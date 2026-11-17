@@ -134,6 +134,10 @@ public partial class AIModule : TnziApplicationModule
         // （TryAdd 或 Add）都先于它，替换它不需要任何约定；放在 Configure 阶段的话，消费方一用 TryAdd 就被这里挡掉，
         // 症状是「注册了自己的策略，聊天照旧按配置放行」。
         context.Services.TryAddScoped<IChatAgentPolicy, ConfiguredChatAgentPolicy>();
+        // 客户端能声明哪些线程来源：同一个理由放在 Post 阶段
+        context.Services.TryAddScoped<IThreadOriginPolicy, ConfiguredThreadOriginPolicy>();
+        // 排队消息合成一轮时元数据怎么合并（权限一类的键取最严值）：同理放在 Post 阶段，应用自己的实现先注册就用它的
+        context.Services.TryAddScoped<IChatQueueMetadataMerger, ConfiguredChatQueueMetadataMerger>();
 
         return Task.CompletedTask;
     }
@@ -242,21 +246,7 @@ public partial class AIModule : TnziApplicationModule
             logger.LogWarning("AI:Widgets is enabled but no WebApplication is available; the widget runner page was not mapped");
         }
 
-        // 从数据库加载持久化的子 Agent 类型定义
-        try
-        {
-            var subAgentRegistry = serviceProvider.GetRequiredService<ISubAgentRegistry>();
-            using var subAgentScope = serviceProvider.CreateScope();
-            var subAgentTypeRepo = subAgentScope.ServiceProvider.GetRequiredService<IRepository<SubAgentType, Guid>>();
-            // 根作用域没有租户，过滤器只放行 TenantId 为 null 的行；关掉它一次读全部租户，按 TenantId 分桶
-            using var tenantFilterScope = subAgentScope.ServiceProvider.GetService<IDataFilterManager>()?.Disable<IMultiTenantFilter>();
-            await subAgentRegistry.LoadAllTenantsFromStoreAsync(subAgentTypeRepo);
-            logger.LogDebug("Sub-agent type definitions loaded from database.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to load sub-agent type definitions from database. Using built-in types only.");
-        }
+        // 数据库里的子 Agent 类型由 SubAgentTypeLoadStartupTask 在迁移之后读入（失败时后台重试）。
 
         // Memory 工具依赖 ContextProviders 的记忆召回能力：召回关着时整个 "memory" 组不交给模型。
         // 判定在 ToolResolver 每次解析时按当前配置做（Memory.Enabled 是运行时设置），这里不从注册表删组。

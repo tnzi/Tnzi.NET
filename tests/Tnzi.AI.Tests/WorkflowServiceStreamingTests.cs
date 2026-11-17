@@ -262,16 +262,15 @@ public class WorkflowServiceStreamingTests
         insertedExecution!.Status.ShouldBe(WorkflowExecutionStatus.AwaitingApproval);
 
         usageLog.Verify(x => x.LogUsageAsync(
-            AIOperationType.WorkflowRunStreaming,
-            "Workflow",
-            "wf",
-            It.IsAny<int>(),
-            It.IsAny<int>(),
-            It.IsAny<long>(),
-            false,
-            It.Is<string>(msg => msg.Contains("Approval required", StringComparison.OrdinalIgnoreCase) || msg.Contains("AwaitingApproval", StringComparison.OrdinalIgnoreCase)),
-            null,
-            null,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.WorkflowRunStreaming &&
+                e.Provider == "Workflow" &&
+                e.Model == "wf" &&
+                !e.IsSuccess &&
+                e.ErrorMessage != null &&
+                (e.ErrorMessage.Contains("Approval required", StringComparison.OrdinalIgnoreCase) || e.ErrorMessage.Contains("AwaitingApproval", StringComparison.OrdinalIgnoreCase)) &&
+                e.AgentId == null &&
+                e.ThreadId == null),
             CancellationToken.None), Times.Once);
     }
 
@@ -286,18 +285,7 @@ public class WorkflowServiceStreamingTests
         var runRepository = new Mock<IRepository<AgentRun, Guid>>();
         runRepository.Setup(x => x.FirstOrDefaultAsync(It.IsAny<Expression<Func<AgentRun, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((AgentRun?)null);
-        usageLog.Setup(x => x.LogUsageAsync(
-                It.IsAny<string>(),
-                It.IsAny<string>(),
-                It.IsAny<string>(),
-                It.IsAny<int>(),
-                It.IsAny<int>(),
-                It.IsAny<long>(),
-                It.IsAny<bool>(),
-                It.IsAny<string?>(),
-                It.IsAny<Guid?>(),
-                It.IsAny<Guid?>(),
-                It.IsAny<CancellationToken>()))
+        usageLog.Setup(x => x.LogUsageAsync(It.IsAny<UsageLogEntry>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         var services = new ServiceCollection();
         services.AddLogging();

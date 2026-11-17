@@ -10,9 +10,13 @@
  *
  * The actual `type` ('email' | 'phone') sent to the backend is detected per
  * submit via {@link detectAccountType}.
+ *
+ * The rule is an `IFormRule[]` (`@tnzi/core/types`), so it binds to no form
+ * library; `@tnzi/ui-admin`'s `useNaiveLoginAccountField` turns it into Naive
+ * UI rules.
  */
 import { computed, type ComputedRef } from 'vue'
-import type { FormItemRule } from 'naive-ui'
+import type { IFormRule } from '@tnzi/core/types'
 import { useFormRules, type Translate } from './useFormRules'
 
 export interface CodeChannels {
@@ -21,7 +25,7 @@ export interface CodeChannels {
 }
 
 export interface LoginAccountField {
-  rule: ComputedRef<FormItemRule[]>
+  rule: ComputedRef<IFormRule[]>
   label: ComputedRef<string>
   placeholder: ComputedRef<string>
 }
@@ -34,20 +38,15 @@ export function useLoginAccountField(
   const onlySms = computed(() => channels().sms && !channels().email)
   const onlyEmail = computed(() => channels().email && !channels().sms)
 
-  const rule = computed<FormItemRule[]>(() => {
-    const base = onlySms.value
+  const rule = computed<IFormRule[]>(() =>
+    onlySms.value
       ? r.phone
       : onlyEmail.value
         ? r.email
         : r.emailOrPhone(
             translate('admin.login.errorAccountFormat', 'Enter a valid email or phone number'),
-          )
-    // Tag each rule with key 'account' so the modules' per-field validation
-    // before sending a code - `validate(_, r => r.key === 'account')` - actually
-    // matches. naive-ui does NOT inject key/path onto merged rules, so without
-    // this the predicate matches zero rules and the account is never validated.
-    return base.map((ru) => ({ ...ru, key: 'account' }))
-  })
+          ),
+  )
 
   const label = computed(() => {
     if (onlySms.value) return translate('admin.login.identifier.phone', 'Phone')

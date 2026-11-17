@@ -355,6 +355,12 @@ public partial class AIModule
         services.AddScoped<IMessageFeedbackService, MessageFeedbackService>();
         services.AddScoped<IAgentAttachmentService, AgentAttachmentService>();
         services.AddScoped<IChatService, ChatService>();
+
+        // 线程的消息队列：一轮还在跑时写下的消息在服务端排队，运行结束事件推动它往前走，定时扫描补上漏掉的事件
+        services.AddScoped<IChatQueueService, ChatQueueService>();
+        services.AddScoped<IChatQueueDelivery, ChatQueueDelivery>();
+        services.AddEventHandler<CliRunFinishedEvent, ChatQueueRunFinishedHandler>();
+        services.AddHostedService<ChatQueueSweepHostedService>();
         services.AddScoped<IEmbeddingService, EmbeddingService>();
         services.AddScoped<IStructuredOutputService, StructuredOutputService>();
 
@@ -416,6 +422,8 @@ public partial class AIModule
         AddAiMiddleware<InputGuardrailMiddleware>(services);
         // 线程解析（40）先于 Sandbox 子模块的 ThreadData（50）/ Sandbox（55）：新会话首轮也要有沙箱
         AddAiMiddleware<ThreadResolutionMiddleware>(services);
+        // 标题（260）：输入守卫与用量上限之后、历史之前 —— 第一条消息一被接受就起名，不等回复
+        AddAiMiddleware<ThreadTitleMiddleware>(services);
         AddAiMiddleware<HistoryMiddleware>(services);
 
         // Scoped because the constructor consumes Scoped IContextProviderContributor instances
@@ -445,7 +453,6 @@ public partial class AIModule
         services.AddScoped<IRunTracker, RunTracker>();
         services.AddScoped<IEventPublisher>(sp => new EventPublisher(
             sp.GetService<IEventBus>(),
-            sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetRequiredService<ILogger<EventPublisher>>()));
         services.AddScoped<IWorkflowDelegator, WorkflowDelegator>();
         services.AddScoped<IAgentRuntime, AgentRuntime>();
@@ -514,8 +521,9 @@ public partial class AIModule
         services.AddSingleton<IAgentDefinitionProvider, YamlAgentDefinitionProvider>();
         services.AddHostedService<AgentDefinitionSyncService>();
 
-        // Thread title generation event handler
-        services.AddEventHandler<ThreadFirstReplyCompletedEvent, ThreadTitleGenerationHandler>();
+        // 线程标题：回退标题 + 后台 AI 标题（内建路径经 ThreadTitleMiddleware、外部 CLI 路径经门面调用）
+        services.TryAddScoped<IThreadTitleService, ThreadTitleService>();
+        services.AddEventHandler<ThreadTitleRequestedEvent, ThreadTitleGenerationHandler>();
         services.AddEventHandler<ThreadDeletedEvent, ThreadCleanupHandler>();
 
         // 嵌入式 AI 客户端（直接调用 IAgentRuntime，绕过 HTTP）
@@ -532,6 +540,8 @@ public partial class AIModule
 
         // Phase 6: 子 Agent 注册表（全局单例，3 内置类型 + 运行时扩展）
         services.AddSingleton<ISubAgentRegistry, SubAgentRegistry>();
+        // 数据库里的子 Agent 类型在迁移之后读进注册表；读不到时后台重试（不再在模块初始化里读一次了事）
+        services.AddTransient<IPostMigrationStartupTask, SubAgentTypeLoadStartupTask>();
 
         // Phase 6: HTML 可读性提取（SmartReader + 标签剥离降级）
         services.AddSingleton<IReadabilityExtractor, SmartReaderExtractor>();

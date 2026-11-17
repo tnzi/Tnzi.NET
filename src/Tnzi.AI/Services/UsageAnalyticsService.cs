@@ -73,6 +73,8 @@ public class UsageAnalyticsService : ApplicationService, IUsageAnalyticsService
             q = q.Where(l => l.IsSuccess == query.IsSuccess.Value);
         if (query.AgentId.HasValue)
             q = q.Where(l => l.AgentId == query.AgentId.Value);
+        if (query.UserId.HasValue)
+            q = q.Where(l => l.UserId == query.UserId.Value);
         var pagedList = await q
             .OrderByDescending(l => l.CreationTime)
             .ProjectTo<UsageLog, UsageLogDto>()

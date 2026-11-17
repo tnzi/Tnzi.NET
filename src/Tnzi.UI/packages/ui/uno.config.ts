@@ -10,9 +10,9 @@ import { defineConfig, presetWind4, presetIcons } from 'unocss';
  *   code without extra setup.
  * - **@tnzi/ui's own components** should NOT use Tailwind-specific conventions.
  *   Internal code uses pure UnoCSS conventions: numeric scales (`text-4`, `font-500`),
- *   Naive UI design tokens via shortcuts (`text-success`, `bg-naive-card`), and
- *   arbitrary values (`text-[13px]`, `rounded-[3px]`). This keeps internal styling
- *   theme-aware and decoupled from any specific color palette.
+ *   `--tnzi-*` theme variables and arbitrary values (`text-[13px]`, `rounded-[3px]`).
+ *   No shortcut here reads a component library's variables (`--n-*`): this package
+ *   renders with none.
  */
 export default defineConfig({
   presets: [
@@ -27,18 +27,6 @@ export default defineConfig({
   ],
 
   shortcuts: {
-    // Naive UI design tokens - use these instead of hardcoded Tailwind colors
-    'border-naive': 'border border-[var(--n-border-color,#e0e0e6)]',
-    'bg-naive-hover': 'bg-[var(--n-color-hover,rgba(0,0,0,0.03))]',
-    'bg-naive-card': 'bg-[var(--n-card-color,#fff)]',
-    'text-naive-secondary': 'text-[var(--n-text-color-3,#999)]',
-    'text-naive-primary': 'text-[var(--n-text-color-1,#333)]',
-    // Semantic colors mapped to Naive UI status tokens (theme-aware)
-    'text-success': 'text-[var(--n-success-color,#18a058)]',
-    'text-error': 'text-[var(--n-error-color,#d03050)]',
-    'text-warning': 'text-[var(--n-warning-color,#f0a020)]',
-    'text-info': 'text-[var(--n-info-color,#2080f0)]',
-    'text-disabled': 'text-[var(--n-text-color-disabled,#999)]',
     // Layout shortcuts
     'flex-center': 'flex items-center justify-center',
     'flex-between': 'flex items-center justify-between',

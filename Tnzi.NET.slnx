@@ -64,6 +64,7 @@
     <Project Path="src/Tnzi.Identity/Tnzi.Identity.csproj" />
     <Project Path="src/Tnzi.Identity.Presence/Tnzi.Identity.Presence.csproj" />
     <Project Path="src/Tnzi.Identity.Organization/Tnzi.Identity.Organization.csproj" />
+    <Project Path="src/Tnzi.Identity.OpenIdConnect/Tnzi.Identity.OpenIdConnect.csproj" />
   </Folder>
   <Folder Name="/src/modules/Tnzi.Authorization/">
     <Project Path="src/Tnzi.Authorization/Tnzi.Authorization.csproj" />
@@ -109,6 +110,7 @@
     <Project Path="tests/Tnzi.Identity.IntegrationTests/Tnzi.Identity.IntegrationTests.csproj" />
     <Project Path="tests/Tnzi.Identity.Presence.Tests/Tnzi.Identity.Presence.Tests.csproj" />
     <Project Path="tests/Tnzi.Identity.Organization.Tests/Tnzi.Identity.Organization.Tests.csproj" />
+    <Project Path="tests/Tnzi.Identity.OpenIdConnect.Tests/Tnzi.Identity.OpenIdConnect.Tests.csproj" />
     <Project Path="tests/Tnzi.Identity.Tests/Tnzi.Identity.Tests.csproj" />
     <Project Path="tests/Tnzi.Imaging.Tests/Tnzi.Imaging.Tests.csproj" />
     <Project Path="tests/Tnzi.Kafka.Tests/Tnzi.Kafka.Tests.csproj" />

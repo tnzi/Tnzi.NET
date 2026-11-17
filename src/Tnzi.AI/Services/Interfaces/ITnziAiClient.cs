@@ -22,7 +22,10 @@ public interface ITnziAiClient
         CancellationToken ct = default);
 
     /// <summary>创建新线程</summary>
-    Task<Guid> CreateThreadAsync(string? title = null, CancellationToken ct = default);
+    /// <param name="title">标题；null = 按时间起一个。</param>
+    /// <param name="origin">线程的来源（<c>AgentThreadDto.Origin</c>，应用定义的值）；null = 不声明。</param>
+    /// <param name="ct">取消令牌。</param>
+    Task<Guid> CreateThreadAsync(string? title = null, string? origin = null, CancellationToken ct = default);
 
     /// <summary>删除线程</summary>
     Task DeleteThreadAsync(Guid threadId, CancellationToken ct = default);

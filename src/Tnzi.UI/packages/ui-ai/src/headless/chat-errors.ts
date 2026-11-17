@@ -22,8 +22,17 @@ export type ChatThreadsOperation =
   | 'archive-thread'
   | 'unarchive-thread'
   | 'stop-run'
+  /** Stopping one task (a sub-agent, a background command) of the running external agent. */
+  | 'stop-task'
   | 'attachment'
   | 'edit'
+  /** Reading the conversation's queued messages. */
+  | 'load-queue'
+  /** Queueing a message written while a turn runs. */
+  | 'queue'
+  | 'edit-queued'
+  | 'remove-queued'
+  | 'send-queued-now'
   /** A turn (send, regenerate, edit, or a run picked up again) whose stream failed. Written on the reply row. */
   | 'turn';
 

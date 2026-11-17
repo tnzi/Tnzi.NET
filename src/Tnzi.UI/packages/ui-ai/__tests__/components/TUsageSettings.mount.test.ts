@@ -5,7 +5,8 @@
  * the settings pages; this proves the other half on one of them: the catalogue
  * provided by an ancestor is the one that reaches the pane, and the shares,
  * window lengths and reset times are substituted into the translated sentences
- * rather than left as `{percent}`.
+ * rather than left as `{percent}`. The bars are `TProgress`, in the tone the
+ * server's own judgement gives (accent, warning, danger at the limit).
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { computed, createApp, defineComponent, h, nextTick, ref, type App } from 'vue';
@@ -127,5 +128,35 @@ describe('TUsageSettings under zh-cn', () => {
   it('a failed first read says so', async () => {
     const text = await mountInChinese(controller(null, { failed: true }));
     expect(text).toContain(zhCn.usageSettings.loadFailed);
+  });
+});
+
+describe('TUsageSettings bars', () => {
+  async function bars(windows: MyUsageWindowDto[]): Promise<HTMLElement[]> {
+    await mountInChinese(controller({ windows, warningThreshold: 0.8, checkedAt: new Date().toISOString() }));
+    return Array.from(host!.querySelectorAll<HTMLElement>('.t-progress'));
+  }
+
+  it('one TProgress per limited window, filled to the share used, 8px thick', async () => {
+    const [bar] = await bars([win({ usedPercent: 42.4 })]);
+    expect(bar.classList.contains('t-progress--accent')).toBe(true);
+    expect(bar.style.height).toBe('8px');
+    expect((bar.querySelector('.t-progress__fill') as HTMLElement).style.width).toMatch(/^42(\.4)?%$/);
+  });
+
+  it('turns to the warning tone when the server says the warning is reached', async () => {
+    const [bar] = await bars([win({ usedPercent: 85, warningReached: true })]);
+    expect(bar.classList.contains('t-progress--warning')).toBe(true);
+  });
+
+  it('is full and in the danger tone at the limit, even past 100%', async () => {
+    const [bar] = await bars([win({ usedPercent: 130, warningReached: true, exceeded: true })]);
+    expect(bar.classList.contains('t-progress--danger')).toBe(true);
+    expect((bar.querySelector('.t-progress__fill') as HTMLElement).style.width).toBe('100%');
+  });
+
+  it('draws no bar for an unlimited window', async () => {
+    const all = await bars([win(), win({ window: UsageLimitWindow.Weekly, limited: false, usedPercent: null, resetsAt: null })]);
+    expect(all).toHaveLength(1);
   });
 });

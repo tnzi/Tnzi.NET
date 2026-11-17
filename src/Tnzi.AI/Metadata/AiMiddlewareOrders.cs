@@ -7,11 +7,11 @@ namespace Tnzi.AI.Metadata;
 /// <para>
 /// 完整管道（700 = Core Execution 位置，非中间件）：
 ///  40 ThreadResolution → 50 ThreadData → 55 Sandbox → 60 FileUpload → 80 Thinking
-/// → 100 Retry → 200 InputGuardrail → 250 Quota → 300 History → 350 Summarization
+/// → 100 Retry → 200 InputGuardrail → 250 Quota → 260 Title → 300 History → 350 Summarization
 /// → 400 ContextInjection → 420 Todo → 450 SkillConstraint → 460 PromptCaching → 500 UsageLogging
 /// → 650 LoopDetection → 655 ToolGuardrail → 660 ToolErrorRecovery
 /// → [700 Core Execution]
-/// → 800 OutputGuardrail → 900 Title → 950 Memory → 999 Clarification
+/// → 800 OutputGuardrail → 950 Memory → 999 Clarification
 /// </para>
 /// </remarks>
 public static class AiMiddlewareOrders
@@ -46,6 +46,12 @@ public static class AiMiddlewareOrders
 
     /// <summary>配额预检与预留</summary>
     public const int Quota = 250;
+
+    /// <summary>
+    /// 新线程起标题：输入守卫与用量上限之后（被拒的消息不算被接受，标题取守卫改写后的文本），
+    /// 历史之前（回复开始之前侧栏里的线程就有名字）。
+    /// </summary>
+    public const int Title = 260;
 
     // === Pre-execution: Context Assembly (300-500) ===
 
@@ -88,9 +94,6 @@ public static class AiMiddlewareOrders
 
     /// <summary>输出安全防护 (Phase 5 enhanced)</summary>
     public const int OutputGuardrail = 800;
-
-    /// <summary>自动标题生成 - reserved: 当前由 AgentRuntime 内部处理，未独立为中间件</summary>
-    public const int Title = 900;
 
     /// <summary>记忆存储 - reserved: 当前由 ContextInjectionMiddleware 的 OnCompleted 回调处理</summary>
     public const int Memory = 950;

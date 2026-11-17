@@ -21,13 +21,21 @@ public enum ThreadListStatus
 }
 
 /// <summary>
-/// 线程列表的排序。每一种都以 Id 收尾，翻页时同值的行不会在两页之间漂移。
+/// 线程列表在每一层里的排序。
 /// </summary>
+/// <remarks>
+/// 不论选哪一种，列表都先分三层：在等主人的线程（<see cref="AgentThreadDto.AwaitingOwner"/>），然后有一轮在跑的
+/// （<see cref="AgentThreadDto.Running"/>），然后其余的；这里选的只是层内的顺序。每一种都依次以创建时间（新的在前）与 Id 收尾，
+/// 翻页时同值的行不会在两页之间漂移。
+/// </remarks>
 [JsonConverter(typeof(JsonStringEnumConverter<ThreadListSort>))]
 public enum ThreadListSort
 {
-    /// <summary>最近活动在前（默认，与此前相同）。</summary>
-    LastActivity = 0,
+    /// <summary>
+    /// 主人最近一次发消息的时间在前（<see cref="AgentThreadDto.LastUserMessageTime"/>，没有时用创建时间；默认）。
+    /// 只有主人自己的动作挪动一行：AI 的回答、一轮结束、改标题、标记已读都不改变它。
+    /// </summary>
+    LastUserMessage = 0,
 
     /// <summary>最近创建的在前。</summary>
     CreationTime = 1,

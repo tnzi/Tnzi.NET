@@ -233,3 +233,23 @@ describe('the picked model', () => {
     expect(bodies[0]).not.toHaveProperty('model');
   });
 });
+
+describe('the picked effort', () => {
+  it('goes with every kind of turn', async () => {
+    const chat = useChatThreads({ ...(deps() as never), model: () => 'claude-opus-5-5', effort: () => 'xhigh' });
+    await chat.selectThread('t1');
+    await chat.send('a');
+    await chat.regenerate();
+    const userId = chat.messages.value.find((m) => m.role === 'user' && !m.id.startsWith('m_'))?.id ?? 'm1';
+    await chat.editMessage(userId, 'edited');
+
+    expect(bodies).toHaveLength(3);
+    expect(bodies.every((b) => b.effort === 'xhigh' && b.model === 'claude-opus-5-5')).toBe(true);
+  });
+
+  it('no pick sends no effort, so the agent decides', async () => {
+    const chat = useChatThreads({ ...(deps() as never), effort: () => null });
+    await chat.send('a');
+    expect(bodies[0]).not.toHaveProperty('effort');
+  });
+});

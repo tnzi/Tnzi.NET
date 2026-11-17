@@ -1,0 +1,131 @@
+/* ===========================================================================
+ * Page toolbar controls: the pieces `TPageToolbar` and `TToolbarSearch` draw
+ * their buttons from. Global (not scoped) so a page's own control in the
+ * toolbar's `#actions` slot matches them without re-implementing them.
+ *
+ *   .t-page-toolbar-icon        an icon button at the toolbar's control size;
+ *                               `.is-active` when what it controls is applied
+ *                               (a filter other than the default)
+ *   .t-page-toolbar-button      a small button with an optional icon and label;
+ *     --primary                 the page's primary action
+ *     --secondary               a bordered secondary action
+ *   .t-page-toolbar-split       a primary button and its chevron as one control
+ *   .t-page-toolbar-chevron     the chevron inside a button that opens a menu
+ *
+ * Height is `--tnzi-ai-toolbar-control-size` (30px).
+ * ======================================================================== */
+
+.t-page-toolbar-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--tnzi-ai-toolbar-control-size, 30px);
+  height: var(--tnzi-ai-toolbar-control-size, 30px);
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tnzi-ai-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 16px;
+  cursor: pointer;
+  transition: background var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease),
+    color var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease);
+}
+.t-page-toolbar-icon:hover:not(:disabled),
+.t-page-toolbar-icon[aria-expanded='true'] {
+  background: var(--tnzi-ai-hover, rgba(0, 0, 0, 0.04));
+  color: var(--tnzi-ai-text, #000);
+}
+.t-page-toolbar-icon.is-active,
+.t-page-toolbar-icon.is-active:hover:not(:disabled) {
+  background: var(--tnzi-ai-accent-soft);
+  color: var(--tnzi-ai-accent-text);
+}
+.t-page-toolbar-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.t-page-toolbar-button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--tnzi-ai-toolbar-control-size, 30px);
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tnzi-ai-text, #000);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease),
+    border-color var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease);
+}
+.t-page-toolbar-button > svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+}
+.t-page-toolbar-button--primary {
+  background: var(--tnzi-ai-accent);
+  color: var(--tnzi-ai-on-accent);
+}
+.t-page-toolbar-button--primary:hover:not(:disabled),
+.t-page-toolbar-button--primary[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--tnzi-ai-accent) 88%, black);
+}
+.t-page-toolbar-button--secondary {
+  background: var(--tnzi-ai-surface);
+  border-color: var(--tnzi-ai-border-strong);
+}
+.t-page-toolbar-button--secondary:hover:not(:disabled) {
+  background: var(--tnzi-ai-hover);
+}
+.t-page-toolbar-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.t-page-toolbar-button > svg.t-page-toolbar-chevron {
+  width: 14px;
+  height: 14px;
+  margin-left: -2px;
+}
+
+.t-page-toolbar-split {
+  flex: none;
+  display: inline-flex;
+}
+.t-page-toolbar-split > .t-page-toolbar-button:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.t-page-toolbar-split > :last-child .t-page-toolbar-button,
+.t-page-toolbar-split > .t-page-toolbar-button:last-child {
+  padding: 0 6px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--tnzi-ai-on-accent) 30%, transparent);
+}
+
+.t-page-toolbar-icon:focus-visible,
+.t-page-toolbar-button:focus-visible {
+  outline: var(--tnzi-ai-focus-outline);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-page-toolbar-icon,
+  .t-page-toolbar-button {
+    transition: none;
+  }
+}

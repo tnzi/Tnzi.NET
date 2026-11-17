@@ -23,6 +23,9 @@ export interface ComposerAction {
   readonly order?: number
 }
 
+/** Icon of the composer's primary button while it sends, unless a `sendIcon` is given. */
+export const DEFAULT_SEND_ICON = 'lucide:arrow-up'
+
 /** Default wide accept list for the built-in attachment button. */
 export const DEFAULT_COMPOSER_ACCEPT =
   'image/*,.pdf,.txt,.md,.csv,.json,.doc,.docx,.xls,.xlsx,.ppt,.pptx,' +

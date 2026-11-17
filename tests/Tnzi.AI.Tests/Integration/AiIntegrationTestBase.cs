@@ -215,7 +215,6 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
         services.AddScoped<IRunTracker, RunTracker>();
         services.AddScoped<IEventPublisher>(sp => new EventPublisher(
             sp.GetService<IEventBus>(),
-            sp.GetRequiredService<IServiceScopeFactory>(),
             sp.GetRequiredService<ILogger<EventPublisher>>()));
         services.AddScoped<IWorkflowDelegator, WorkflowDelegator>();
 

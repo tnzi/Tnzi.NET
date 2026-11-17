@@ -52,6 +52,20 @@ describe('createTnziUiAdmin', () => {
     plugin.uninstall()
   })
 
+  // Until someone picks a mode, an admin follows the operating system.
+  it('installs its context on auto by default, or on defaultMode', () => {
+    const modeOf = (options?: Parameters<typeof createTnziUiAdmin>[1]) => {
+      const app = createApp(defineComponent({ render: () => h('div') }))
+      const plugin = createTnziUiAdmin(app, options)
+      const provides = (app as unknown as { _context: { provides: Record<symbol, unknown> } })._context.provides
+      const ctx = provides[THEME_CONTEXT_KEY] as { settings: { value: { mode: string } } }
+      plugin.uninstall()
+      return ctx.settings.value.mode
+    }
+    expect(modeOf()).toBe('auto')
+    expect(modeOf({ defaultMode: 'light' })).toBe('light')
+  })
+
   it('respects existing theme context (does not overwrite)', () => {
     const app = createApp(defineComponent({ render: () => h('div') }))
     const existingCtx = {

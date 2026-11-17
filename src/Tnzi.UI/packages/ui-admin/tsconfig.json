@@ -32,6 +32,8 @@
     "src/icons/**/*",
     "src/index.ts",
     "src/env.d.ts",
+    // Ambient `window.$message` / `$dialog` / ... types; nothing imports it.
+    "src/types/**/*",
     "src/pages/index.ts",
     "src/pages/identity/UserManagement.vue",
     "src/pages/identity/user-config.ts",

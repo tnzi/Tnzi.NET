@@ -3,7 +3,7 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import { TSourceBadge } from '@tnzi/ui'
+import TSourceBadge from '../../components/display/TSourceBadge.vue'
 
 /**
  * Template Layout page config - Phase 3 Task 3.37.

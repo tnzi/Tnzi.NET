@@ -39,6 +39,21 @@ public interface IAgentThreadService
             "Archiving threads is not supported by this thread service.", 501, ErrorCodes.InternalError));
 
     /// <summary>
+    /// 标记主人看过了这条线程（<see cref="AgentThread.ReadTime"/> 写成现在）：之前写下的回答都不再算未读。调用方负责先核线程归属。
+    /// </summary>
+    Task<Result> MarkReadAsync(Guid id)
+        => Task.FromResult(Result.Failure(
+            "Read state is not supported by this thread service.", 501, ErrorCodes.InternalError));
+
+    /// <summary>
+    /// 一位用户的线程里，哪些有一轮正在服务端跑、哪些有还没看过的回答（<see cref="ThreadAttentionDto"/>）。
+    /// <see cref="ThreadAttentionQueryDto.CreatorId"/> 为 null 时不按主人筛选（管理端用），用户端必须设它。
+    /// </summary>
+    Task<Result<ThreadAttentionDto>> GetAttentionAsync(ThreadAttentionQueryDto query)
+        => Task.FromResult(Result<ThreadAttentionDto>.Failure(
+            "Read state is not supported by this thread service.", 501, ErrorCodes.InternalError));
+
+    /// <summary>
     /// 验证用户是否为线程所有者
     /// </summary>
     Task<bool> IsOwnerAsync(Guid threadId, Guid userId);
@@ -77,7 +92,19 @@ public interface IAgentThreadInternalService
     /// 给定的线程不存在、不归运行发起人所有、或与 <paramref name="agentId"/> 不符时一律抛 404 的 <see cref="BusinessException"/>。
     /// 历史消息不在这里加载（见 <see cref="GetMessageHistoryAsync"/>）。
     /// </summary>
-    Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default);
+    /// <param name="threadId">要续接的线程；null = 新建一条。</param>
+    /// <param name="agentId">这一轮的 Agent；null = 不带 Agent。</param>
+    /// <param name="origin">
+    /// 新建时写进线程的来源（<see cref="AgentThread.Origin"/>，形状不合规抛 400 <c>AI_INVALID_THREAD_ORIGIN</c>）；续接已有线程时不用。
+    /// 调用方负责它可信：聊天端点上新线程的来源由 <see cref="IThreadOriginPolicy"/> 给出。
+    /// </param>
+    /// <param name="listing">
+    /// 新建时线程在不在主人的列表里（<see cref="AgentThread.Listing"/>）；续接已有线程时不用。调用方负责它可信：聊天端点建的线程总是
+    /// <see cref="ThreadListing.Listed"/>，只有进程内调用方（<c>AgentRunRequest.ThreadListing</c>）给别的值。
+    /// </param>
+    /// <param name="ct">取消令牌。</param>
+    Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
+        Guid? threadId, Guid? agentId, string? origin, ThreadListing listing = ThreadListing.Listed, CancellationToken ct = default);
 
     /// <summary>
     /// 保存消息到线程。
@@ -102,9 +129,18 @@ public interface IAgentThreadInternalService
     /// <remarks>
     /// 框架的实现把元数据存在同一行里（<c>AgentThreadMessage.MetadataJson</c>）。默认实现只存消息、不存元数据，
     /// 给替换了本接口的实现保持编译；那样的实现上，重新生成拿不回原来那一轮的元数据。
+    /// 用户消息同时把线程的「主人最近发消息的时间」（<c>AgentThread.LastUserMessageTime</c>）往后推到 <c>sentAt</c>：
+    /// 主人发出它的时间，null = 现在。排队消息交给 agent 时传它排下的时间：主人那时就发了，列表在那时就挪过它，送达不再挪一次。
     /// </remarks>
-    Task<Guid> SaveUserMessageAsync(Guid threadId, string content, IReadOnlyDictionary<string, JsonElement>? metadata, Guid? messageId = null, CancellationToken ct = default)
+    Task<Guid> SaveUserMessageAsync(
+        Guid threadId, string content, IReadOnlyDictionary<string, JsonElement>? metadata, Guid? messageId = null, DateTime? sentAt = null, CancellationToken ct = default)
         => SaveMessageAsync(threadId, MessageRole.User, content, messageId: messageId, ct: ct);
+
+    /// <summary>
+    /// 记下主人在 <paramref name="sentAt"/> 往线程里发了一条消息、但它还没写进线程（排进了线程的消息队列）：
+    /// 线程的「主人最近发消息的时间」只往后推，列表里这一行在主人发出的那一刻就挪到该在的位置。
+    /// </summary>
+    Task MarkUserMessageAsync(Guid threadId, DateTime sentAt, CancellationToken ct = default) => Task.CompletedTask;
 
     /// <summary>
     /// 获取线程消息历史
@@ -130,6 +166,41 @@ public interface IAgentThreadInternalService
     /// </summary>
     Task<int> DeleteMessagesFromAsync(Guid threadId, int fromOrder, CancellationToken ct = default)
         => throw new NotSupportedException("This thread service cannot rewind a thread.");
+
+    /// <summary>
+    /// 记下服务端的一轮把回答写进了线程（<see cref="AgentThread.ReplyTime"/>，只往后走）：主人在 <paramref name="repliedAt"/>
+    /// 之后没看过这条线程，它就算未读。在服务端跑、写下回答的一方（外部 agent 的执行器）调它，<b>先于</b>客户端能从流里看到这一轮结束。
+    /// 线程不存在时不做任何事；默认实现什么都不记。
+    /// </summary>
+    /// <param name="threadId">线程。</param>
+    /// <param name="repliedAt">写下回答的时间（UTC）。</param>
+    /// <param name="ct">取消令牌。</param>
+    Task MarkRepliedAsync(Guid threadId, DateTime repliedAt, CancellationToken ct = default)
+        => Task.CompletedTask;
+
+    /// <summary>
+    /// 改线程在不在主人的列表里（<see cref="AgentThread.Listing"/>）。给服务端代码用：让一条 <see cref="ThreadListing.UntilUserMessage"/>
+    /// 的线程提前进列表、把一条线程永远留在列表外（<see cref="ThreadListing.Never"/>）或收回去。不比对主人、不发事件。
+    /// 线程不存在（或不在当前租户）时答 404；默认实现答 501。
+    /// </summary>
+    /// <param name="threadId">线程。</param>
+    /// <param name="listing">新的状态。</param>
+    /// <param name="ct">取消令牌。</param>
+    Task<Result> SetListingAsync(Guid threadId, ThreadListing listing, CancellationToken ct = default)
+        => Task.FromResult(Result.Failure(
+            "Listing changes are not supported by this thread service.", 501, ErrorCodes.InternalError));
+
+    /// <summary>
+    /// 主人自己在线程里说了话：一条 <see cref="ThreadListing.UntilUserMessage"/> 的线程从此进列表，并发布 <see cref="ThreadListedEvent"/>。
+    /// 别的状态（已在列表里、<see cref="ThreadListing.Never"/>）与不归 <paramref name="userId"/> 的线程不变。
+    /// 聊天入口（<c>IChatService</c>）续接已有线程的每一轮、以及往线程队列里放一条消息时调它；默认实现什么都不做。
+    /// </summary>
+    /// <param name="threadId">线程。</param>
+    /// <param name="userId">说话的人；必须是线程的主人。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <returns>这一次是否把它放进了列表。</returns>
+    Task<bool> ListOnUserMessageAsync(Guid threadId, Guid userId, CancellationToken ct = default)
+        => Task.FromResult(false);
 
     /// <summary>
     /// 写入线程元数据中某个键的值（<paramref name="valueJson"/> 为该值的 JSON 文本；null = 移除该键）。

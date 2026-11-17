@@ -23,6 +23,9 @@ import type {
   ChatRequestDto,
   ChatResponseDto,
   ChatRunDto,
+  ChatPermissionRequestDto,
+  QueuedMessageDto,
+  QueueMessageRequestDto,
   ThreadMessagePageDto,
   ThreadMessagePageQuery,
   // Agents
@@ -48,6 +51,8 @@ import type {
   AgentThreadDetailDto,
   ThreadListQueryDto,
   UpdateThreadTitleDto,
+  ThreadAttentionDto,
+  ThreadAttentionQueryDto,
   ThreadExportDto,
   MessageFeedbackDto,
   // Agent Runs
@@ -193,6 +198,25 @@ export function useChatApi(client: HttpClient) {
       client.post<void>(`${base}/runs/${encodeURIComponent(runId)}/cancel`),
 
     /**
+     * Stop one task of the thread's running external agent (a sub-agent or a background command; `taskId` is
+     * `ToolTaskDetailDto.taskId`) without stopping the turn. Its stopped outcome arrives on the stream. 409 when no run
+     * is going on, 501 when the CLI cannot stop a single task (stop the turn instead).
+     */
+    stopTask: (threadId: string, taskId: string) =>
+      client.post<void>(`${base}/threads/${encodeURIComponent(threadId)}/tasks/${encodeURIComponent(taskId)}/stop`),
+
+    /**
+     * The requests the thread's unfinished runs still wait on (permissions, questions, plans), oldest
+     * first. A client that picks a run's stream up after its start finds the earlier requests here.
+     */
+    getPendingPermissions: (threadId: string) =>
+      client.get<ChatPermissionRequestDto[]>(`${base}/threads/${encodeURIComponent(threadId)}/permissions`),
+
+    /** The requests one run still waits on, oldest first. 404 for a run the caller cannot see. */
+    getRunPendingPermissions: (runId: string) =>
+      client.get<ChatPermissionRequestDto[]>(`${base}/runs/${encodeURIComponent(runId)}/permissions`),
+
+    /**
      * Answer a `permission_request` event of a run you started: `optionId` is one of the event's
      * `eventData.options[].id`. 409 when the request already has an outcome (answered elsewhere, timed out).
      */
@@ -201,6 +225,39 @@ export function useChatApi(client: HttpClient) {
         `${base}/runs/${encodeURIComponent(runId)}/permissions/${encodeURIComponent(requestId)}`,
         answer,
       ),
+
+    /**
+     * The thread's queued messages, in the order they go: the one to send now first, then as written.
+     * Only the thread's owner reaches the queue (404 otherwise).
+     */
+    getQueue: (threadId: string) =>
+      client.get<QueuedMessageDto[]>(`${base}/threads/${encodeURIComponent(threadId)}/queue`),
+
+    /**
+     * Queue a message while the thread's turn runs: an agent whose turn can take messages gets it at once (`HandedOver`,
+     * then `Delivered` when it takes it in); otherwise it waits on the server and goes with the others as one turn when
+     * the turn ends. When no turn runs it goes at once (`state` comes back `Delivering`, or `Held` with the reason when
+     * the turn was refused). Attachments in `content` follow a chat message's rules. 409 `AI_QUEUE_FULL` when the
+     * thread holds as many as allowed.
+     */
+    queueMessage: (threadId: string, data: QueueMessageRequestDto) =>
+      client.post<QueuedMessageDto>(`${base}/threads/${encodeURIComponent(threadId)}/queue`, data),
+
+    /** Change a queued message's words. 409 `AI_QUEUED_MESSAGE_DELIVERING` once it is going out or handed over; 404 once it went. */
+    updateQueuedMessage: (threadId: string, messageId: string, text: string) =>
+      client.put<QueuedMessageDto>(`${base}/threads/${encodeURIComponent(threadId)}/queue/${encodeURIComponent(messageId)}`, { text }),
+
+    /** Remove a queued message (and its attachments). 409 `AI_QUEUED_MESSAGE_DELIVERING` once it is going out or handed over. */
+    removeQueuedMessage: (threadId: string, messageId: string) =>
+      client.delete<void>(`${base}/threads/${encodeURIComponent(threadId)}/queue/${encodeURIComponent(messageId)}`),
+
+    /**
+     * Send a queued message now. When the running turn can take it (`sendNowStopsTurn` false) it is handed to the agent
+     * at once and nothing is stopped; otherwise the server stops the turn going on and sends this message alone as the
+     * next turn, and the others wait for the turn it starts. The only way a held message goes.
+     */
+    sendQueuedMessageNow: (threadId: string, messageId: string) =>
+      client.post<QueuedMessageDto>(`${base}/threads/${encodeURIComponent(threadId)}/queue/${encodeURIComponent(messageId)}/send-now`),
   };
 }
 
@@ -244,6 +301,18 @@ export function useThreadApi(client: HttpClient) {
     /** Update thread title */
     updateTitle: (id: string, data: UpdateThreadTitleDto) =>
       client.patch<AgentThreadDto>(`${base}/${id}/title`, data),
+
+    /**
+     * Which of the current user's threads have a turn going on on the server and which have a reply
+     * they have not seen, with both counts (see `ThreadAttentionDto`). Cheaper than paging the list,
+     * and not bounded by it.
+     */
+    getAttention: (query: ThreadAttentionQueryDto = {}) =>
+      client.post<ThreadAttentionDto>(`${base}/attention`, query),
+
+    /** Mark that the current user has seen the thread: its replies so far are no longer unread. */
+    markRead: (id: string) =>
+      client.post<void>(`${base}/${id}/read`),
 
     /**
      * Archive a thread: it leaves lists filtered by `status: Active`, its content stays. A new user
@@ -301,12 +370,25 @@ export function useUsageLimitApi(client: HttpClient) {
 /** The models the current user may pick in the chat. */
 export function useChatModelApi(client: HttpClient) {
   return {
-    /** Models for an agent (omit `agentId` for agentless chat, filtered by `provider` or the default provider). */
-    getModels: (agentId?: string | null, provider?: string | null) =>
+    /**
+     * Models for an agent (omit `agentId` for agentless chat, filtered by `provider` or the default provider). With
+     * `threadId`, an application that says where a conversation really runs (`IChatModelTargetResolver`: another CLI
+     * than the agent's binding) gets that provider's models and efforts. `metadata` is the per-turn metadata the page
+     * will send with the next turn (the user's run selection, a CLI profile picked beside the composer): the server hands
+     * it to the same resolver, so a conversation without a thread yet lists what its first turn will be checked against.
+     */
+    getModels: (
+      agentId?: string | null,
+      provider?: string | null,
+      threadId?: string | null,
+      metadata?: Record<string, unknown> | null,
+    ) =>
       client.get<ChatModelsDto>('/chat/models', {
         params: {
           ...(agentId ? { agentId } : {}),
           ...(provider ? { provider } : {}),
+          ...(threadId ? { threadId } : {}),
+          ...(metadata && Object.keys(metadata).length > 0 ? { metadata: JSON.stringify(metadata) } : {}),
         },
       }),
   };

@@ -11,6 +11,7 @@ namespace Tnzi.AI.Events.Handlers;
 ///    线程删除后留在管理端任务列表里，RunId 指向已不存在的运行
 /// 3. AgentArtifact（产物记录）与 AgentAttachment（用户随消息发的图片 / PDF、工具返回的图片，连同字节）
 /// 4. UsageLog（使用日志）：只解除 ThreadId 引用，账目行保留（预算聚合与用量分析的事实来源）
+/// 5. QueuedThreadMessage（还没发出的排队消息）：线程没了，它们无处可去
 /// 各仓储均为可选注入，缺失时对应步骤跳过（软依赖）。
 /// 级联删除是持久化副作用，本处理器不吞异常：任何一步失败均让异常冒泡给事件总线
 /// （LocalEventBus 已统一做错误隔离、LogError、重试与死信队列）。各删除按 ThreadId
@@ -27,6 +28,7 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
     private readonly IRepository<AgentArtifact, Guid>? _artifactRepository;
     private readonly IRepository<UsageLog, Guid>? _usageLogRepository;
     private readonly IRepository<AgentAttachment, Guid>? _attachmentRepository;
+    private readonly IRepository<QueuedThreadMessage, Guid>? _queueRepository;
     private readonly ILogger<ThreadCleanupHandler> _logger;
 
     public ThreadCleanupHandler(
@@ -38,7 +40,8 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
         IRepository<AgentArtifact, Guid>? artifactRepository = null,
         IRepository<UsageLog, Guid>? usageLogRepository = null,
         IRepository<AgentTask, Guid>? taskRepository = null,
-        IRepository<AgentAttachment, Guid>? attachmentRepository = null)
+        IRepository<AgentAttachment, Guid>? attachmentRepository = null,
+        IRepository<QueuedThreadMessage, Guid>? queueRepository = null)
     {
         _logger = Check.NotNull(logger);
         _messageRepository = messageRepository;
@@ -49,6 +52,7 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
         _artifactRepository = artifactRepository;
         _usageLogRepository = usageLogRepository;
         _attachmentRepository = attachmentRepository;
+        _queueRepository = queueRepository;
     }
 
     public async Task HandleAsync(ThreadDeletedEvent evt, CancellationToken ct = default)
@@ -132,6 +136,15 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
             await _usageLogRepository.AsQueryable()
                 .Where(log => log.ThreadId == threadId)
                 .ExecuteUpdateAsync(setters => setters.SetProperty(log => log.ThreadId, (Guid?)null), ct);
+        }
+
+        // 5. 还没发出的排队消息：线程删掉之后它们没有地方可去，也不该在后台被谁发出去
+        if (_queueRepository != null)
+        {
+            await _queueRepository.AsQueryable()
+                .IgnoreQueryFilters()
+                .Where(m => m.ThreadId == threadId)
+                .ExecuteDeleteAsync(ct);
         }
 
         _logger.LogInformation("Cascade cleanup completed for thread {ThreadId}", evt.ThreadId);

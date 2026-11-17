@@ -24,35 +24,54 @@
  * See a consumer chat app for a
  * real-world integration.
  */
-import { computed, inject, ref, shallowRef, watch, onMounted, onBeforeUnmount, useSlots, useTemplateRef } from 'vue'
+import { computed, inject, nextTick, ref, shallowRef, watch, onMounted, onBeforeUnmount, useId, useSlots, useTemplateRef } from 'vue'
 import TUsageLimitNotice from './TUsageLimitNotice.vue'
 import TComposerModelPicker, { type ComposerModelOption } from './TComposerModelPicker.vue'
 import type { UsageLimitNotice } from '../../headless/usage-limits'
+import type { IconMotion } from '../../headless/icon-motion'
 import { Icon } from '@iconify/vue'
-import { NConfigProvider } from 'naive-ui'
-import { TAvatar, THEME_CONTEXT_KEY, applyThemeModeToDocument, type ThemeContext } from '@tnzi/ui'
-import { useAiNaiveTheme } from '../../headless/useAiNaiveTheme'
+import { TAvatar } from '@tnzi/ui/components'
+import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui/headless'
+import { applyThemeModeToDocument } from '@tnzi/ui/theme'
+import { markAiApp } from '../../headless/app-root'
 import type { ThemeMode } from '@tnzi/core/types'
 import { normalizeThemeMode } from '@tnzi/core/types'
 import TCollapsibleSidebar from '../layout/TCollapsibleSidebar.vue'
 import TAsidePanel from '../layout/TAsidePanel.vue'
 import TCommandPalette from '../overlay/TCommandPalette.vue'
 import TSettingsDialog from '../overlay/TSettingsDialog.vue'
+import type { DialogCloseReason } from '../overlay/dialog-motion'
+import TConfirmHost from '../overlay/TConfirmHost.vue'
+import TToastHost from '../controls/TToastHost.vue'
+import TPendingApprovals from '../approvals/TPendingApprovals.vue'
+import TQueuedMessages from './TQueuedMessages.vue'
+import TSlashCommandMenu, { type SlashCommandsState } from './TSlashCommandMenu.vue'
+import { textWithCommand, useSlashMenu, type SlashMenuItem } from '../../headless/slash-menu'
+import type { ApprovalCardModel } from '../../headless/approval-card'
+import type { ApprovalQueue, PendingInteraction } from '../../headless/approval-queue'
+import { CHAT_THREADS_KEY, pickChatApprovals, pickChatMessageQueue, pickChatStopTask } from '../../headless/chat-approvals-key'
+import { createSubAgentView, provideSubAgentView } from '../reasoning/sub-agent-view'
+import type { MessageQueue } from '../../headless/message-queue'
 import TLandingPage from './TLandingPage.vue'
 import TSidebarNav from '../layout/TSidebarNav.vue'
 import TChatRail from '../layout/TChatRail.vue'
+import TRailButton from '../layout/TRailButton.vue'
+import TRailFlyout from '../layout/TRailFlyout.vue'
+import TRailThreadList from './TRailThreadList.vue'
 import TThreadList from './TThreadList.vue'
 import type { ThreadItem } from './TThreadList.vue'
 import TRecentsPage from './TRecentsPage.vue'
+import type { ThreadIconResolver } from './thread-icon'
 import TThreadTitle from './TThreadTitle.vue'
 import { RECENTS_VIEW_ID, type RecentThreadsController } from '../../headless/recents'
-import type { NavItem, NavGroup } from '../layout/TSidebarNav.vue'
+import type { NavItem, NavGroup, NavGroupAction, NavItemAction } from '../layout/TSidebarNav.vue'
 import TUserMenu from '../overlay/TUserMenu.vue'
 import TSettingRow from '../layout/TSettingRow.vue'
 import TSettingGroup from '../layout/TSettingGroup.vue'
 import TAppearanceAdmin from '../layout/TAppearanceAdmin.vue'
 import type { UseGlobalAiThemeReturn } from '../../headless/useGlobalAiTheme'
 import type { HttpClient } from '@tnzi/core/http'
+import type { UserDto } from '@tnzi/core/services/identity'
 import { useAccountSettings } from '../../headless/useAccountSettings'
 import { useAiPersonalization } from '../../headless/useAiPersonalization'
 import TAccountSettings from '../settings/TAccountSettings.vue'
@@ -65,10 +84,11 @@ import type { LandingChip } from './TLandingPage.vue'
 import TThreadComposer from './TThreadComposer.vue'
 import TThreadMessage from './TThreadMessage.vue'
 import TThreadLoading from './TThreadLoading.vue'
-import { useAutoScroll } from '../../headless/useAutoScroll'
-import { useTurnAnchor } from '../../headless/useTurnAnchor'
+import { useAutoScroll, type ChatScrollMode } from '../../headless/useAutoScroll'
 import { useLatestInView } from '../../headless/useLatestInView'
 import { usePinnedViewport } from '../../headless/usePinnedViewport'
+import { useScrollMemory } from '../../headless/useScrollMemory'
+import { enableTouchPress } from '../../headless/touch-press'
 import { useAiI18n } from '../../i18n/index'
 import type { ComposerAction } from './composer-types'
 import { DEFAULT_COMPOSER_ACCEPT } from './composer-types'
@@ -81,8 +101,11 @@ import type {
 import type { SettingsSection } from '../../headless/useSettingsDialog'
 import type { CommandAction } from '../../headless/useCommandPalette'
 import { useSidebarState, type SidebarMode } from '../../headless/useSidebarState'
+import { conversationRoom, useSidebarAutoFit, SIDEBAR_AUTO_FIT_MIN_WIDTH } from '../../headless/useSidebarAutoFit'
 import { useAsidePanel, provideChatAside } from '../../headless/useAsidePanel'
+import { provideChatViewFill } from '../../headless/useChatViewFill'
 import type { ChatMessage } from '../../headless/useChat'
+import { continuesAfterBackgroundTask } from './thread-continuation'
 import type { AddAttachmentsResult, RejectedAttachment } from '../../headless/useComposerAttachments'
 import {
   provideChatRenderContext,
@@ -136,6 +159,15 @@ const BUILTIN_VIEW_ICONS: Record<BuiltinViewId, string> = {
   skills: 'lucide:wand-2',
   knowledge: 'lucide:book-open',
 }
+/* The hover motion is part of the same contract as the icon: each one says
+   what its entry is (the clock rings, the agent hops, the wand is waved). */
+const BUILTIN_VIEW_ICON_MOTIONS: Record<BuiltinViewId, IconMotion> = {
+  agents: 'hop',
+  scheduled: 'ring',
+  artifacts: 'pop',
+  skills: 'tilt',
+  knowledge: 'pop',
+}
 
 /**
  * What `addAttachments` did. `added` / `rejected` come from the composer's own
@@ -150,7 +182,7 @@ export interface ChatAppAttachmentsResult extends AddAttachmentsResult {
 
 /* Re-exported so consumers import every TChatApp-facing type from one module
    rather than tracking which shell component happens to own each one. */
-export type { LandingChip, NavItem, NavGroup, UserMenuItem, UserBarAction, ThreadItem }
+export type { LandingChip, NavItem, NavGroup, NavGroupAction, NavItemAction, UserMenuItem, UserBarAction, ThreadItem }
 
 // ---------------------------------------------------------------------------
 // Props / events / slots
@@ -204,6 +236,20 @@ const props = withDefaults(
     sidebarMobileBreakpoint?: number
     /** Expanded sidebar width (px). */
     sidebarWidth?: number
+    /**
+     * Fold the expanded sidebar into the rail by itself when the conversation
+     * would be narrower than `conversationMinWidth` beside it (an open side
+     * panel and artifact pane counted), and unfold it when there is room again
+     * (`conversationMinWidth` + 80px). Follows the window, the shell's own
+     * size and the side panel opening, closing and being resized. Only a
+     * sidebar it folded is unfolded: a rail or a hidden sidebar the user chose
+     * stays, and nothing it does is written to `sidebarStorageKey`. A user
+     * expanding it while the room is short keeps it expanded. No effect on the
+     * narrow-screen drawer. Default `true`.
+     */
+    sidebarAutoCollapse?: boolean
+    /** Narrowest conversation column (px) `sidebarAutoCollapse` keeps beside the expanded sidebar. Default 560. */
+    conversationMinWidth?: number
     /** Section heading above the threads list. Defaults to the current
      *  locale's; pass '' for none. */
     threadsLabel?: string
@@ -212,16 +258,40 @@ const props = withDefaults(
     /** Iconify name for the new-chat entry. A product that calls this
      *  something else usually wants its own glyph too. */
     newChatIcon?: string
+    /** Hover motion of the new-chat icon (see `NavItem.iconMotion`). The
+     *  default suits the default pen; `null` keeps the icon still. */
+    newChatIconMotion?: IconMotion | null
     /**
      * Contribute the built-in new-chat entry at the top of the nav. Turn it off
      * when the product already carries "New chat" among its own nav entries -
      * otherwise it appears twice, in both the expanded sidebar and the rail.
      */
     showNewChatButton?: boolean
+    /**
+     * Whether the landing state on show is the new-chat destination, so the
+     * new-chat entry is highlighted there (in the expanded sidebar and the
+     * rail alike). Pass `false` while a product uses the landing state for
+     * something else, such as an existing item opened beside it; clicking the
+     * entry still starts a new chat. Default `true`.
+     */
+    landingIsNewChat?: boolean
     /** Hover delete affordance on each thread row (with inline confirm). Default true. */
     enableThreadDelete?: boolean
     /** Inline delete-confirm prompt label. Defaults to the current locale's. */
     deleteConfirmLabel?: string
+    /**
+     * The conversations button of the collapsed rail: hovering, focusing or
+     * clicking it opens the recent conversations beside the rail
+     * (`TRailFlyout` + `TRailThreadList`, from `threads`; with `recents`, a
+     * "View all" row). It appears when `threads` has any, or when the
+     * `#rail-threads` slot is given (a product whose list is something else
+     * supplies it there). `false` never shows it.
+     */
+    railThreads?: boolean
+    /** Name and heading of that button and its panel. Defaults to `threadsLabel`, then the locale's. */
+    railThreadsLabel?: string
+    /** Iconify name of that button. */
+    railThreadsIcon?: string
 
     // ── Threads ─────────────────────────────────────────────────────────
     threads?: ReadonlyArray<ThreadItem>
@@ -238,14 +308,74 @@ const props = withDefaults(
     // ── Chat thread ─────────────────────────────────────────────────────
     messages?: ReadonlyArray<ChatMessage>
     isStreaming?: boolean
+    /**
+     * While `isStreaming`, let the conversation's composer queue a message: with
+     * text or attachments in it the primary button (and Enter) emits
+     * `queue(content, files)` and empties the composer, and Stop moves to a
+     * second button beside it. Keeping the queued messages and sending them
+     * when the turn ends is the app's (list them in `#thread-composer-top`).
+     * Default false: while streaming the composer offers only Stop.
+     *
+     * Not needed with a server message queue (`messageQueue`): while its
+     * turn has a server run the composer queues by itself.
+     */
+    queueWhileRunning?: boolean
+    /**
+     * The conversation's queued messages on the server (`useChatThreads().messageQueue`): listed
+     * above the composer, each editable, removable and sendable now. While a turn of an external
+     * agent runs (`messageQueue.available`) the composer queues: a message with words, attachments or
+     * both is emitted as `send`, which `useChatThreads().send` queues on the server (the running agent
+     * gets it at once when its turn can take messages). Without it the shell uses the queue of the `useChatThreads` whose `messages` it shows
+     * (picked as the approval cards are); `null` turns the list and the queueing off (an app with its own queue, which then
+     * uses `queueWhileRunning` and `queue`).
+     */
+    messageQueue?: MessageQueue | null
     /** Composer text - v-model'able. */
     inputText?: string
     /** Defaults to the current locale's. */
     composerPlaceholder?: string
     /** Extra composer toolbar buttons (declarative - "more buttons"). */
     composerActions?: ReadonlyArray<ComposerAction>
+    /**
+     * Attributes for the composer's textarea, landing and thread alike (the
+     * combobox ARIA of a `#composer-suggestions` menu). See TThreadComposer `inputAttrs`.
+     */
+    composerInputAttrs?: Readonly<Record<string, string | number | boolean | undefined>>
+    /**
+     * The commands of the composer's `/` menu (a CLI agent's skills and commands). Given (even
+     * empty), typing a slash at the start of an empty box opens the menu above the composer,
+     * filtered by what follows the slash; the arrows move, Enter or Tab writes `/<command> ` into the
+     * box, Escape closes it until the text changes. The box gets the combobox ARIA. Where the list
+     * comes from is the app's: read it on `slash-query`. `null` / not given: no menu.
+     */
+    slashCommands?: ReadonlyArray<SlashMenuItem> | null
+    /** Where reading `slashCommands` stands: the menu says "Reading…" or that it failed while the list is empty. Default `'ready'`. */
+    slashCommandsState?: SlashCommandsState
+    /** A line under the `/` menu's list (why some commands are missing, say). */
+    slashCommandsNote?: string | null
+    /**
+     * What the conversation waits on its user for, shown as cards above the composer: an external
+     * agent's permission requests, questions and plans, and the application's own kinds.
+     * `useChatThreads().approvals`; without it the shell uses the queue of the `useChatThreads` in
+     * an ancestor component whose `messages` array is the one given here (with a single instance,
+     * that one; with several and none matching, no cards), so a shell wired to the hook shows them
+     * by itself. `null` turns the cards off.
+     */
+    approvals?: ApprovalQueue | null
+    /**
+     * A card model for a waiting item (an application's own kind, or its own wording of a built-in
+     * one); null leaves it to the framework's card or the `#approval-card` slot.
+     */
+    describeApproval?: ((item: PendingInteraction) => ApprovalCardModel | null) | null
     /** Built-in voice (speech-to-text) mic button. Default true. */
     enableVoice?: boolean
+    /**
+     * Iconify name of the composer's send button, on the home screen and in a
+     * conversation alike (a brand's own mark, registered like any other icon).
+     * Only the send state: stop, voice and end-dictation keep their icons.
+     * Default `lucide:arrow-up`.
+     */
+    sendIcon?: string
     /** Built-in attachment button (paperclip + drag/paste). Default false. */
     enableAttachments?: boolean
     /** Accepted attachment file types (`<input accept>` syntax). Checked for every
@@ -326,6 +456,14 @@ const props = withDefaults(
      * of them elsewhere: the same predicate it applies before handing `threads` in.
      */
     recentsInclude?: (thread: ThreadItem) => boolean
+    /**
+     * Maps a thread to the icon shown before its title, usually from its
+     * `origin`: `(thread) => ({ icon, label })` with an Iconify name the app
+     * bundles, or null for none (no icon, no space kept). One resolver for the sidebar
+     * list, the collapsed rail's list and the Recents page, so a conversation
+     * looks the same in all three. The label is the tooltip and accessible name.
+     */
+    threadIcon?: ThreadIconResolver
     /** The open thread has messages before the first one shown: scrolling to the top emits `load-older-messages`. */
     hasOlderMessages?: boolean
     /** Older messages are loading. */
@@ -356,16 +494,34 @@ const props = withDefaults(
     threadTitleOf?: (threadId: string) => string | null | undefined
     /** Max width of the conversation content column (CSS length, e.g. "1100px"). */
     contentWidth?: string | number
+    /**
+     * How the conversation scrolls when a message is sent and its answer
+     * streams. `'chat'` (default): the sent message comes into view with the
+     * end of the previous answer above it, and the view follows the answer
+     * until the message reaches the top, then stays, so a long answer is read
+     * from its start. `'follow'`: the view follows the newest output while it
+     * streams, for an agent whose turn is a long run of steps. In both,
+     * scrolling up stops following at once and coming back to the bottom
+     * resumes it, and a conversation opens at its latest turn.
+     */
+    scrollMode?: ChatScrollMode
     /** Fine-print line under the composer (model disclaimer, usage note). */
     disclaimer?: string
     /**
      * Models the user may pick for the next turn (`useChatModels().models`).
-     * More than one shows a picker in the composer; `v-model:model` carries the
-     * choice, which goes to `useChatThreads({ model })` so the turn uses it.
+     * More than one, or one that offers efforts, shows a picker in the composer;
+     * `v-model:model` carries the choice, which goes to `useChatThreads({ model })`
+     * so the turn uses it.
      */
     models?: ReadonlyArray<ComposerModelOption>
     /** The picked model id (`v-model:model`); the first of `models` when null or unknown. */
     model?: string | null
+    /**
+     * The picked thinking effort (`v-model:effort`, typically `useChatModels().effort`,
+     * updated through `selectEffort`); goes to `useChatThreads({ effort })`. The picker
+     * offers the efforts of the current model (`ComposerModelOption.efforts`).
+     */
+    effort?: string | null
     /**
      * A usage limit a turn ran into (`useChatThreads().usageLimit`), shown above
      * the composer with its reset time. Supports `v-model:usage-limit-notice`:
@@ -409,7 +565,11 @@ const props = withDefaults(
     /** Appended to the account menu after the built-ins, above sign-out.
      *  The usual way to add product-specific entries. */
     userMenuExtraItems?: ReadonlyArray<UserMenuItem>
-    /** Icon buttons on the account bar itself (notifications, feedback). */
+    /** Icon buttons in the account row, flush right of the account button
+     *  (an apps launcher, notifications, feedback). `label` is both the
+     *  tooltip and the accessible name; a click emits `user-action` with the
+     *  action's `id`. In the collapsed rail they are not shown (the rail has
+     *  the avatar only); in the mobile drawer they are, at touch size. */
     userBarActions?: ReadonlyArray<UserBarAction>
     /** Secondary line in the account menu header (email, workspace, plan). */
     accountSubtitle?: string
@@ -451,6 +611,13 @@ const props = withDefaults(
      */
     accountClient?: HttpClient | null
     /**
+     * The Account page's "Delete account" group (with `accountClient`).
+     * `false` hides it; `{ blockedReason }` keeps it visible but disabled with
+     * that reason (last owner, an active subscription). On success the shell
+     * emits `account-deleted`, which is where the consumer signs out.
+     */
+    accountDeletion?: boolean | { blockedReason?: string | null }
+    /**
      * `(key, fallback?) => string` for the appearance pane's copy. The rest of
      * the dialog reads the `locales` prop; this pane takes an injected
      * translator because it is also usable outside `TChatApp`.
@@ -462,6 +629,8 @@ const props = withDefaults(
     settingsSections?: ReadonlyArray<SettingsSection>
     /** Defaults to the current locale's. */
     settingsTitle?: string
+    /** Asked before the settings dialog closes (unsaved changes); `false` keeps it open. */
+    settingsBeforeClose?: (reason: DialogCloseReason) => boolean | void | Promise<boolean | void>
     /** Show the filter box in the settings dialog's left rail. Worth turning
      *  on past roughly half a dozen sections. */
     settingsSearchable?: boolean
@@ -508,6 +677,36 @@ const props = withDefaults(
     asideLabel?: string
     /** Show the top bar button that opens and closes the panel. */
     showAsideToggle?: boolean
+    /**
+     * On a wide screen, the panel takes the full height of the main area, from its very top, and
+     * the top bar spans only the conversation (its actions and the panel toggle end beside the
+     * panel). For a panel that opens with its own row of controls. Default: the panel sits under a
+     * top bar that spans the whole main area. A narrow screen's full-size layer is the same either way.
+     * The `aside` slot is told (`fullHeight`), and the panel's content gets the window's corner insets
+     * as `--tnzi-ai-aside-inset-top` / `--tnzi-ai-aside-inset-right` (0 when it is not full height).
+     */
+    asideFullHeight?: boolean
+    /**
+     * Offer the panel on the landing page too (a new conversation with no messages yet), with the
+     * same frame, resizing and stored width as in a conversation; the landing content recentres in
+     * the remaining width and the top bar toggle appears there. Its state is the new conversation's
+     * (the draft slot), handed to the conversation the first message creates, and the panel stays
+     * mounted across that switch. For a start page whose panel has something to show before the
+     * first message (a project's files and history). Default: no panel on the landing page.
+     */
+    asideOnLanding?: boolean
+    /**
+     * The side panel's tab that shows a sub-agent's own view (`TSubAgentPanel`). With it, opening a sub-agent (its
+     * step in a run, its row in `TBackgroundTasks`) opens the side panel on this tab, and closing the view returns
+     * to the tab that was shown before; the `aside` slot renders `TSubAgentPanel` for it. Without it (default), or
+     * without an `aside` slot, a sub-agent's step opens its view in place, inside its run.
+     */
+    subAgentAside?: string | null
+    /**
+     * How a task of the conversation (a sub-agent, a background command) is stopped. Default: the `stopTask` of the
+     * `useChatThreads` whose conversation is on screen (picked as the approval cards are). `null` = no Stop buttons.
+     */
+    stopTask?: ((taskId: string) => Promise<boolean> | boolean | void) | null
 
     // ── Responsive ──────────────────────────────────────────────────────
     /**
@@ -536,27 +735,43 @@ const props = withDefaults(
     sidebarStorageKey: 'tnzi-ui-ai-sidebar-mode',
     sidebarMobileBreakpoint: 768,
     sidebarWidth: 300,
+    sidebarAutoCollapse: true,
+    conversationMinWidth: SIDEBAR_AUTO_FIT_MIN_WIDTH,
     /* No default for any user-visible label (`threadsLabel`, `newChatLabel`,
        `deleteConfirmLabel`, `composerPlaceholder`, `agentName`, the landing
        copy, `settingsSections`, `settingsTitle`): each falls back to the
        dictionary where it is rendered, so leaving it unset translates instead
        of pinning the shell to English. */
     newChatIcon: 'lucide:square-pen',
+    newChatIconMotion: 'tilt',
     showNewChatButton: true,
+  landingIsNewChat: true,
     enableThreadDelete: true,
+    railThreads: true,
+    railThreadsLabel: undefined,
+    railThreadsIcon: 'lucide:messages-square',
     threads: () => [],
     openingThreadId: undefined,
     threadTitleOf: undefined,
     messages: () => [],
     isStreaming: false,
+    queueWhileRunning: false,
     inputText: '',
     composerActions: () => [],
+    composerInputAttrs: undefined,
+    slashCommands: null,
+    slashCommandsState: 'ready',
+    slashCommandsNote: null,
+    approvals: undefined,
+    messageQueue: undefined,
+    describeApproval: null,
     enableVoice: true,
     enableAttachments: false,
     composerAccept: DEFAULT_COMPOSER_ACCEPT,
     voiceLang: 'en-US',
     showAgentByline: true,
     showToolCalls: true,
+    scrollMode: 'chat',
     showUsage: false,
     locales: () => [],
     locale: '',
@@ -566,6 +781,7 @@ const props = withDefaults(
     globalTheme: null,
     translateSetting: undefined,
     settingsSearchable: false,
+    settingsBeforeClose: undefined,
     settingsShowAccount: false,
     enableCommandPalette: false,
     commandActions: () => [],
@@ -583,6 +799,10 @@ const props = withDefaults(
     asideDefaultTab: undefined,
     asideLabel: undefined,
     showAsideToggle: true,
+    asideFullHeight: false,
+    asideOnLanding: false,
+    subAgentAside: null,
+    stopTask: undefined,
     isMobile: undefined,
     pinNarrowViewport: true,
     view: 'chat',
@@ -597,6 +817,7 @@ const props = withDefaults(
     disclaimer: '',
     models: () => [],
     model: null,
+    effort: null,
     usageLimitNotice: null,
     toolRenderers: () => ({}),
     resolveAttachmentUrl: undefined,
@@ -607,6 +828,7 @@ const props = withDefaults(
     threadSearchable: false,
     recents: null,
     recentsInclude: undefined,
+    threadIcon: undefined,
     hasOlderMessages: false,
     loadingOlderMessages: false,
   },
@@ -620,6 +842,11 @@ const emit = defineEmits<{
   nav: [item: NavItem]
   /** A nav group's header action was clicked (e.g. "new project"). */
   'nav-group-action': [groupId: string, actionId: string]
+  /**
+   * A nav row's trailing action was clicked (`NavItem.action`, e.g. a "+" on
+   * "Projects"). Only this fires: the row is not selected and `view` does not move.
+   */
+  'nav-item-action': [itemId: string, actionId: string]
   /**
    * `v-model:view`. Emitted alongside `nav` (the entry's id) and alongside
    * `new-chat` / `select-thread` (back to the conversation). Ignore it to keep
@@ -642,11 +869,31 @@ const emit = defineEmits<{
 
   // Composer
   send: [content: string, files: File[]]
+  /**
+   * A message written while `isStreaming` (`queueWhileRunning`). Same arguments
+   * as `send` (the files exactly as the composer held them); the composer is
+   * emptied. Not checked against the usage figures: nothing is sent yet.
+   * With a server message queue in effect (`messageQueue.available`) it is
+   * emitted as `send` instead, and not as `queue`.
+   */
+  queue: [content: string, files: File[]]
   'composer-action': [id: string]
+  /**
+   * A key pressed in the composer (landing or thread), before the composer acts
+   * on it. An open `#composer-suggestions` menu handles its navigation keys here
+   * and calls `preventDefault()` so Enter picks instead of sending.
+   */
+  'composer-keydown': [event: KeyboardEvent]
+  /**
+   * The name being typed after a slash at the start of the box, or `null` when no command is being
+   * typed: read the `slashCommands` for the conversation on screen when it stops being null.
+   */
+  'slash-query': [query: string | null]
   stop: []
   'update:input-text': [value: string]
   /** The user picked a model in the composer's picker. */
   'update:model': [modelId: string]
+  'update:effort': [effort: string]
   /** The usage-limit notice was dismissed, or its reset passed. */
   'update:usage-limit-notice': [notice: UsageLimitNotice | null]
   /** Files the composer refused (over `composerMaxFileSize`, or not matched by
@@ -676,6 +923,11 @@ const emit = defineEmits<{
   'update:locale': [locale: string]
   'open-settings': []
   'sign-out': []
+  /** The user's profile changed on the Account page (display name, photo).
+   *  Refresh whatever copy the shell renders from (`accountAvatar`). */
+  'profile-change': [profile: UserDto]
+  /** The account was deleted; every session is already revoked server-side. */
+  'account-deleted': []
 
   // Artifact
   'close-artifact': []
@@ -699,6 +951,24 @@ const emit = defineEmits<{
    `sidebarMode = 'icon'` assignments in the template; drawer opens and closes
    on a narrow viewport are not. */
 const t = useAiI18n()
+/* The cards above the composer: the queue given (`null` turns them off), or that of the
+   `useChatThreads` in an ancestor whose messages are the ones shown here; with one instance, that
+   one; with several and no match, none (see `chat-approvals-key.ts`). */
+const chatThreads = inject(CHAT_THREADS_KEY, null)
+const pickedApprovals = computed(() => pickChatApprovals(chatThreads, props.messages))
+const approvalQueue = computed(() => (props.approvals === undefined ? pickedApprovals.value.approvals : props.approvals))
+/* On a phone, while a card waits, the composer keeps only its bar (stop, the pickers): the cards
+   get the room, and what is typed waits until they are answered. */
+const cardsWaiting = computed(() => (approvalQueue.value?.items.value.length ?? 0) > 0)
+const awaitingAnswer = computed(() => effectiveIsMobile.value && cardsWaiting.value)
+/* The queued messages above the composer: the queue given, or that of the `useChatThreads` whose
+   conversation is on screen, picked as the cards are (`null` turns them off). While its turn has a
+   server run the composer queues through it, attachments included. */
+const messageQueue = computed<MessageQueue | null>(() =>
+  props.messageQueue === undefined ? pickChatMessageQueue(chatThreads, props.messages) : props.messageQueue,
+)
+const serverQueueOn = computed(() => !!messageQueue.value?.available.value)
+const effectiveQueueWhileRunning = computed(() => props.queueWhileRunning || serverQueueOn.value)
 
 const sidebar = useSidebarState({
   initialMode: props.initialSidebarMode,
@@ -722,6 +992,14 @@ const sidebarMode = computed<SidebarMode>({
    bubbles broke one word per line. Backdrop and scroll lock were off too,
    since both hang off the same flag. */
 const effectiveIsMobile = computed(() => props.isMobile ?? sidebar.isMobile.value)
+
+/* The brand header's toggle: on a wide screen it folds the sidebar into the
+   rail, in the narrow drawer it closes the drawer. Also handed to a `brand`
+   slot override, which would otherwise have no way to collapse. */
+const headerToggleLabel = computed(() => (effectiveIsMobile.value ? t.value.sidebar.close : t.value.sidebar.collapse))
+function collapseFromHeader(): void {
+  sidebarMode.value = effectiveIsMobile.value ? 'hidden' : 'icon'
+}
 
 /* Whether the conversation list is folded away under its heading. Remembered
    next to the sidebar mode, under the same key (and not at all without one). */
@@ -759,6 +1037,36 @@ const composerText = computed({
 
 const hasMessages = computed(() => (props.messages?.length ?? 0) > 0)
 
+/* The composer's `/` menu: open while a command is typed at the start of an empty box, when the
+   app gives commands. It takes the composer's navigation keys before the composer does. */
+const slashMenuId = `t-slash-menu-${useId()}`
+const slashMenu = useSlashMenu({
+  text: composerText,
+  items: computed(() => props.slashCommands ?? []),
+  onPick: (item) => {
+    composerText.value = textWithCommand(item)
+    void nextTick(focusComposer)
+  },
+})
+const slashOpen = computed(() => props.slashCommands != null && slashMenu.open.value)
+watch(slashMenu.query, (query) => emit('slash-query', query))
+function onComposerKeydown(event: KeyboardEvent): void {
+  if (slashOpen.value && slashMenu.handleKey(event)) event.preventDefault()
+  emit('composer-keydown', event)
+}
+const effectiveComposerInputAttrs = computed(() => {
+  if (props.slashCommands == null) return props.composerInputAttrs
+  const listed = slashOpen.value && slashMenu.results.value.length > 0
+  return {
+    ...props.composerInputAttrs,
+    role: 'combobox',
+    'aria-autocomplete': 'list',
+    'aria-expanded': String(slashOpen.value),
+    'aria-controls': listed ? slashMenuId : undefined,
+    'aria-activedescendant': listed ? `${slashMenuId}-${slashMenu.highlighted.value}` : undefined,
+  }
+})
+
 /* The right-side panel. State is per conversation; a conversation that has no id yet shares a
    draft slot that is handed to the real id once the first turn creates it. */
 const aside = useAsidePanel({
@@ -785,15 +1093,34 @@ provideChatAside({ open: aside.open, tab: aside.tab, show: aside.show, hide: asi
 const CHAT_VIEW_ID = 'chat'
 
 const isChatView = computed(() => props.view === CHAT_VIEW_ID)
-/* The panel exists only where the conversation does (not on the landing page or a product's own
-   `view`), and only when the product gave it content. */
+/* The landing page: a conversation view with no messages, unless the shell was told to skip it or a
+   picked conversation is still loading. It is drawn inside the workspace, in the thread's place, so
+   the panel beside it is the same element before and after the first message. */
+const showsLanding = computed(() => !hasMessages.value && props.showLanding && !isOpeningThread.value)
+/* The panel exists only where the conversation does (not on a product's own `view`, and not on the
+   landing page unless `asideOnLanding`), and only when the product gave it content. */
 const asideAvailable = computed(
-  () => !!slots.aside && isChatView.value && !(!hasMessages.value && props.showLanding && !isOpeningThread.value),
+  () => !!slots.aside && isChatView.value && (props.asideOnLanding || !showsLanding.value),
 )
 const asideShown = computed(() => asideAvailable.value && aside.open.value)
+/* `asideFullHeight`: the main area becomes a grid whose last column is the panel's, from the top.
+   It holds for as long as the panel is available, open or not, so opening it moves nothing up or
+   down; the narrow screen keeps its overlay. */
+const asideFullHeightLayout = computed(() => props.asideFullHeight && asideAvailable.value && !effectiveIsMobile.value)
 /* The full Recents page is the shell's own, when it has the controller to fill it. */
 const isRecentsView = computed(() => props.view === RECENTS_VIEW_ID && props.recents != null)
+/* A page of the product's, in the `view` slot. */
+const isPageView = computed(() => !isChatView.value && !isRecentsView.value)
+/* The slot's section stays mounted once a page has been shown (see the template). */
+const pageViewMounted = ref(isPageView.value)
+watch(isPageView, (page) => {
+  if (page) pageViewMounted.value = true
+})
 const threadsLabelText = computed(() => props.threadsLabel ?? t.value.chat.threadsLabel)
+/* `threadsLabel: ''` hides the expanded list's heading; the rail button still needs a name. */
+const railThreadsLabelText = computed(
+  () => props.railThreadsLabel || props.threadsLabel || t.value.chat.threadsLabel,
+)
 
 /* New chat is a nav destination like any other - it opens the landing page -
    so it renders through TSidebarNav rather than as its own button. It used to
@@ -840,7 +1167,8 @@ const primaryNavGroup = computed<NavGroup | null>(() => {
           id: NEW_CHAT_NAV_ID,
           label: newChatText.value,
           icon: props.newChatIcon,
-          active: isLandingView.value,
+          iconMotion: props.newChatIconMotion ?? undefined,
+          active: isLandingView.value && props.landingIsNewChat,
         },
       ]
     : []
@@ -849,6 +1177,7 @@ const primaryNavGroup = computed<NavGroup | null>(() => {
     id,
     label: t.value.views[id],
     icon: BUILTIN_VIEW_ICONS[id],
+    iconMotion: BUILTIN_VIEW_ICON_MOTIONS[id],
     active: props.view === id,
   }))
 
@@ -938,11 +1267,15 @@ const openingThreadTitle = computed(() => {
   return props.threadTitleOf?.(id) || props.threads.find((thread) => thread.id === id)?.title
 })
 
+/* Nothing to name (a new chat, a conversation still untitled, a view with no
+   nav label) leaves the bar empty, with the sidebar shown or hidden alike: the
+   brand belongs to the sidebar header, and in the bar it reads as a page title
+   for a page that has none. */
 const topbarTitle = computed(
   () =>
     activeViewLabel.value
     || (isOpeningThread.value ? openingThreadTitle.value : props.threadTitle)
-    || props.brandName,
+    || '',
 )
 
 /* The open conversation's title becomes editable, with its own menu, when the
@@ -1007,6 +1340,46 @@ const WIRED_SETTINGS_IDS = ['security', 'personalization', 'usage'] as const
 
 const slots = useSlots()
 
+/* A sub-agent's own view: in the side panel on `subAgentAside`'s tab when the product shows it there, else in place
+   inside its run. Stopping a task goes through the conversation's `useChatThreads` unless `stopTask` says otherwise. */
+const subAgentView = provideSubAgentView(createSubAgentView({
+  panel: () => !!props.subAgentAside && !!slots.aside,
+  stopTask: () => (props.stopTask === undefined ? pickChatStopTask(chatThreads, props.messages) : props.stopTask),
+}))
+/* What the side panel was before a sub-agent opened in it, to put back when the view closes. */
+let asideBeforeSubAgent: { open: boolean; tab: string | undefined } | null = null
+watch(
+  () => subAgentView.current.value,
+  (id, previous) => {
+    const tab = props.subAgentAside
+    if (!tab || !slots.aside) return
+    if (id) {
+      if (!previous) asideBeforeSubAgent = { open: aside.open.value, tab: aside.tab.value }
+      aside.show(tab)
+      return
+    }
+    const before = asideBeforeSubAgent
+    asideBeforeSubAgent = null
+    if (!before || aside.tab.value !== tab || !aside.open.value) return
+    if (!before.open) aside.hide()
+    else if (before.tab !== undefined && before.tab !== tab) aside.setTab(before.tab)
+  },
+)
+/* The side panel closed (or turned to another tab): no sub-agent is shown any more. */
+watch([aside.open, aside.tab], ([open, tab]) => {
+  if (subAgentView.current.value && props.subAgentAside && (!open || tab !== props.subAgentAside)) {
+    asideBeforeSubAgent = null
+    subAgentView.close()
+  }
+})
+/* Another conversation: no sub-agent of the previous one stays open. */
+watch(() => props.activeThreadId, () => subAgentView.close())
+
+/* The rail's conversations button: something to list, or the product's own list. */
+const showRailThreads = computed(
+  () => props.railThreads && (props.threads.length > 0 || Boolean(slots['rail-threads'])),
+)
+
 /* The built-in sections, named in the current locale. Security and
    Personalization are listed but render nothing without an `accountClient`; a
    consumer on a different backend drops them by passing its own list. Listing
@@ -1061,7 +1434,11 @@ const customSettingsSections = computed(() =>
    then disagree after a write. `null` when no client was supplied, which is
    what hides both pages. */
 const accountSettings = props.accountClient
-  ? useAccountSettings({ client: props.accountClient })
+  ? useAccountSettings({
+      client: props.accountClient,
+      onProfileChange: (profile) => emit('profile-change', profile),
+      onAccountDeleted: () => emit('account-deleted'),
+    })
   : null
 const personalization = props.accountClient
   ? useAiPersonalization({ client: props.accountClient })
@@ -1133,7 +1510,11 @@ if (usage) {
   })
 }
 
-const showModelPicker = computed(() => props.models.length > 1)
+const showModelPicker = computed(() => {
+  if (props.models.length > 1) return true
+  const current = props.models.find((m) => m.id === props.model) ?? props.models[0]
+  return (current?.efforts?.length ?? 0) > 0
+})
 
 const themeOptions = computed<ReadonlyArray<{ id: ThemePref; label: string }>>(() => [
   { id: 'light', label: t.value.settings.themeLight },
@@ -1157,10 +1538,6 @@ const resolvedTheme = computed<'light' | 'dark'>(() => {
 })
 
 const isDark = computed(() => resolvedTheme.value === 'dark')
-
-/* Naive theme for this shell. `isDark` is the same value written to <html>,
-   so the controls and the painted surfaces cannot disagree about the mode. */
-const { theme: naiveTheme, themeOverrides: naiveThemeOverrides } = useAiNaiveTheme(isDark)
 
 // ---------------------------------------------------------------------------
 // Theme application
@@ -1219,11 +1596,20 @@ onMounted(() => {
     systemMediaQuery.addEventListener('change', onSystemThemeChange)
   }
   applyTheme()
+  /* A press shows on iOS too (`styles/touch.css`). */
+  enableTouchPress()
+  /* The page-wide rules (body face, thin scrollbars, focus line) apply while
+     the shell is on the page (`headless/app-root.ts`). */
+  releaseAppMark = markAiApp()
 })
+
+let releaseAppMark: (() => void) | null = null
 
 onBeforeUnmount(() => {
   systemMediaQuery?.removeEventListener('change', onSystemThemeChange)
   systemMediaQuery = null
+  releaseAppMark?.()
+  releaseAppMark = null
 })
 
 // ---------------------------------------------------------------------------
@@ -1289,6 +1675,15 @@ function onComposerSend(text: string, files: File[]): void {
   void sendUnlessAtLimit(text, files)
 }
 
+function onComposerQueue(text: string, files: File[]): void {
+  if (!text.trim() && files.length === 0) return
+  // The server queue takes it through `send`: `useChatThreads().send` queues while the run goes on,
+  // with the turn's model and metadata, as any send. Not checked against the usage figures: it goes later.
+  if (serverQueueOn.value) emit('send', text, files)
+  else emit('queue', text, files)
+  emit('update:input-text', '')
+}
+
 /**
  * Send, unless the usage figures say a window is at its limit. Then the
  * figures are read again first (an administrator may have reset the window,
@@ -1323,6 +1718,41 @@ const rootRef = useTemplateRef<HTMLElement>('rootRef')
    does not move: only the conversation scrolls (`pinNarrowViewport`). */
 const pinnedToViewport = computed(() => effectiveIsMobile.value && props.pinNarrowViewport)
 usePinnedViewport(rootRef, pinnedToViewport)
+
+/* The shell's own width, for `sidebarAutoCollapse`: the window's until the
+   shell is laid out (so a narrow first load starts on the rail instead of
+   folding after the first paint), then the element's, which also covers a
+   shell embedded in something narrower than the window. */
+const shellWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
+function measureShell(): void {
+  const measured = rootRef.value?.clientWidth ?? 0
+  shellWidth.value = measured > 0 ? measured : typeof window === 'undefined' ? shellWidth.value : window.innerWidth
+}
+let shellObserver: ResizeObserver | null = null
+onMounted(() => {
+  measureShell()
+  window.addEventListener('resize', measureShell)
+  if (typeof ResizeObserver !== 'undefined' && rootRef.value) {
+    shellObserver = new ResizeObserver(measureShell)
+    shellObserver.observe(rootRef.value)
+  }
+})
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') window.removeEventListener('resize', measureShell)
+  shellObserver?.disconnect()
+  shellObserver = null
+})
+useSidebarAutoFit(sidebar, {
+  room: () =>
+    conversationRoom({
+      containerWidth: shellWidth.value,
+      sidebarWidth: props.sidebarWidth,
+      asideWidth: asideShown.value ? aside.width.value : 0,
+      artifactWidth: props.artifact ? props.artifactWidth : 0,
+    }),
+  enabled: () => props.sidebarAutoCollapse && !effectiveIsMobile.value,
+  minWidth: () => props.conversationMinWidth,
+})
 const threadComposerRef = useTemplateRef<InstanceType<typeof TThreadComposer>>('threadComposerRef')
 const pendingAttachments = shallowRef<File[]>([])
 
@@ -1388,37 +1818,48 @@ const rootStyle = computed<Record<string, string> | undefined>(() => {
   return { '--tnzi-ai-content-width': w }
 })
 
-/* The thread's scrolling. It opens at the latest turn, but does not follow a
-   reply as it streams: a sent message is brought to the top of the view and
-   the answer grows beneath it (`useTurnAnchor`), so a long answer is read from
-   its start, and the position is the user's from then on. */
-const { containerRef: threadScrollRef, scrollToBottom } = useAutoScroll({ follow: false })
-const turnAnchor = useTurnAnchor({
-  container: threadScrollRef,
-  topOffset: () => (effectiveIsMobile.value ? 12 : 24),
-})
-const turnReserve = computed(() => `${turnAnchor.reserve.value}px`)
-/* The "scroll to the latest" button: up while the end of the last message is
-   below the composer, measured on every scroll and every change of size
-   (`useLatestInView`). Not "the scroller is not at its bottom": the reserve
-   under a just-sent turn is scroller, not conversation, and a step collapsed
-   with nothing scrolled left a button that answered that question up. */
+/* The thread's scrolling (`useAutoScroll`). It opens at the latest turn and
+   follows the bottom while the reader is there; scrolling up stops it at once.
+   What a send does depends on `scrollMode`: 'chat' brings the sent message
+   into view under the end of the previous answer and follows the answer no
+   further than that message reaching the top; 'follow' goes to the bottom and
+   keeps following. The composer sits inside the scroller, so its keys and
+   menus do not count as the reader scrolling. */
+const {
+  containerRef: threadScrollRef,
+  isAtBottom: threadAtBottom,
+  scrollToBottom,
+  followTurn,
+} = useAutoScroll({ notContent: '.t-thread-composer-wrap', openAt: () => takeConversationReturn() })
+const turnTopOffset = (): number => (effectiveIsMobile.value ? 12 : 24)
+/* The "scroll to the latest" button: up while the end of the last message (or
+   of what `#thread-end` shows after it) is below the composer, measured on every scroll and every change of size
+   (`useLatestInView`), so a step collapsed with nothing scrolled takes it
+   down. What `#thread-composer-top` shows above the box counts as covering the
+   conversation. Clicking it goes to the bottom and follows from there. */
 const latestInView = useLatestInView({
   container: threadScrollRef,
   latest: () => {
+    // What `#thread-end` shows after the last message is the conversation's end.
+    const end = threadScrollRef.value?.querySelector<HTMLElement>(':scope > .t-chat-app__thread-col > .t-chat-app__thread-end')
+    if (end && end.childElementCount > 0) return end
     const last = props.messages[props.messages.length - 1]
     return last ? messageElement(last.id) : null
   },
-  viewportBottom: () =>
-    threadScrollRef.value
-      ?.querySelector(':scope > .t-chat-app__thread-col > .t-thread-composer-wrap > .t-thread-composer')
-      ?.getBoundingClientRect().top,
+  viewportBottom: () => {
+    const wrap = threadScrollRef.value?.querySelector(':scope > .t-chat-app__thread-col > .t-thread-composer-wrap')
+    // What `#thread-composer-top` shows covers the conversation too; an empty
+    // one is not drawn (and measures 0).
+    const top = wrap?.querySelector(':scope > .t-thread-composer__top')
+    const edge = top && top.childElementCount > 0 ? top : wrap?.querySelector(':scope > .t-thread-composer')
+    return edge?.getBoundingClientRect().top
+  },
 })
 const showScrollToLatest = computed(
   () => latestInView.hiddenBelow.value && !isOpeningThread.value && props.messages.length > 0,
 )
 function scrollToLatest(): void {
-  latestInView.scrollToLatest('smooth')
+  scrollToBottom('smooth')
 }
 
 const lastUserMessageId = computed(() => {
@@ -1431,25 +1872,21 @@ function messageElement(id: string): HTMLElement | null {
   return threadScrollRef.value?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`) ?? null
 }
 /* A new user message at the end of the conversation on screen is a turn being
-   sent (from the composer, an edit, or the product): anchor it. Opening
+   sent (from the composer, an edit, or the product): bring it into view and
+   follow its answer the way `scrollMode` says. Opening
    another conversation is not (its transcript arrives with a new thread id, or
    at the end of a load), and neither is a jump of more than one turn (a
    transcript arriving at once). */
 watch(
   [lastUserMessageId, () => props.activeThreadId, () => props.openingThreadId, () => props.messages.length],
   ([lastUser, active, opening, count], [previousUser, previousActive, previousOpening, previousCount]) => {
-    if (count === 0) {
-      turnAnchor.release()
-      return
-    }
+    if (count === 0) return
     const switched = active !== previousActive && !!previousActive
     const opened = !previousActive && !!active && previousCount === 0
-    if (switched || opened || !!opening || (!!previousOpening && !opening)) {
-      turnAnchor.release()
-      return
-    }
+    if (switched || opened || !!opening || (!!previousOpening && !opening)) return
     if (!lastUser || lastUser === previousUser || count - (previousCount ?? 0) > 2) return
-    void turnAnchor.anchor(() => messageElement(lastUser))
+    if (props.scrollMode === 'follow') scrollToBottom('auto')
+    else followTurn(() => messageElement(lastUser), { topOffset: turnTopOffset })
   },
   { flush: 'post' },
 )
@@ -1470,9 +1907,77 @@ watch(
     const loadingEnded = !!previousOpening && !opening
     const switched = !!previousActive && !!active && active !== previousActive
     if (loadingEnded || switched) {
-      turnAnchor.release()
       scrollToBottom('auto')
     }
+  },
+  { flush: 'post' },
+)
+
+/* Leaving the conversation for a page and coming back opens it where it was
+   left, not at its latest turn: the transcript is drawn again from scratch
+   (the page took its place), so the position is noted on the way out and
+   handed to `useAutoScroll` (`openAt`) when the scroller reappears. Left at
+   the bottom, it comes back following the bottom as before. Only for the
+   conversation that was left: another one picked from the page opens at its
+   latest turn. */
+let conversationReturn: { threadId: string | undefined; top: number } | null = null
+function takeConversationReturn(): number | null {
+  const noted = conversationReturn
+  conversationReturn = null
+  return noted && noted.threadId === props.activeThreadId ? noted.top : null
+}
+watch(
+  isChatView,
+  (chat, wasChat) => {
+    if (chat || !wasChat) return
+    const el = threadScrollRef.value
+    conversationReturn = el && !threadAtBottom.value ? { threadId: props.activeThreadId, top: el.scrollTop } : null
+  },
+  { flush: 'pre' },
+)
+
+/* Each page keeps its own scroll position (`useScrollMemory`): noted when it
+   is left (before the swap, while it is still on screen), put back when it is
+   shown again, and held while its content is still arriving. The product's
+   pages share one scroller, kept mounted (see the template), the Recents page
+   has its own. */
+const pageViewRef = ref<HTMLElement | null>(null)
+const recentsViewRef = ref<HTMLElement | null>(null)
+const viewScroll = useScrollMemory()
+/* A page that fills the view area and scrolls itself (`useChatViewFill`) takes away the area's own
+   scrolling and its scrollbar's room while it is on screen; every other page keeps both. Counted,
+   so a page leaving and the next arriving in either order ends right. */
+const viewFillClaims = ref(0)
+provideChatViewFill({
+  claim() {
+    viewFillClaims.value += 1
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      viewFillClaims.value -= 1
+    }
+  },
+})
+const viewFilled = computed(() => viewFillClaims.value > 0)
+function viewScroller(view: ChatAppView): HTMLElement | null {
+  if (view === CHAT_VIEW_ID) return null
+  return view === RECENTS_VIEW_ID && props.recents != null ? recentsViewRef.value : pageViewRef.value
+}
+watch(
+  () => props.view,
+  (_view, previous) => {
+    const el = previous == null ? null : viewScroller(previous)
+    if (el && previous != null) viewScroll.save(previous, el)
+  },
+  { flush: 'pre' },
+)
+watch(
+  () => props.view,
+  (view) => {
+    const el = viewScroller(view)
+    if (el) viewScroll.restore(view, el)
+    else viewScroll.cancel()
   },
   { flush: 'post' },
 )
@@ -1564,24 +2069,10 @@ function onArtifactWidthChange(w: number): void {
 </script>
 
 <template>
-  <!-- The shell provides the naive theme for everything it renders, including
-       the modals and drawers it teleports. Without it the naive controls inside
-       this package fell back to naive's stock look while the painted surfaces
-       followed `--tnzi-ai-*`, so a product could set its colour and watch half
-       the UI ignore it. Overrides come from the host's `@tnzi/ui` context when
-       there is one - see `useAiNaiveTheme`. -->
-  <!-- `abstract`: renders NO element. Without it naive inserts a
-       `<div class="n-config-provider">` between the page and this shell,
-       and `.t-chat-app`'s height chain resolves against a block div with
-       no height - measured 1467px of content in a 711px viewport, with the
-       composer and account bar pushed off screen. Theme still reaches every
-       descendant (including teleported ones) because provide/inject follows
-       the component tree, not the DOM. -->
-  <NConfigProvider abstract :theme="naiveTheme" :theme-overrides="naiveThemeOverrides">
   <div
     ref="rootRef"
     class="t-chat-app"
-    :class="{ 't-chat-app--dark': isDark, 't-chat-app--narrow': effectiveIsMobile, 't-chat-app--pinned': pinnedToViewport }"
+    :class="{ 't-chat-app--dark': isDark, 't-chat-app--narrow': effectiveIsMobile, 't-chat-app--pinned': pinnedToViewport, 't-chat-app--awaiting': awaitingAnswer }"
     :style="rootStyle"
   >
     <!-- ───────────────────────── Sidebar ───────────────────────── -->
@@ -1593,38 +2084,52 @@ function onArtifactWidthChange(w: number): void {
     >
       <!-- Brand header -->
       <template #header>
-        <slot name="brand">
+        <!-- The brand mark is the collapse control: the logo at rest, the
+             panel icon on hover or keyboard focus, both drawn in one box so
+             the swap moves nothing. The button is named by its action; the
+             logo inside it is decorative. A full `brand` override receives the
+             same action as slot props, so replacing the header keeps collapse. -->
+        <slot
+          name="brand"
+          :toggle-sidebar="collapseFromHeader"
+          :toggle-label="headerToggleLabel"
+          :narrow="effectiveIsMobile"
+        >
           <div class="t-chat-app__brand">
-            <span class="t-chat-app__brand-mark" aria-hidden="true">
-              <svg
-                v-if="brandLogo === 'monogram'"
-                class="t-chat-app__brand-mark-svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M5 6 L19 6" />
-                <path d="M12 6 L12 19" />
-                <circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none" />
-              </svg>
-              <Icon v-else :icon="brandLogo" />
-            </span>
+            <button
+              type="button"
+              class="t-chat-app__brand-toggle"
+              :aria-label="headerToggleLabel"
+              :title="headerToggleLabel"
+              @click="collapseFromHeader"
+            >
+              <span class="t-chat-app__brand-mark" aria-hidden="true">
+                <svg
+                  v-if="brandLogo === 'monogram'"
+                  class="t-chat-app__brand-mark-svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M5 6 L19 6" />
+                  <path d="M12 6 L12 19" />
+                  <circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none" />
+                </svg>
+                <Icon v-else :icon="brandLogo" />
+              </span>
+              <Icon icon="lucide:panel-left" class="t-chat-app__brand-toggle-icon" aria-hidden="true" />
+            </button>
             <strong v-if="brandWordmark" class="t-chat-app__brand-name t-chat-app__brand-wordmark">
               <Icon :icon="brandWordmark" class="t-chat-app__brand-wordmark-glyph" />
               <span v-if="brandName" class="sr-only">{{ brandName }}</span>
             </strong>
             <strong v-else class="t-chat-app__brand-name">{{ brandName }}</strong>
-            <button
-              type="button"
-              class="t-chat-app__brand-collapse"
-              :aria-label="effectiveIsMobile ? t.sidebar.close : t.sidebar.collapse"
-              @click="sidebarMode = effectiveIsMobile ? 'hidden' : 'icon'"
-            >
-              <Icon icon="lucide:panel-left" />
-            </button>
+            <div v-if="$slots['brand-actions']" class="t-chat-app__brand-actions">
+              <slot name="brand-actions" :narrow="effectiveIsMobile" />
+            </div>
           </div>
         </slot>
       </template>
@@ -1637,6 +2142,7 @@ function onArtifactWidthChange(w: number): void {
             :groups="pinnedNavGroups"
             @select="onNavSelect"
             @group-action="(groupId, actionId) => emit('nav-group-action', groupId, actionId)"
+            @item-action="(itemId, actionId) => emit('nav-item-action', itemId, actionId)"
           />
         </slot>
       </template>
@@ -1649,6 +2155,7 @@ function onArtifactWidthChange(w: number): void {
             :groups="navGroups"
             @select="onNavSelect"
             @group-action="(groupId, actionId) => emit('nav-group-action', groupId, actionId)"
+            @item-action="(itemId, actionId) => emit('nav-item-action', itemId, actionId)"
           />
         </slot>
 
@@ -1671,6 +2178,7 @@ function onArtifactWidthChange(w: number): void {
             :has-more="threadsHasMore"
             :loading-more="threadsLoadingMore"
             :preferences="recents?.preferences.value"
+            :thread-icon="threadIcon"
             :show-view-all="recents != null"
             :enable-rename="recents != null"
             :enable-archive="recents != null"
@@ -1749,16 +2257,44 @@ function onArtifactWidthChange(w: number): void {
             @expand="sidebarMode = 'expanded'"
             @select="onNavSelect"
           >
-            <template #bottom>
-              <button
-                v-if="enableSettings && !showAccountBar"
-                type="button"
-                class="t-chat-rail__btn"
-                :aria-label="t.sidebar.settings"
-                @click="openSettings()"
+            <!-- The recent conversations, beside the rail: collapsing the sidebar
+                 must not put them out of reach. -->
+            <template v-if="showRailThreads" #after-groups>
+              <TRailFlyout
+                class="t-chat-app__rail-threads"
+                :label="railThreadsLabelText"
+                :icon="railThreadsIcon"
               >
-                <Icon icon="lucide:settings-2" />
-              </button>
+                <template #default="{ close }">
+                  <slot
+                    name="rail-threads"
+                    :close="close"
+                    :threads="threads"
+                    :active-thread-id="activeThreadId"
+                    :opening-thread-id="openingThreadId"
+                    :select="(id: string) => { close(); openThread(id) }"
+                  >
+                    <TRailThreadList
+                      :threads="threads"
+                      :active-thread-id="activeThreadId"
+                      :opening-thread-id="openingThreadId"
+                      :show-view-all="recents != null"
+                      :thread-icon="threadIcon"
+                      @select="(id) => { close(); openThread(id) }"
+                      @view-all="() => { close(); goToView(RECENTS_VIEW_ID) }"
+                    />
+                  </slot>
+                </template>
+              </TRailFlyout>
+            </template>
+            <template #bottom>
+              <TRailButton
+                v-if="enableSettings && !showAccountBar"
+                class="t-chat-rail__btn"
+                icon="lucide:settings-2"
+                :label="t.sidebar.settings"
+                @click="openSettings()"
+              />
               <!-- With the account bar on, the avatar is the rail's account
                    affordance and carries settings inside its menu. -->
               <TUserMenu
@@ -1780,8 +2316,16 @@ function onArtifactWidthChange(w: number): void {
     </TCollapsibleSidebar>
 
     <!-- ───────────────────────── Main area ───────────────────────── -->
-    <main class="t-chat-app__main">
-      <header v-if="showTopbar" class="t-chat-app__topbar">
+    <main
+      class="t-chat-app__main"
+      :class="{ 't-chat-app__main--aside-full-height': asideFullHeightLayout, 't-chat-app__main--landing': showsLanding }"
+      :style="asideFullHeightLayout ? { '--t-chat-app-aside-width': asideShown ? `${aside.width.value}px` : '0px' } : undefined"
+    >
+      <header
+        v-if="showTopbar"
+        class="t-chat-app__topbar"
+        :class="{ 't-chat-app__topbar--corner-free': asideFullHeightLayout && asideShown }"
+      >
         <button
           v-if="sidebarMode === 'hidden'"
           type="button"
@@ -1822,7 +2366,9 @@ function onArtifactWidthChange(w: number): void {
               @unarchive="setActiveThreadArchived(false)"
               @delete="activeThreadId && emit('delete-thread', activeThreadId)"
             />
-            <span v-else class="t-chat-app__workspace-switcher">
+            <!-- No element for an empty title: the spacer after it keeps the
+                 bar's own controls where they are, and the bar its height. -->
+            <span v-else-if="topbarTitle" class="t-chat-app__workspace-switcher">
               <span>{{ topbarTitle }}</span>
             </span>
           </slot>
@@ -1849,13 +2395,19 @@ function onArtifactWidthChange(w: number): void {
 
       <!-- Consumer-owned page. Sits inside the shell so the sidebar and top
            bar survive navigating away from the conversation. -->
-      <section v-if="isRecentsView" class="t-chat-app__view t-ai-scroll">
+      <section
+        v-if="isRecentsView"
+        ref="recentsViewRef"
+        class="t-chat-app__view t-ai-scroll"
+        :class="{ 't-chat-app__view--fill': viewFilled }"
+      >
         <slot name="recents" :controller="recents">
           <TRecentsPage
             :controller="recents!"
             :title="threadsLabelText"
             :active-thread-id="activeThreadId"
             :include="recentsInclude"
+            :thread-icon="threadIcon"
             :enable-delete="enableThreadDelete"
             :confirm-label="deleteConfirmLabel"
             @select="openThread"
@@ -1863,82 +2415,114 @@ function onArtifactWidthChange(w: number): void {
           />
         </slot>
       </section>
-      <section v-else-if="!isChatView" class="t-chat-app__view t-ai-scroll">
-        <slot name="view" :view="view" />
+      <!-- The product's pages. Mounted from the first page shown and then kept,
+           hidden while the conversation or Recents is on screen, so a
+           `<KeepAlive>` in the slot keeps its pages across a visit to a
+           conversation (unmounting the section would take the KeepAlive and its
+           cache with it). The slot is told the current `view` and whether the
+           section is on screen (`active`). -->
+      <section
+        v-if="pageViewMounted"
+        v-show="isPageView"
+        ref="pageViewRef"
+        class="t-chat-app__view t-ai-scroll"
+        :class="{ 't-chat-app__view--fill': viewFilled }"
+      >
+        <slot name="view" :view="view" :active="isPageView" />
       </section>
 
-      <!-- Landing empty state -->
-      <TLandingPage
-        v-else-if="!hasMessages && showLanding && !isOpeningThread"
-        ref="landingRef"
-        v-model="composerText"
-        :greeting="landingGreeting"
-        :subline="landingSubline"
-        :chips="landingChips"
-        :placeholder="landingPlaceholder"
-        :disabled="isStreaming"
-        :compact="effectiveIsMobile"
-        :composer-actions="composerActions"
-        :enable-voice="enableVoice"
-        :enable-attachments="enableAttachments"
-        :accept="composerAccept"
-        :max-file-size="composerMaxFileSize"
-        :voice-lang="voiceLang"
-        @submit="onLandingSubmit"
-        @chip-click="onChipClick"
-        @action="emit('composer-action', $event)"
-        @attachments-rejected="emit('attachments-rejected', $event)"
-      >
-        <template v-if="$slots['landing-plan']" #plan>
-          <slot name="landing-plan" />
-        </template>
-        <template v-if="$slots['landing-headline']" #headline>
-          <slot name="landing-headline" />
-        </template>
-        <template v-if="$slots['landing-subline']" #subline>
-          <slot name="landing-subline" />
-        </template>
-        <template v-if="$slots['landing-chips']" #chips>
-          <slot name="landing-chips" :chips="landingChips" />
-        </template>
-        <template v-if="composerNotice" #composer-notice>
-          <TUsageLimitNotice
-            variant="banner"
-            :tone="composerNotice.tone"
-            :window="composerNotice.window"
-            :resets-at="composerNotice.resetsAt"
-            :used-percent="composerNotice.usedPercent"
-            :dismissible="composerNotice.dismissible"
-            :draft-kept="composerNotice.draftKept"
-            @dismiss="dismissComposerNotice"
-            @expired="onComposerNoticeExpired"
-          />
-        </template>
-        <template v-if="$slots['composer-left']" #composer-left>
-          <slot name="composer-left" />
-        </template>
-        <template v-if="$slots['composer-right'] || showModelPicker" #composer-right>
-          <TComposerModelPicker
-            v-if="showModelPicker"
-            :models="models"
-            :model-value="model"
-            :disabled="isStreaming"
-            @update:model-value="emit('update:model', $event)"
-          />
-          <slot name="composer-right" />
-        </template>
-        <template v-if="$slots['landing-footer']" #footer>
-          <slot name="landing-footer" />
-        </template>
-      </TLandingPage>
-
-      <!-- Active workspace: messages + optional artifact panel -->
+      <!-- Conversation view: the landing page or the thread, the artifact pane and the panel -->
       <section
-        v-else
+        v-if="isChatView"
         class="t-chat-app__workspace"
-        :class="{ 't-chat-app__workspace--has-artifact': !!artifact, 't-chat-app__workspace--has-aside': asideShown }"
+        :class="{ 't-chat-app__workspace--has-artifact': !!artifact && !showsLanding, 't-chat-app__workspace--has-aside': asideShown }"
       >
-        <div ref="threadScrollRef" class="t-chat-app__thread t-ai-scroll">
+        <!-- Landing empty state, in the thread's place: the panel beside it is not
+             remounted when the first message turns it into a conversation. -->
+        <TLandingPage
+          v-if="showsLanding"
+          ref="landingRef"
+          class="t-chat-app__landing"
+          v-model="composerText"
+          :greeting="landingGreeting"
+          :subline="landingSubline"
+          :chips="landingChips"
+          :placeholder="landingPlaceholder"
+          :disabled="isStreaming"
+          :compact="effectiveIsMobile"
+          :composer-actions="composerActions"
+          :enable-voice="enableVoice"
+          :enable-attachments="enableAttachments"
+          :accept="composerAccept"
+          :max-file-size="composerMaxFileSize"
+          :voice-lang="voiceLang"
+          :send-icon="sendIcon"
+          :input-attrs="effectiveComposerInputAttrs"
+          @submit="onLandingSubmit"
+          @chip-click="onChipClick"
+          @action="emit('composer-action', $event)"
+          @attachments-rejected="emit('attachments-rejected', $event)"
+          @input-keydown="onComposerKeydown"
+        >
+          <template v-if="$slots['composer-suggestions'] || slashCommands != null" #suggestions="context">
+            <TSlashCommandMenu
+              v-if="slashOpen"
+              :id="slashMenuId"
+              :items="slashMenu.results.value"
+              :highlighted="slashMenu.highlighted.value"
+              :state="slashCommandsState"
+              :note="slashCommandsNote"
+              @pick="slashMenu.pick"
+              @highlight="(index) => (slashMenu.highlighted.value = index)"
+            />
+            <slot v-else name="composer-suggestions" v-bind="context" />
+          </template>
+          <template v-if="$slots['landing-plan']" #plan>
+            <slot name="landing-plan" />
+          </template>
+          <template v-if="$slots['landing-headline']" #headline>
+            <slot name="landing-headline" />
+          </template>
+          <template v-if="$slots['landing-subline']" #subline>
+            <slot name="landing-subline" />
+          </template>
+          <template v-if="$slots['landing-chips']" #chips>
+            <slot name="landing-chips" :chips="landingChips" />
+          </template>
+          <template v-if="composerNotice" #composer-notice>
+            <TUsageLimitNotice
+              variant="banner"
+              :tone="composerNotice.tone"
+              :window="composerNotice.window"
+              :resets-at="composerNotice.resetsAt"
+              :used-percent="composerNotice.usedPercent"
+              :dismissible="composerNotice.dismissible"
+              :draft-kept="composerNotice.draftKept"
+              @dismiss="dismissComposerNotice"
+              @expired="onComposerNoticeExpired"
+            />
+          </template>
+          <template v-if="$slots['composer-left']" #composer-left>
+            <slot name="composer-left" />
+          </template>
+          <template v-if="$slots['composer-right'] || showModelPicker" #composer-right>
+            <TComposerModelPicker
+              v-if="showModelPicker"
+              :models="models"
+              :model-value="model"
+              :effort="effort"
+              :disabled="isStreaming"
+              @update:model-value="emit('update:model', $event)"
+              @update:effort="emit('update:effort', $event)"
+            />
+            <slot name="composer-right" />
+          </template>
+          <template v-if="$slots['landing-footer']" #footer>
+            <slot name="landing-footer" />
+          </template>
+        </TLandingPage>
+
+        <div v-else ref="threadScrollRef" class="t-chat-app__thread t-ai-scroll">
           <div class="t-chat-app__thread-col">
           <!-- The top edge fades the way the bottom does under the composer. -->
           <div class="t-chat-app__top-fade" :class="{ 'is-visible': threadScrolled }" aria-hidden="true" />
@@ -1947,7 +2531,16 @@ function onArtifactWidthChange(w: number): void {
           <div v-if="loadingOlderMessages" class="t-chat-app__older" role="status">
             {{ t.chat.loadingOlder }}
           </div>
-          <div v-for="msg in messages" :key="msg.id" class="t-chat-app__message" :data-message-id="msg.id">
+          <div v-for="(msg, index) in messages" :key="msg.id" class="t-chat-app__message" :data-message-id="msg.id">
+            <!-- Two answers with no user message between them: the agent went on
+                 by itself after a background task. A mark between them, so the
+                 second does not read as the first shown twice. -->
+            <div
+              v-if="continuesAfterBackgroundTask(messages[index - 1], msg)"
+              class="t-wave-divider t-chat-app__continued"
+            >
+              <span>{{ t.chat.continuedAfterBackgroundTask }}</span>
+            </div>
             <slot name="message" :message="msg" :copied="copiedId === msg.id">
               <TThreadMessage
                 :message="msg"
@@ -1972,21 +2565,20 @@ function onArtifactWidthChange(w: number): void {
               </TThreadMessage>
             </slot>
           </div>
-          <!-- Room under a just-sent message, so it can sit at the top of the
-               view while its reply is still short (`useTurnAnchor`). -->
-          <div
-            v-if="turnAnchor.anchored.value"
-            class="t-chat-app__turn-reserve"
-            :style="{ height: turnReserve }"
-            aria-hidden="true"
-          />
+          <!-- The end of the conversation: what the app puts after the last message
+               (a mark that the session ended), scrolling with the messages. -->
+          <div v-if="$slots['thread-end']" class="t-chat-app__thread-end">
+            <slot name="thread-end" :narrow="effectiveIsMobile" />
+          </div>
           </template>
 
           <TThreadComposer
             ref="threadComposerRef"
             v-model="composerText"
             :placeholder="composerPlaceholderText"
-            :disabled="isStreaming || isOpeningThread"
+            :disabled="(isStreaming && !effectiveQueueWhileRunning) || isOpeningThread"
+            :running="isStreaming"
+            :queue-while-running="effectiveQueueWhileRunning"
             :compact="effectiveIsMobile"
             :composer-actions="composerActions"
             :enable-voice="enableVoice"
@@ -1994,10 +2586,28 @@ function onArtifactWidthChange(w: number): void {
             :accept="composerAccept"
             :max-file-size="composerMaxFileSize"
             :voice-lang="voiceLang"
+            :send-icon="sendIcon"
+            :input-attrs="effectiveComposerInputAttrs"
             @send="onComposerSend"
+            @stop="emit('stop')"
+            @queue="onComposerQueue"
             @action="emit('composer-action', $event)"
             @attachments-rejected="emit('attachments-rejected', $event)"
+            @input-keydown="onComposerKeydown"
           >
+            <template v-if="$slots['composer-suggestions'] || slashCommands != null" #suggestions="context">
+              <TSlashCommandMenu
+                v-if="slashOpen"
+                :id="slashMenuId"
+                :items="slashMenu.results.value"
+                :highlighted="slashMenu.highlighted.value"
+                :state="slashCommandsState"
+                :note="slashCommandsNote"
+                @pick="slashMenu.pick"
+                @highlight="(index) => (slashMenu.highlighted.value = index)"
+              />
+              <slot v-else name="composer-suggestions" v-bind="context" />
+            </template>
             <template v-if="showScrollToLatest" #above>
               <button
                 type="button"
@@ -2007,6 +2617,20 @@ function onArtifactWidthChange(w: number): void {
               >
                 <Icon icon="lucide:arrow-down" />
               </button>
+            </template>
+            <!-- Above the box, top to bottom: the app's own content, the queued messages, then the
+                 cards the agent waits on. The cards sit nearest the box: they are what needs an answer
+                 now, and on a phone they take the box's place. While a card waits the queue folds to its
+                 title line (any width: the band scrolls at 40% of the screen, and the card must not
+                 be pushed out of it); the user can open it again. -->
+            <template v-if="$slots['thread-composer-top'] || approvalQueue || messageQueue" #top>
+              <slot name="thread-composer-top" :narrow="effectiveIsMobile" />
+              <TQueuedMessages v-if="messageQueue" :queue="messageQueue" :folded="cardsWaiting" />
+              <TPendingApprovals v-if="approvalQueue" :queue="approvalQueue" :describe="describeApproval">
+                <template v-if="$slots['approval-card']" #card="card">
+                  <slot name="approval-card" v-bind="card" />
+                </template>
+              </TPendingApprovals>
             </template>
             <template v-if="composerNotice" #notice>
               <TUsageLimitNotice
@@ -2029,20 +2653,14 @@ function onArtifactWidthChange(w: number): void {
                 v-if="showModelPicker"
                 :models="models"
                 :model-value="model"
+                :effort="effort"
                 :disabled="isStreaming"
                 @update:model-value="emit('update:model', $event)"
+                @update:effort="emit('update:effort', $event)"
               />
-              <slot name="thread-composer-right">
-                <button
-                  v-if="isStreaming"
-                  type="button"
-                  class="t-chat-app__stop-btn"
-                  :aria-label="t.chat.stop"
-                  @click="emit('stop')"
-                >
-                  <Icon icon="lucide:square" />
-                </button>
-              </slot>
+              <!-- Stop is the composer's primary button while `isStreaming`
+                   (beside the queue button with `queueWhileRunning`). -->
+              <slot name="thread-composer-right" />
             </template>
             <!-- Rides inside the composer's sticky wrapper, so the fine print
                  stays put instead of scrolling away with the messages. On a
@@ -2058,7 +2676,7 @@ function onArtifactWidthChange(w: number): void {
         </div>
 
         <TArtifactPanel
-          v-if="artifact"
+          v-if="artifact && !showsLanding"
           :artifact="artifact"
           :files="artifactFiles"
           :view="artifactView"
@@ -2070,6 +2688,7 @@ function onArtifactWidthChange(w: number): void {
 
         <TAsidePanel
           v-if="asideShown"
+          class="t-chat-app__aside"
           :width="aside.width.value"
           :min-width="aside.minWidth"
           :max-width="aside.maxWidth"
@@ -2084,6 +2703,7 @@ function onArtifactWidthChange(w: number): void {
             :set-tab="aside.setTab"
             :close="aside.hide"
             :narrow="effectiveIsMobile"
+            :full-height="asideFullHeightLayout"
             :thread-id="activeThreadId"
           />
         </TAsidePanel>
@@ -2099,6 +2719,7 @@ function onArtifactWidthChange(w: number): void {
       :sections="effectiveSettingsSections"
       :title="settingsTitleText"
       :searchable="settingsSearchable"
+      :before-close="settingsBeforeClose"
       :show-account="settingsShowAccount"
       :account-name="accountName"
       :account-subtitle="accountSubtitle || accountEmail"
@@ -2112,7 +2733,7 @@ function onArtifactWidthChange(w: number): void {
            without Tnzi.Identity can honestly show. -->
       <template #account>
         <slot name="settings-account">
-          <TAccountSettings v-if="accountSettings" :controller="accountSettings" />
+          <TAccountSettings v-if="accountSettings" :controller="accountSettings" :deletion="accountDeletion ?? true" />
           <div v-else class="t-chat-app__account">
             <div class="t-chat-app__account-card">
               <TAvatar
@@ -2240,6 +2861,11 @@ function onArtifactWidthChange(w: number): void {
         </slot>
       </template>
 
+      <!-- Above the open section's name (a notice that concerns every section). -->
+      <template v-if="$slots['settings-lead']" #lead>
+        <slot name="settings-lead" :section="settingsSection" />
+      </template>
+
       <!-- Pass-through for custom sections (any id not in the default set) -->
       <template
         v-for="section in customSettingsSections"
@@ -2256,8 +2882,12 @@ function onArtifactWidthChange(w: number): void {
       v-model="commandPaletteOpen"
       :actions="commandActions"
     />
+
+    <!-- The app's one confirmation dialog and its notes: what `useConfirm()`
+         and `useToast()` show, from any page in the shell. -->
+    <TConfirmHost />
+    <TToastHost :narrow="effectiveIsMobile" />
   </div>
-  </NConfigProvider>
 </template>
 
 <style scoped>
@@ -2348,7 +2978,7 @@ function onArtifactWidthChange(w: number): void {
 /* The wordmark keeps the line the name's text occupied (`1lh`) and sits in the
    middle of it, so the mark beside it and everything below stay put. Iconify
    draws it 1em high (the name's font size) and as wide as its viewBox; a narrow
-   sidebar shrinks it rather than pushing it under the collapse button. */
+   sidebar shrinks it rather than pushing the header actions out of the row. */
 .t-chat-app__brand-wordmark {
   display: flex;
   align-items: center;
@@ -2358,25 +2988,84 @@ function onArtifactWidthChange(w: number): void {
   display: block;
   max-width: 100%;
 }
-.t-chat-app__brand-collapse {
+/* The logo tile is the collapse button. At rest it shows the mark; on hover
+   or keyboard focus the panel icon takes its place inside the same box, so the
+   swap shifts nothing. Its box reads the icon-button token (touch size on a
+   narrow screen) and the 32px tile sits centred in it. */
+.t-chat-app__brand-toggle {
+  position: relative;
   width: var(--tnzi-ai-icon-button-size, 32px);
   height: var(--tnzi-ai-icon-button-size, 32px);
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--tnzi-ai-text-secondary);
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
   flex-shrink: 0;
   transition: background var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing),
               color var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
 }
-.t-chat-app__brand-collapse:hover {
-  background: var(--tnzi-ai-hover);
+.t-chat-app__brand-toggle .t-chat-app__brand-mark {
+  transition: opacity var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
+}
+.t-chat-app__brand-toggle-icon {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 18px;
+  height: 18px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
+}
+.t-chat-app__brand-toggle:focus-visible {
+  background: var(--tnzi-ai-sidebar-hover);
   color: var(--tnzi-ai-text);
+  outline: var(--tnzi-ai-focus-outline);
+  outline-offset: 1px;
+}
+.t-chat-app__brand-toggle:focus-visible .t-chat-app__brand-mark {
+  opacity: 0;
+}
+.t-chat-app__brand-toggle:focus-visible .t-chat-app__brand-toggle-icon {
+  opacity: 1;
+}
+/* Hover swaps only where the primary pointer can hover. A touch browser keeps
+   `:hover` on the last tapped spot, and the top bar's open button sits right
+   where this toggle lands, so an unguarded rule opened the drawer showing the
+   panel icon instead of the logo. On touch the logo stays the logo; tapping it
+   still closes the drawer. */
+@media (hover: hover) {
+  .t-chat-app__brand-toggle:hover {
+    background: var(--tnzi-ai-sidebar-hover);
+    color: var(--tnzi-ai-text);
+  }
+  .t-chat-app__brand-toggle:hover .t-chat-app__brand-mark {
+    opacity: 0;
+  }
+  .t-chat-app__brand-toggle:hover .t-chat-app__brand-toggle-icon {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-chat-app__brand-toggle,
+  .t-chat-app__brand-toggle .t-chat-app__brand-mark,
+  .t-chat-app__brand-toggle-icon {
+    transition: none;
+  }
+}
+/* The product's own controls at the header's right end (a mode switch, for
+   one). The name before it takes the free width, so this sits flush right. */
+.t-chat-app__brand-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* The nav owns its own row geometry (`.t-sidebar-nav__item` in TSidebarNav).
@@ -2409,7 +3098,7 @@ function onArtifactWidthChange(w: number): void {
               color var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
 }
 .t-chat-app__foot-btn:hover {
-  background: var(--tnzi-ai-hover);
+  background: var(--tnzi-ai-sidebar-hover);
   color: var(--tnzi-ai-text);
 }
 
@@ -2420,14 +3109,21 @@ function onArtifactWidthChange(w: number): void {
   display: flex;
   flex-direction: column;
 }
+/* The window's own controls (a frameless desktop window's minimise / maximise
+   / close) may sit over the top right corner: the bar keeps clear of
+   `--tnzi-ai-window-inset-right`. When a full-height panel is open the corner
+   is the panel's, and the bar keeps its plain gutter. */
 .t-chat-app__topbar {
   display: flex;
   align-items: center;
   gap: 8px;
   height: 52px;
-  padding: 0 16px;
+  padding: 0 calc(16px + var(--tnzi-ai-window-inset-right, 0px)) 0 16px;
   flex-shrink: 0;
   background: transparent;
+}
+.t-chat-app__topbar--corner-free {
+  padding-right: 16px;
 }
 .t-chat-app__topbar-toggle {
   flex-shrink: 0;
@@ -2476,23 +3172,44 @@ function onArtifactWidthChange(w: number): void {
 }
 
 /* Consumer-owned page area. Scrolls on its own so a long page does not push
-   the shell around, and imposes no padding: the page owns its own layout. */
+   the shell around, and imposes no padding: the page owns its own layout.
+   The scrollbar's room is kept whether or not the page overflows, so moving
+   between a long page and a short one does not slide the content and its
+   toolbar sideways by the bar's width. Where scrollbars overlay the content
+   (iOS, macOS by default) the gutter is zero and nothing is reserved. */
 .t-chat-app__view {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   position: relative;
+}
+/* A page that fills the area and scrolls inside itself (`useChatViewFill`): the area never
+   scrolls, so it keeps no room for a bar that would never show. `hidden` rather than `clip`, so
+   the scroll memory can still set the area's position while the class comes and goes. */
+.t-chat-app__view--fill {
+  overflow: hidden;
+  scrollbar-gutter: auto;
 }
 
 /* The editable title owns the top bar's free room and nothing else: basis 0,
    so it never takes room from the controls beside it (an auto basis let a long
    title shrink them along with itself, measured at 390px: 32px action buttons
-   squeezed to 18px), and a grow weight that dwarfs the spacer's, so the room
-   left over is the title's. Inside, the title (or its rename field) keeps the
-   width of its text and ellipsises or scrolls past that. */
-.t-chat-app__thread-title {
+   squeezed to 18px), and a grow weight that dwarfs the spacer's. Up to a cap
+   (520px, at most 55% of the bar): past it the title ellipsises, so however
+   long it still reads as a title and the rest of the bar stays empty. Inside,
+   the title (or its rename field) keeps the width of its text. Scoped under
+   the bar so the cap wins over the title component's own `max-width: 100%`. */
+.t-chat-app__topbar .t-chat-app__thread-title {
   flex: 1000 1 0%;
   min-width: 0;
+  max-width: min(520px, 55%);
+}
+/* A plain title (a page of the product's) is as wide as its text, to the same cap. */
+.t-chat-app__topbar .t-chat-app__workspace-switcher {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(520px, 55%);
 }
 .t-chat-app__workspace-switcher > span {
   overflow: hidden;
@@ -2503,7 +3220,6 @@ function onArtifactWidthChange(w: number): void {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
   padding: 6px 10px;
   border-radius: 8px;
   font-size: 15px;
@@ -2529,6 +3245,12 @@ function onArtifactWidthChange(w: number): void {
   min-width: 0;
   width: 100%;
   overflow-y: auto;
+  /* Room for the scrollbar on both edges, whether or not the conversation
+     overflows yet: the centred column (and the composer in it) does not move
+     when a growing reply first brings the bar in, and stays centred on the
+     same axis as the landing page it replaces. Zero where scrollbars overlay
+     the content. */
+  scrollbar-gutter: stable both-edges;
   /* Reaching either end of the conversation does not hand the drag on to the
      page (on iOS that moved the whole shell, composer included). */
   overscroll-behavior: contain;
@@ -2538,6 +3260,17 @@ function onArtifactWidthChange(w: number): void {
      the page and, laid out deep in the scrolled content, grew the document: the
      page got its own scrollbar and the shell slid up when it was scrolled. */
   position: relative;
+}
+/* The mark before an answer the agent went on with by itself (a wavy line with
+   words, `.t-wave-divider`): 14px of air on each side, inside the message's
+   own box so the column's gap above it stays as it is. */
+.t-chat-app__continued {
+  margin: 14px 0;
+}
+/* A wavy mark the app ends the conversation with sits as far from the last
+   message as the one between two answers. */
+.t-chat-app__thread-end > :slotted(.t-wave-divider) {
+  margin: 14px 0;
 }
 .t-chat-app__older {
   padding: 4px 0 12px;
@@ -2572,12 +3305,26 @@ function onArtifactWidthChange(w: number): void {
 .t-chat-app__workspace--has-artifact .t-chat-app__thread-col {
   max-width: 620px;
 }
+/* Beside the panel the conversation keeps a readable width (480px, or 60% of
+   the area when that is less) and the panel gives way first. */
+.t-chat-app__workspace--has-aside .t-chat-app__thread,
+.t-chat-app__workspace--has-aside .t-chat-app__landing {
+  min-width: min(480px, 60%);
+}
+.t-chat-app__workspace--has-aside .t-chat-app__aside {
+  flex-shrink: 1;
+}
 /* Narrow screen (below `sidebarMobileBreakpoint`): the desktop gutters around
    the conversation and in the top bar are decorative there and cost a phone
    width and lines. Nothing interactive changes size. */
 .t-chat-app--narrow .t-chat-app__topbar {
   height: 48px;
-  padding: 0 8px;
+  padding: 0 calc(8px + var(--tnzi-ai-window-inset-right, 0px)) 0 8px;
+}
+/* A card waits on a phone: the composer keeps only its bar, so the cards are not squeezed off the screen. */
+.t-chat-app--awaiting :deep(.t-thread-composer__input),
+.t-chat-app--awaiting :deep(.t-thread-composer__files) {
+  display: none;
 }
 .t-chat-app--narrow .t-chat-app__thread-col {
   --t-chat-app-col-pad-top: 12px;
@@ -2604,12 +3351,6 @@ function onArtifactWidthChange(w: number): void {
   transition: opacity var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
 }
 .t-chat-app__top-fade.is-visible { opacity: 1; }
-/* The reserve under a just-sent message. It cancels the column gap before it,
-   so a reserve of 0 adds nothing. */
-.t-chat-app__turn-reserve {
-  flex-shrink: 0;
-  margin-top: calc(-1 * var(--t-chat-app-col-gap));
-}
 /* "Scroll to the latest": floats above the composer while the view is not at
    the end of the conversation. */
 .t-chat-app__to-latest {
@@ -2636,6 +3377,75 @@ function onArtifactWidthChange(w: number): void {
 .t-chat-app--narrow .t-chat-app__to-latest {
   width: 40px;
   height: 40px;
+}
+
+/* The panel's content reads the window corner it has to keep clear of; only a
+   full-height panel reaches the top of the window (below). */
+.t-chat-app__aside {
+  --tnzi-ai-aside-inset-top: 0px;
+  --tnzi-ai-aside-inset-right: 0px;
+}
+
+/* ─── Full-height aside (`asideFullHeight`) ────────────────────────────────
+   Three columns: the conversation, the artifact pane (empty when there is
+   none) and the panel. The top bar spans the first two; the panel spans both
+   rows. The workspace's own box steps aside (`display: contents`) so its
+   children are the grid's, without moving the panel in the DOM: its content
+   is not remounted when the screen crosses the narrow breakpoint. The panel's
+   column is its width (0 while closed), capped at 70% of the area as the
+   panel caps itself in the workspace: the cap has to be the column's, since a
+   fixed-width item sizes an auto or fit-content column to its full width and a
+   percentage on the item would resolve against that column. The conversation
+   keeps a readable width first (480px, or 60% of the area when that is less):
+   the panel's column gives way to it. Beside the landing page the panel is
+   capped at 30% (`--tnzi-ai-aside-landing-max-share`): what a start page shows
+   beside itself (a project's files) is a list, and the page is the point. The
+   area clips what the workspace clipped (the artifact pane's bottom margin
+   past its full height). */
+.t-chat-app__main--aside-full-height {
+  display: grid;
+  grid-template-columns:
+    minmax(min(480px, 60%), 1fr)
+    auto
+    minmax(0, min(var(--t-chat-app-aside-width, 0px), var(--tnzi-ai-aside-max-share, 70%)));
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+.t-chat-app__main--aside-full-height.t-chat-app__main--landing {
+  grid-template-columns:
+    minmax(min(480px, 60%), 1fr)
+    auto
+    minmax(0, min(var(--t-chat-app-aside-width, 0px), var(--tnzi-ai-aside-landing-max-share, 30%)));
+}
+.t-chat-app__main--aside-full-height > .t-chat-app__topbar {
+  grid-column: 1 / 3;
+  grid-row: 1;
+  min-width: 0;
+}
+.t-chat-app__main--aside-full-height > .t-chat-app__workspace {
+  display: contents;
+}
+.t-chat-app__main--aside-full-height .t-chat-app__thread,
+.t-chat-app__main--aside-full-height .t-chat-app__landing {
+  grid-column: 1;
+  grid-row: 2;
+  min-height: 0;
+}
+.t-chat-app__main--aside-full-height .t-chat-app__artifact-slot {
+  grid-column: 2;
+  grid-row: 2;
+  min-height: 0;
+}
+.t-chat-app__main--aside-full-height .t-chat-app__aside {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  min-height: 0;
+  max-width: 100%;
+  /* The panel's top right corner is the window's: what the panel draws there
+     (its own head, a row of view icons) keeps clear of the window's controls
+     by reading these two (0 when the panel is not full height). */
+  --tnzi-ai-aside-inset-top: var(--tnzi-ai-window-inset-top, 0px);
+  --tnzi-ai-aside-inset-right: var(--tnzi-ai-window-inset-right, 0px);
 }
 
 /* ─── Artifact panel slot ──────────────────────────────────────────────── */
@@ -2765,20 +3575,4 @@ function onArtifactWidthChange(w: number): void {
   color: var(--tnzi-ai-text);
 }
 
-/* ─── Stop button (composer right slot, streaming-only) ────────────────── */
-.t-chat-app__stop-btn {
-  width: 30px;
-  height: 30px;
-  border: 1px solid var(--tnzi-ai-border);
-  background: var(--tnzi-ai-surface);
-  color: var(--tnzi-ai-text);
-  border-radius: 999px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  transition: background var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
-}
-.t-chat-app__stop-btn:hover { background: var(--tnzi-ai-hover); }
 </style>

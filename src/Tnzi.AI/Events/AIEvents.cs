@@ -83,6 +83,22 @@ public class ThreadDeletedEvent : EventBase
 }
 
 /// <summary>
+/// 一条不在列表里的线程（<see cref="ThreadListing.UntilUserMessage"/>）因为主人在里面说了话而进了主人的对话列表时发布，
+/// 在写下之后、每次转换恰好一条。服务端代码经 <c>IAgentThreadInternalService.SetListingAsync</c> 改的不发（调用方自己知道）。
+/// </summary>
+/// <remarks>
+/// 打开着的页面在自己这一轮之后会重读列表；别的页面 / 设备要看到它，应用把这个事件推给主人的客户端，
+/// 与推「线程有了新活动」的做法相同（这一轮本身也是一次新活动）。
+/// </remarks>
+public class ThreadListedEvent : EventBase
+{
+    /// <summary>Thread ID</summary>
+    public Guid ThreadId { get; set; }
+    /// <summary>The thread's owner, who wrote in it</summary>
+    public Guid UserId { get; set; }
+}
+
+/// <summary>
 /// Guardrail 拦截事件 - 当输入或输出被 Guardrail 拒绝时发布。
 /// 可用于安全监控、审计、报表等。
 /// </summary>

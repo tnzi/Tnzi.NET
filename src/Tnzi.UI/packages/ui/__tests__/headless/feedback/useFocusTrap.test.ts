@@ -103,6 +103,19 @@ describe('useFocusTrap', () => {
     wrapper.unmount()
   })
 
+  it('wraps Shift+Tab from the root itself to the last focusable', async () => {
+    const Host = createHost()
+    const wrapper = mount(Host, { props: { active: true }, attachTo: document.body })
+    await flushFocus()
+    const root = wrapper.find('[data-testid="root"]').element as HTMLElement
+    root.tabIndex = -1
+    root.focus()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(wrapper.find('[data-testid="last"]').element)
+    wrapper.unmount()
+  })
+
   it('restores focus to the previously focused element on deactivation', async () => {
     const Host = createHost()
     const wrapper = mount(Host, { props: { active: true }, attachTo: document.body })

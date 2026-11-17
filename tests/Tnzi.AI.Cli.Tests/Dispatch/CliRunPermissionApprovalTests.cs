@@ -302,6 +302,79 @@ public class CliRunPermissionApprovalTests : IntegratedTestBase<CliBudgetDbConte
         (await RequestRowAsync(requestId)).Status.ShouldBe(CliPermissionStatus.Allowed);
     }
 
+    // ── 列出还在等的请求 ─────────────────────────────────────────────────────
+
+    /// <summary>刷新之后的界面靠它找回卡片：请求事件原样列出，回答一落库就不再列出（哪怕还没写给 CLI），运行结束之后也不列。</summary>
+    [Fact]
+    public async Task TheWaitingRequestIsListed_UntilItIsAnswered()
+    {
+        var remote = Remote(handle: null, onAnswer: _ => [ToolResult, Finished]);
+        var host = await CreateHostAsync(remote);
+        var run = await SeedClaimedRunAsync(attended: true);
+
+        var execution = CreateExecutor(host).ExecuteAsync(run.Id, CancellationToken.None);
+        var requestId = CliRunMessageConverter.DeserializePermission((await WaitForRequestAsync(run.Id)).PermissionJson)!.RequestId!.Value;
+
+        var listed = await CreateDispatcher().GetPendingPermissionsAsync(run.Id);
+        listed.Succeeded.ShouldBeTrue(listed.Message);
+        var waiting = listed.Data.ShouldHaveSingleItem();
+        waiting.Type.ShouldBe(CliAgentEventType.PermissionRequest);
+        waiting.Tool.ShouldBe("Bash");
+        waiting.CallId.ShouldBe("toolu_1");
+        waiting.Content.ShouldBe("Remove the build directory");
+        waiting.Input.ShouldNotBeNull();
+        waiting.Input!["command"]!.ToString().ShouldBe("rm -rf build");
+        waiting.Permission!.RequestId.ShouldBe(requestId);
+        waiting.Permission.Status.ShouldBe(CliPermissionStatus.Pending);
+        waiting.Permission.ExpiresAt!.Value.ShouldBeGreaterThan(DateTime.UtcNow);
+        waiting.Permission.Options.Select(o => o.Id).ShouldBe([CliPermissionOptionKinds.AllowOnce, CliPermissionOptionKinds.RejectOnce]);
+
+        (await CreateDispatcher().AnswerPermissionAsync(
+            run.Id, requestId, new CliPermissionAnswerDto { OptionId = CliPermissionOptionKinds.AllowOnce })).Succeeded.ShouldBeTrue();
+        (await CreateDispatcher().GetPendingPermissionsAsync(run.Id)).Data.ShouldBeEmpty();
+
+        await execution.WaitAsync(TestTimeout);
+        var after = await CreateDispatcher().GetPendingPermissionsAsync(run.Id);
+        after.Succeeded.ShouldBeTrue();
+        after.Data.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task PendingRequests_AreListedOnlyToWhoeverCanSeeTheRun_AndNotOnceTheyExpired()
+    {
+        var (runId, requestId) = await SeedWaitingRequestAsync(SomeoneElse);
+        await SeedRequestEventAsync(runId, requestId);
+
+        var stranger = await CreateDispatcher().GetPendingPermissionsAsync(runId);
+        stranger.Code.ShouldBe(404);
+        stranger.ErrorCode.ShouldBe(ErrorCodes.CliRunNotFound);
+
+        // 能看（ai.cliRun.view）就能列出：列出的是流上本来就看得见的事件
+        _permissionChecker!.Setup(p => p.IsGrantedAsync(CliPermissions.CliRunView)).ReturnsAsync(true);
+        var viewer = await CreateDispatcher().GetPendingPermissionsAsync(runId);
+        viewer.Data.ShouldHaveSingleItem().Permission!.RequestId.ShouldBe(requestId);
+
+        // 过了期限还没被执行器改成超时的，也已经不能回答：不列
+        await DbContext.Set<CliRunPermissionRequest>().IgnoreQueryFilters().Where(r => r.Id == requestId)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.ExpiresAt, DateTime.UtcNow.AddSeconds(-1)));
+        (await CreateDispatcher().GetPendingPermissionsAsync(runId)).Data.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task AFinishedRun_ListsNothing_EvenWithARowLeftPending()
+    {
+        var (runId, requestId) = await SeedWaitingRequestAsync(TestHelper.DefaultTestUserId);
+        await SeedRequestEventAsync(runId, requestId);
+        (await CreateDispatcher().GetPendingPermissionsAsync(runId)).Data.ShouldHaveSingleItem();
+
+        await DbContext.Set<CliRun>().IgnoreQueryFilters().Where(r => r.Id == runId)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.Status, CliRunStatus.Completed));
+
+        var listed = await CreateDispatcher().GetPendingPermissionsAsync(runId);
+        listed.Succeeded.ShouldBeTrue();
+        listed.Data.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task AnAnswerMustBeOneOfTheOfferedOptions_AndCountsOnlyOnce()
     {
@@ -458,6 +531,33 @@ public class CliRunPermissionApprovalTests : IntegratedTestBase<CliBudgetDbConte
         await DbContext.SaveChangesAsync();
         DbContext.ChangeTracker.Clear();
         return (run.Id, request.Id);
+    }
+
+    /// <summary>请求行对应的那条请求事件（执行器会在同一个序号上落库的那条）。</summary>
+    private async Task SeedRequestEventAsync(Guid runId, Guid requestId)
+    {
+        var permission = new CliAgentPermission
+        {
+            RequestId = requestId,
+            Options =
+            [
+                new CliPermissionOption(CliPermissionOptionKinds.AllowOnce, "Allow once", CliPermissionOptionKinds.AllowOnce),
+                new CliPermissionOption(CliPermissionOptionKinds.RejectOnce, "Deny", CliPermissionOptionKinds.RejectOnce)
+            ],
+            ExpiresAt = DateTime.UtcNow.AddMinutes(10)
+        };
+        DbContext.Set<CliRunMessage>().Add(new CliRunMessage
+        {
+            RunId = runId,
+            Sequence = 3,
+            Type = CliAgentEventType.PermissionRequest,
+            Tool = "Bash",
+            CallId = "toolu_1",
+            Content = "Remove the build directory",
+            PermissionJson = JsonSerializer.Serialize(permission, TnziJsonDefaults.Options)
+        });
+        await DbContext.SaveChangesAsync();
+        DbContext.ChangeTracker.Clear();
     }
 
     private async Task<CliRunMessage> WaitForRequestAsync(Guid runId)

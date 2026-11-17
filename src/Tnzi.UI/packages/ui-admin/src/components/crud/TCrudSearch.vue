@@ -59,7 +59,7 @@ import { computed, ref, type Ref } from 'vue'
 import { NButton, NCard, NCollapseTransition, NInput } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TCrudSearchAdvanced from './TCrudSearchAdvanced.vue'
-import type { FormSchemaItem } from '@tnzi/ui'
+import type { FormSchemaItem } from '../forms/TSchemaForm'
 
 /**
  * Minimum slice of `UseCrudPageReturn` that the search panel needs.

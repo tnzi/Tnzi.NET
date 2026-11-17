@@ -41,9 +41,22 @@ public class CliRunExecutor
     private readonly CliRunFinalizer _finalizer;
     private readonly ICliUsageLimitHandler? _usageLimitHandler;
     private readonly IReadOnlyList<ICliLaunchProfileContributor> _profileContributors;
+    private readonly CliRunHandoffs? _handoffs;
+    private readonly IEventBus? _eventBus;
+    private readonly IHostApplicationLifetime? _applicationLifetime;
+
+    // 这次运行在等后台任务、登记了可以把进程交给同线程的下一条运行（§6.18）；交出去的进程，收尾时（落终态之后）交给来取的那条
+    private CliWaitingRun? _waiting;
+    private CliLiveSession? _handoff;
 
     // 这次执行的启动档案：第一次起进程时问一次，续接被拒、换登录接着跑这些重试沿用它
     private CliLaunchProfile? _launchProfile;
+
+    // 这次执行布置工作区时签发的回写凭据原文（它在这次起的进程的 MCP 配置里）：进程交出去时随它交给接手的运行
+    private string? _writeBackToken;
+
+    // 运行中途结束的那几轮里最后写进线程的回答：最后一轮什么都没说（等后台任务到了上限）时，运行记录上的回答指向它
+    private Guid? _lastTurnMessageId;
 
     // 这次执行解析出的绑定、运行时、执行目标与身份：收尾时删会话记录要用
     private CliRunSetup? _setup;
@@ -81,7 +94,9 @@ public class CliRunExecutor
         IEventBus? eventBus = null,
         ICliUsageLimitHandler? usageLimitHandler = null,
         IEnumerable<ICliLaunchProfileContributor>? profileContributors = null,
-        IRepository<CliRunPermissionRequest, Guid>? permissionRepository = null)
+        IRepository<CliRunPermissionRequest, Guid>? permissionRepository = null,
+        CliRunHandoffs? handoffs = null,
+        IHostApplicationLifetime? applicationLifetime = null)
     {
         _runRepository = Check.NotNull(runRepository);
         _messageRepository = Check.NotNull(messageRepository);
@@ -111,10 +126,15 @@ public class CliRunExecutor
         _threadRepository = threadRepository;
         // 终态一律经它写：条件写入 + 完成转换的一方发布结束事件。总线缺省只为直接构造（测试），那时只写不发
         _finalizer = new CliRunFinalizer(runRepository, eventBus, logger, permissionRepository);
+        _eventBus = eventBus;
         // 缺省：账号到了上限，这一轮就以 UsageLimit 结束（框架不知道还有别的账号）
         _usageLimitHandler = usageLimitHandler;
         // 缺省：档案就是执行目标给的那一份
         _profileContributors = profileContributors?.ToList() ?? [];
+        // 缺省只为直接构造（测试）：等后台任务的运行不把进程交给下一条，下一条照旧排在等待后面
+        _handoffs = handoffs;
+        // 缺省只为直接构造（测试）：宿主是否在停机只看执行器的令牌
+        _applicationLifetime = applicationLifetime;
     }
 
     /// <summary>执行一条运行，直到终态。</summary>
@@ -230,18 +250,46 @@ public class CliRunExecutor
                 target = setup.Target;
                 _setup = setup;
 
-                await ResolveResumePointerAsync(run, setup, cancellationToken);
-
-                workspace = await PrepareWorkspaceAsync(run, setup, options, cancellationToken);
-
-                if (!await MarkRunningAsync(run, workspace, cancellationToken))
+                // 同线程的上一条运行在这个副本上等后台任务：接过它的进程（后台任务照常跑），这一轮写进同一个 stdin，而不是排在等待后面
+                if (await TakeOverWaitingProcessAsync(run, setup, cancellationToken) is { } live)
                 {
-                    return;
+                    workspace = live.Workspace;
+                    var continued = await ContinueOnProcessAsync(run, setup, live, options, usage, cancellationToken);
+                    if (continued is null)
+                    {
+                        return;
+                    }
+
+                    attempt = continued;
+                    if (attempt.ContinuationRefused)
+                    {
+                        // 进程接不了这一轮，已经结束：它的工作区像一轮结束时那样收尾，这条运行像平常起进程时一样布置自己的工作区
+                        //（自己的回写凭据与 MCP 配置，执行目标与 contributor 按它重答启动档案），另起进程续接同一会话
+                        run.ProviderSessionId = attempt.SessionId ?? live.SessionId;
+                        run.MessageCount = attempt.Sequence;
+                        await CleanupWorkspaceAsync(target, live.Workspace, removeAll: false);
+                        workspace = null;
+                        _launchProfile = null;
+
+                        workspace = await PrepareWorkspaceAsync(run, setup, options, cancellationToken);
+                        attempt = await RunProcessAsync(run, setup, workspace, options, usage, cancellationToken);
+                    }
                 }
+                else
+                {
+                    await ResolveResumePointerAsync(run, setup, cancellationToken);
 
-                _signalHub.Signal(runId);
+                    workspace = await PrepareWorkspaceAsync(run, setup, options, cancellationToken);
 
-                attempt = await RunProcessAsync(run, setup, workspace, options, usage, cancellationToken);
+                    if (!await MarkRunningAsync(run, workspace, cancellationToken))
+                    {
+                        return;
+                    }
+
+                    _signalHub.Signal(runId);
+
+                    attempt = await RunProcessAsync(run, setup, workspace, options, usage, cancellationToken);
+                }
             }
 
             // 接回来的运行没认出工作区时，重试照样在那个目录里起进程，只是没有受管文件可以刷新
@@ -285,6 +333,7 @@ public class CliRunExecutor
                 break;
             }
 
+            _handoff = attempt.Handoff;
             await CompleteAsync(run, setup, attempt, cancellationToken);
         }
         catch (CliRunDetachedException)
@@ -297,6 +346,21 @@ public class CliRunExecutor
         {
             // 执行宿主眼下连不上（代理还没连回来）：稍后再接，到期限还接不上才算中断
             await RetryReattachLaterAsync(run, ex.Message, options);
+        }
+        catch (CliHostUnavailableException ex) when (IsHostStopping(cancellationToken))
+        {
+            // 服务端在停机：执行宿主连不上是停机本身造成的（消费方的远程通道随服务端一起关），不是这次运行的错。
+            // 与停机时正在跑、接不回来的进程同样处置：打回队列交给下一个宿主；有人要求过取消则落取消。
+            _logger.LogInformation(ex,
+                "CLI run {RunId}: its execution host became unavailable while this server is shutting down; releasing the run to the queue", run.Id);
+            if (await IsCancelRequestedAsync(run.Id))
+            {
+                await MarkCancelledAsync(run);
+            }
+            else
+            {
+                await ReleaseToQueueAsync(run);
+            }
         }
         catch (CliExecutableNotFoundException ex)
         {
@@ -342,12 +406,15 @@ public class CliRunExecutor
         }
         finally
         {
+            // 等后台任务的这条运行已经落了终态：进程交给来取它的那条运行（工作区随进程走，这里不收尾）；没能交出时进程结束、照常收尾
+            var handedOver = await HandOverAsync(run);
+
             // 线程在这次运行期间被删除：删除事件的处理器删不得执行中的运行（见 CliThreadCleanupHandler），收尾由这里做。
             // 工作区整个删掉，运行记录与事件流（含处理器之后才写下的那些）一起删掉；用量已经按真实花费记过、配额照常结算。
             // 进程留在宿主上接着跑时，工作区与运行记录都还在用：收尾等接回来的那一次执行跑完再做。
             var threadDeleted = !detached && await IsThreadDeletedAsync(run);
 
-            if (!detached && target is not null && workspace is not null)
+            if (!detached && !handedOver && target is not null && workspace is not null)
             {
                 await CleanupWorkspaceAsync(target, workspace, removeAll: threadDeleted);
             }
@@ -371,6 +438,184 @@ public class CliRunExecutor
 
             _signalHub.Signal(runId);
         }
+    }
+
+    /// <summary>
+    /// 同线程的上一条运行在这个副本上等后台任务时，等它在两轮之间停下、交出进程（§6.18）。没有这样的运行、或者它没能交出时返回 null（照常起进程）。
+    /// </summary>
+    /// <remarks>
+    /// 只在第一次执行时取（重新执行的运行已经有自己的工作区与续接点）。等着的那条正在回答任务通知开出的一轮时等它答完：
+    /// 两轮从不同时进行，这一轮也从不与它在同一个工作区里并发。
+    /// </remarks>
+    private async Task<CliLiveSession?> TakeOverWaitingProcessAsync(CliRun run, CliRunSetup setup, CancellationToken cancellationToken)
+    {
+        if (_handoffs is null || run.ThreadId is not { } threadId || run.StartedAt is not null
+            || ResolveWorkDirectoryPolicy(run, setup).Mode == CliWorkDirectoryMode.PerRun)
+        {
+            return null;
+        }
+
+        var live = await _handoffs.TakeAsync(threadId, run.Id, cancellationToken);
+        if (live is not null)
+        {
+            _logger.LogInformation(
+                "CLI run {RunId} continues on the process of the previous run of thread {ThreadId}, which was waiting on background tasks",
+                run.Id, threadId);
+        }
+
+        return live;
+    }
+
+    /// <summary>
+    /// 在接过来的进程上跑这一轮：续接点就是那个进程的会话，工作区是它的工作区，回写凭据是它 MCP 配置里那一份。
+    /// 进程接不了这一轮（启动方式不同、它的最后一轮恰好收尾）时返回 <see cref="CliAttempt.ContinuationRefused"/>（进程已结束），
+    /// 由调用方布置这条运行自己的工作区、另起进程续接同一会话。不该再往下跑（已被取消）时返回 null，进程已结束。
+    /// </summary>
+    private async Task<CliAttempt?> ContinueOnProcessAsync(
+        CliRun run, CliRunSetup setup, CliLiveSession live, CliAgentOptions options, UsageHold? usage, CancellationToken cancellationToken)
+    {
+        try
+        {
+            run.ProviderSessionId = live.SessionId;
+            run.ResumeAtEntryId = null;
+            run.ResumeExpected = !string.IsNullOrWhiteSpace(live.SessionId);
+
+            if (!await MarkRunningAsync(run, live.Workspace, cancellationToken))
+            {
+                await live.EndAsync();
+                return null;
+            }
+
+            _signalHub.Signal(run.Id);
+
+            await TakeOverWriteBackChannelAsync(run, setup, live, options);
+            return await RunProcessAsync(run, setup, live.Workspace, options, usage, cancellationToken, live: live);
+        }
+        catch when (!live.Adopted)
+        {
+            // 还没接手就出错（取消、写库失败）：进程没人管了，连同后台任务结束掉
+            await live.EndAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 接过进程时，在问启动档案、比较启动方式之前：进程 MCP 配置里那份回写凭据从此是这条运行的（哈希挪过来），
+    /// 执行目标也像布置工作区时那样，经这条运行的 MCP 配置组合听到这条回写通道。
+    /// </summary>
+    /// <remarks>
+    /// 执行目标可以从回写条目（<see cref="ICliHostTarget.CreateWriteBackServerEntry"/>）认出它在为哪条运行起进程，
+    /// 并据此回答启动档案（例如按运行给的环境变量）。只在布置工作区时组合的话，接手的运行问到的档案缺了这些，
+    /// 与进程起来时的启动方式永远对不上，进程（连同后台任务）每次都被结束，另起的进程也缺着它们。
+    /// 交出它的那条已经落了终态（终态写入清掉了它那一行上的哈希），凭据只认进行中的运行，所以不会两条运行同时认它。
+    /// 进程最终没接着用时，另起进程前布置的工作区签发这条运行自己的新凭据，挪过来的这份随之作废。
+    /// </remarks>
+    private async Task TakeOverWriteBackChannelAsync(CliRun run, CliRunSetup setup, CliLiveSession live, CliAgentOptions options)
+    {
+        if (live.WriteBackTokenHash is { } hash)
+        {
+            var expiresAt = live.WriteBackTokenExpiresAt;
+            await _runRepository.AcrossTenants()
+                .Where(r => r.Id == run.Id && r.Status == CliRunStatus.Running)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(r => r.WriteBackTokenHash, hash)
+                    .SetProperty(r => r.WriteBackTokenExpiresAt, expiresAt), CancellationToken.None);
+            run.WriteBackTokenHash = hash;
+            run.WriteBackTokenExpiresAt = expiresAt;
+        }
+
+        if (options.WriteBack.Enabled && live.WriteBackToken is { } token)
+        {
+            _ = _mcpConfigComposer.Compose(setup.Binding.McpConfigJson, token, options.WriteBack, setup.Target);
+        }
+    }
+
+    /// <summary>
+    /// 这条运行接过进程、提示写进去之前：记下起进程的那条运行（<see cref="CliRun.ProcessLaunchedByRunId"/>），再同步发布
+    /// <see cref="CliRunProcessHandedOverEvent"/>。按起进程的运行 id 授权、记账的消费方（模型网关）此后找得到这条运行，进程接下来的请求不会被拒。
+    /// </summary>
+    /// <remarks>
+    /// 回写凭据在这之前已经挪到这条运行上（<see cref="TakeOverWriteBackChannelAsync"/>）。事件处理器的异常只记 Warning：持久化的链接才是权威答案。
+    /// </remarks>
+    private async Task TakeOverProcessAsync(CliRun run, CliLiveSession live)
+    {
+        var launchedBy = live.LaunchedByRunId;
+        await _runRepository.AcrossTenants()
+            .Where(r => r.Id == run.Id && r.Status == CliRunStatus.Running)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.ProcessLaunchedByRunId, launchedBy), CancellationToken.None);
+        run.ProcessLaunchedByRunId = launchedBy;
+
+        if (_eventBus is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _eventBus.PublishAsync(new CliRunProcessHandedOverEvent
+            {
+                FromRunId = live.FromRunId,
+                ToRunId = run.Id,
+                LaunchedByRunId = launchedBy,
+                AgentId = run.AgentId,
+                ThreadId = run.ThreadId,
+                UserId = run.CreatorId,
+                TenantId = run.TenantId
+            }, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "A handler of the handover of a CLI process to run {RunId} failed; the run goes on", run.Id);
+        }
+    }
+
+    /// <summary>接过来的进程最终没接着用（这条运行另起了进程）：进程是这条运行自己的了，链接清掉。</summary>
+    private async Task ReleaseProcessLinkAsync(CliRun run)
+    {
+        if (run.ProcessLaunchedByRunId is null)
+        {
+            return;
+        }
+
+        await _runRepository.AcrossTenants()
+            .Where(r => r.Id == run.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.ProcessLaunchedByRunId, (Guid?)null), CancellationToken.None);
+        run.ProcessLaunchedByRunId = null;
+    }
+
+    /// <summary>
+    /// 收尾时：这次运行登记过「在等后台任务」，就把结局交给来取进程的那条运行（进程，或者没有进程可交），连同并发槽。返回进程是否交出去了。
+    /// </summary>
+    /// <remarks>
+    /// 只在落了终态之后交：来取的那条接着定续接点与用量基线，要看见这一条已经结束。没交出去（没人来取、来取的那条放弃了、
+    /// 这条没能落终态）的进程在这里结束，后台任务随之结束。
+    /// </remarks>
+    private async Task<bool> HandOverAsync(CliRun run)
+    {
+        if (_waiting is not { } waiting)
+        {
+            return false;
+        }
+
+        _waiting = null;
+        var session = _handoff;
+        _handoff = null;
+
+        // 没有进程可交（进程已经结束），或者这条没能落终态（来取的那条不能在它还算进行中时接着它的会话）：来取的那条另起进程
+        var handed = session is not null && IsTerminal(run.Status) ? session : null;
+        if (_handoffs!.Hand(waiting, handed) && handed is not null)
+        {
+            _logger.LogInformation("CLI run {RunId} handed its process and background tasks to run {SuccessorRunId}", run.Id, waiting.SuccessorRunId);
+            return true;
+        }
+
+        if (session is not null)
+        {
+            _logger.LogInformation("CLI run {RunId} stopped to hand its process over, but it could not be handed (the next run gave up, or this run did not finish); ending it", run.Id);
+            await session.EndAsync();
+        }
+
+        return false;
     }
 
     /// <summary>删掉一条运行与它的事件、附件（线程已删除时）。</summary>
@@ -451,7 +696,8 @@ public class CliRunExecutor
     /// </remarks>
     private async Task<(bool Allowed, UsageHold? Hold)> BeginUsageAsync(CliRun run, CancellationToken cancellationToken)
     {
-        if (_usageLimits is null || run.CreatorId is not { } userId)
+        // 入队时落点就说了用量在别处计量的，不开窗口（CliRunPlacement.UsageMeteredElsewhere）
+        if (_usageLimits is null || run.CreatorId is not { } userId || run.UsageMeteredElsewhere)
         {
             return (true, null);
         }
@@ -910,9 +1156,11 @@ public class CliRunExecutor
             .Select(r => new { r.Prompt, r.Error })
             .FirstAsync(CancellationToken.None);
 
-        var reply = await FoldReplyAsync(scope.ServiceProvider, runId);
-        var lastTool = reply.ToolCalls.LastOrDefault()?.Name;
-        return new InterruptedTurn(row.Prompt, row.Error, reply.Text, reply.ToolCalls.Count, lastTool);
+        var (reply, _, _) = await FoldReplyAsync(scope.ServiceProvider, runId);
+
+        // 主 agent 自己调的工具（子 agent 的调用算在派出它的那一次里）
+        var calls = reply.ToolCalls.Where(c => c.ParentId is null).ToList();
+        return new InterruptedTurn(row.Prompt, row.Error, reply.Text, calls.Count, calls.LastOrDefault()?.Name);
     }
 
     /// <summary>
@@ -1048,6 +1296,7 @@ public class CliRunExecutor
         var writeBackToken = options.WriteBack.Enabled
             ? await _tokenService.IssueAsync(run, options.WriteBack.TokenLifetime, cancellationToken)
             : null;
+        _writeBackToken = writeBackToken;
 
         var context = new CliRunContext
         {
@@ -1163,27 +1412,58 @@ public class CliRunExecutor
     /// 状态因此与停机前一样），已经落库的事件按序号跳过、不写第二遍，进程早已收到过的 stdin 行不再发（见 <see cref="CliReplayProcess"/>）。
     /// </para>
     /// <para>
+    /// <c>live</c>：同线程上一条运行交出的、还在等后台任务的进程（§6.18）。不起新进程：这一轮的用户帧写进它还开着的 stdin，接着读同一条事件流。
+    /// 这一轮要的启动方式与那个进程起来时不同（换了模型、权限档、工具、环境），或者它的最后一轮恰好收尾了，返回
+    /// <see cref="CliAttempt.ContinuationRefused"/>（进程已结束），调用方另起进程续接同一会话。
+    /// </para>
+    /// <para>
+    /// 一轮结束而 CLI 还有后台任务时，这次运行在 <see cref="CliRunHandoffs"/> 登记为等着的运行；同线程的下一条运行来取时，在两轮之间停下读取，
+    /// 进程不终止，结果里带着要交出去的进程（<see cref="CliAttempt.Handoff"/>），由 <see cref="ExecuteAsync"/> 在落终态之后交出。
+    /// </para>
+    /// <para>
     /// 宿主停机时，交出了重新附着句柄的进程不终止：抛 <see cref="CliRunDetachedException"/>，交给 <see cref="ExecuteAsync"/> 让它留在宿主上接着跑。
+    /// 接过来的进程不在此列（句柄记在起它的那条运行上），停机时照常终止。
     /// </para>
     /// </remarks>
     private async Task<CliAttempt> RunProcessAsync(
         CliRun run, CliRunSetup setup, CliWorkspace workspace, CliAgentOptions options, UsageHold? usage,
-        CancellationToken cancellationToken, string? continuation = null, ICliReattachedProcess? reattached = null)
+        CancellationToken cancellationToken, string? continuation = null, ICliReattachedProcess? reattached = null,
+        CliLiveSession? live = null)
     {
-        var adapter = _adapterFactory.Create(setup.Provider.Protocol);
+        var adapter = live?.Adapter ?? _adapterFactory.Create(setup.Provider.Protocol);
 
         // 档案接回来的进程也要：适配器按它的权限档位应答接回来之后的权限请求，按缺省（全权）答就把一条只读的运行放开了。
         // 接回来的进程早就起好了：启动环境（登录态探测会在目标上起一条命令）与附件只是给新进程用的
         var profile = _launchProfile ??= await ResolveLaunchProfileAsync(run, setup, workspace, CliLaunchProfilePurpose.Launch, cancellationToken);
         var launchEnvironment = reattached is null
-            ? await _launchEnvironmentComposer.ComposeAsync(setup.Provider, setup.ExecutablePath, workspace, setup.Target, options, profile, cancellationToken)
+            ? await _launchEnvironmentComposer.ComposeAsync(
+                setup.Provider, setup.ExecutablePath, workspace, setup.Target, options, WithInteractionTools(profile, setup.Provider, run), cancellationToken)
             : CliLaunchEnvironment.None;
-        var attachments = setup.Provider.AcceptsAttachments && continuation is null && reattached is null
-            ? await LoadAttachmentsAsync(run.Id, cancellationToken)
-            : [];
-        var launchContext = BuildLaunchContext(run, setup, workspace, launchEnvironment, profile, options, continuation) with { Attachments = attachments };
+        // 图片与 PDF 随提示投递；其余上传是文件，agent 用工具打开：名字、大小与位置写进这一轮的上下文
+        var (attachments, files) = continuation is null && reattached is null
+            ? await LoadAttachmentsAsync(run.Id, profile, cancellationToken)
+            : ([], []);
+        var launchContext = BuildLaunchContext(run, setup, workspace, launchEnvironment, profile, options, continuation);
+        launchContext = launchContext with
+        {
+            Attachments = setup.Provider.AcceptsAttachments ? attachments : [],
+            Files = files,
+            TurnContext = CliAttachedFiles.AppendTo(launchContext.TurnContext, files)
+        };
         RememberSession(run.ProviderSessionId);
         var spec = adapter.BuildProcess(launchContext);
+
+        // 接过来的进程是按上一轮的启动方式起的：这一轮要的不一样，就不能接着用它（模型、权限档与工具都钉在启动参数里）
+        if (live is not null
+            && CliLaunchSpecs.FindDifference(live.Spec, live.RunScopedVariables, spec, launchEnvironment.RunScopedVariables,
+                setup.Provider.ChangesEffortInSession ? InSessionOptions : null) is { } difference)
+        {
+            _logger.LogInformation(
+                "CLI run {RunId} needs a different launch than the process it was handed ({Difference}); " +
+                "ending that process and starting a new one on the same session", run.Id, difference);
+            return await RefuseContinuationAsync(run, live, options.ToolResults,
+                "The process kept for the background tasks was launched with different settings (model, reasoning effort, permission mode or tools) than this turn needs, so it was ended with them.");
+        }
 
         var idle = ResolveIdleWatchdog(setup.Binding, options);
         using var watchdog = new CliRunWatchdog(idle, options.ToolWatchdog, ResolveHardTimeout(run, options, reattached is not null), cancellationToken);
@@ -1192,142 +1472,373 @@ public class CliRunExecutor
         var persistedThrough = reattached is null ? int.MinValue : await ResolveLastSequenceAsync(run, CancellationToken.None);
 
         var stopwatch = Stopwatch.StartNew();
-        await using var process = reattached is null
-            ? await setup.Target.StartAsync(spec, cancellationToken)
-            : new CliReplayProcess(reattached, options.Reattach.ReplayOrderingWait, _logger);
-
-        if (reattached is null && process.ReattachHandle is { } handle)
+        var replay = reattached is null ? null : new CliReplayProcess(reattached, options.Reattach.ReplayOrderingWait, _logger);
+        var process = live?.Process ?? replay ?? await setup.Target.StartAsync(spec, cancellationToken);
+        if (live is not null)
         {
-            await RecordReattachHandleAsync(run, handle);
+            live.Adopted = true;
         }
 
-        using var sequence = new CliEventSequence(run.MessageCount);
-        var sessionId = run.ProviderSessionId;
-        var externallyCancelled = false;
-        var detach = false;
-        var toolNames = new Dictionary<string, string>(StringComparer.Ordinal);
-        var toolCalls = 0;
-
-        // 「先问我」且有人值守：权限请求交给使用方，回答由批准通道在后台轮询、写回 CLI（见 CliRunApprovals）
-        var approvals = launchContext.AsksForApproval
-            ? new CliRunApprovals(run, adapter, sequence, watchdog, _scopeFactory, _signalHub, options.Approval, persistedThrough,
-                (evt, slot) => PersistAndSignalAsync(run, evt, slot, options.ToolResults), _logger)
-            : null;
-        using var approvalsStop = CancellationTokenSource.CreateLinkedTokenSource(watchdog.Token);
-        var approvalsLoop = approvals?.RunAsync(approvalsStop.Token) ?? Task.CompletedTask;
-
-        using var ticker = new Timer(_ => watchdog.CheckAndTrip(), null, WatchdogTick, WatchdogTick);
-
+        // 事件流的读取令牌属于进程：这次运行的看门狗与取消接到它上面；进程交出去之后这次运行的令牌再被取消，不碰它
+        var lifetime = live?.Lifetime ?? new CancellationTokenSource();
+        CliLiveSession? handoff = null;
+        var released = false;
         try
         {
-            await foreach (var evt in adapter.RunAsync(process.Transport, launchContext, watchdog.Token))
+            if (reattached is null && live is null && launchEnvironment.UsageMeteredElsewhere != run.UsageMeteredElsewhere)
             {
-                watchdog.Observe(evt);
+                await RecordMeteringAsync(run, launchEnvironment.UsageMeteredElsewhere);
+            }
 
-                if (!string.IsNullOrWhiteSpace(evt.SessionId))
-                {
-                    sessionId = evt.SessionId;
-                }
+            if (reattached is null && live is null && process.ReattachHandle is { } handle)
+            {
+                await RecordReattachHandleAsync(run, handle);
+            }
 
-                if (evt.Type == CliAgentEventType.ToolUse)
-                {
-                    toolCalls++;
-                }
+            var continuable = adapter as ICliTurnContinuation;
+            if (live is not null)
+            {
+                // 提示写进去之前：此刻拥有进程的是这条运行（链接 + 事件），进程的第一个模型调用就该认它
+                await TakeOverProcessAsync(run, live);
+            }
 
-                // 序号与停机前那一次逐个对得上（同一份输入、同一个起点），到已落库的为止不再写。
-                // 批准通道写结局也从同一个序号里取号，所以取号与落库都在闸门里
-                await sequence.Gate.WaitAsync(CancellationToken.None);
-                try
+            if (live is not null && !await continuable!.ContinueAsync(launchContext, cancellationToken))
+            {
+                await ReleaseProcessLinkAsync(run);
+                // 交接与 CLI 最后一轮的收尾撞在了一起：这个进程已经不再读，这一轮另起进程续接同一会话
+                _logger.LogInformation("The process handed to CLI run {RunId} ended its last turn meanwhile; starting a new one on the same session", run.Id);
+                released = true;
+                return await RefuseContinuationAsync(run, live, options.ToolResults, null);
+            }
+
+            using var sequence = new CliEventSequence(run.MessageCount);
+            var sessionId = live?.SessionId ?? run.ProviderSessionId;
+            var externallyCancelled = false;
+            var detach = false;
+            var toolNames = new Dictionary<string, string>(StringComparer.Ordinal);
+            var toolCalls = 0;
+
+            // 有人值守：权限请求（「先问我」与「计划」档）、agent 的问题与计划交给使用方，回答由批准通道在后台轮询、写回 CLI（见 CliRunApprovals）
+            var approvals = launchContext.AsksForApproval || launchContext.RelaysInteractions
+                ? new CliRunApprovals(run, adapter, sequence, watchdog, _scopeFactory, _signalHub, options.Approval, persistedThrough,
+                    (evt, slot) => PersistAndSignalAsync(run, evt, slot, options.ToolResults), _logger)
+                : null;
+            using var approvalsStop = CancellationTokenSource.CreateLinkedTokenSource(watchdog.Token);
+            var approvalsLoop = approvals?.RunAsync(approvalsStop.Token) ?? Task.CompletedTask;
+
+            // 停下单个任务（子 agent、后台命令）：请求由任一副本落库，这里轮询到后写给 CLI（见 CliRunTaskStops）。协议做不到时没有这条通道
+            var taskStopsLoop = adapter is ICliTaskControl taskControl
+                ? new CliRunTaskStops(run.Id, taskControl, _scopeFactory, _signalHub, options.Approval.PollInterval, _logger).RunAsync(approvalsStop.Token)
+                : Task.CompletedTask;
+
+            // 线程消息队列交给这一轮的消息：执行这条运行的副本轮询到后写进进程，agent 在两步之间收下（见 CliRunQueuedInput）。
+            // 协议或 provider 做不到、没有线程时不交，消息等这一轮结束。
+            // 可重新附着的进程（本次起的、或接回来的）记下每条写在哪个事件之后，重放时原样再交一次，stdin 行数与适配器的状态都对得上
+            var takesMessages = adapter is ICliTurnInput && setup.Provider.TakesMessagesMidTurn && run.ThreadId is not null;
+            if (run.TakesMessagesMidTurn != takesMessages)
+            {
+                await RecordTakesMessagesAsync(run, takesMessages);
+            }
+
+            var queuedInput = takesMessages
+                ? new CliRunQueuedInput(run.Id, run.ThreadId!.Value, (ICliTurnInput)adapter, continuable, setup.Provider.AcceptsAttachments,
+                    _scopeFactory, options.Approval.PollInterval, _logger,
+                    live is null && process.ReattachHandle is not null
+                        ? new CliQueuedInputRecord(
+                            sequence, reattached is null ? null : run.HandedInputs, persistedThrough, () => replay?.CaughtUp ?? true)
+                        : null)
+                : null;
+            var queuedInputLoop = queuedInput?.RunAsync(approvalsStop.Token) ?? Task.CompletedTask;
+
+            using var ticker = new Timer(_ => watchdog.CheckAndTrip(), null, WatchdogTick, WatchdogTick);
+
+            // 等后台任务时能不能把进程交给同线程的下一条运行：协议做得到、有线程、工作目录跨轮保留（PerRun 每轮换目录、从不续接）
+            var mayHandOff = _handoffs is not null && continuable is not null && run.ThreadId is not null
+                             && ResolveWorkDirectoryPolicy(run, setup).Mode != CliWorkDirectoryMode.PerRun;
+
+            var events = live?.Events ?? adapter.RunAsync(process.Transport, launchContext, lifetime.Token).GetAsyncEnumerator(lifetime.Token);
+            var next = live?.PendingNext;
+            try
+            {
+                using var forward = watchdog.Token.Register(static state => ((CancellationTokenSource)state!).Cancel(), lifetime);
+                while (true)
                 {
-                    var slot = ++sequence.Current;
-                    var named = NameToolResult(evt, toolNames);
-                    if (approvals is not null && named.Type == CliAgentEventType.PermissionRequest)
+                    next ??= events.MoveNextAsync().AsTask();
+
+                    // 在等后台任务、同线程的下一条运行来取进程了：两轮之间（没有一轮在进行）就停下读取，把进程连同正在等的这次读取交出去
+                    if (_waiting is { } waiting && !next.IsCompleted)
                     {
-                        named = await approvals.OpenAsync(named, slot);
+                        if (!waiting.Requested.Task.IsCompleted)
+                        {
+                            await Task.WhenAny(next, waiting.Requested.Task);
+                        }
+
+                        if (!next.IsCompleted && waiting.Requested.Task.IsCompleted)
+                        {
+                            if (waiting.Abandoned)
+                            {
+                                // 来取的那条放弃了（被停下）：重新登记，等下一个
+                                _handoffs!.Hand(waiting, null);
+                                _waiting = _handoffs.Offer(run.Id, waiting.ThreadId, run.AgentId, run.CliRuntimeId);
+                                continue;
+                            }
+
+                            if (continuable!.IsAwaitingFollowUp)
+                            {
+                                handoff = new CliLiveSession
+                                {
+                                    Process = process,
+                                    Adapter = adapter,
+                                    Events = events,
+                                    PendingNext = next,
+                                    Lifetime = lifetime,
+                                    Spec = live?.Spec ?? spec,
+                                    RunScopedVariables = live?.RunScopedVariables ?? launchEnvironment.RunScopedVariables,
+                                    Workspace = workspace,
+                                    SessionId = sessionId,
+                                    FromRunId = run.Id,
+                                    LaunchedByRunId = live?.LaunchedByRunId ?? run.ProcessLaunchedByRunId ?? run.Id,
+                                    WriteBackTokenHash = run.WriteBackTokenHash,
+                                    WriteBackTokenExpiresAt = run.WriteBackTokenExpiresAt,
+                                    WriteBackToken = live is not null ? live.WriteBackToken : _writeBackToken
+                                };
+                                break;
+                            }
+
+                            // 任务通知开出的一轮正在进行：等它结束（下一个 TurnCompleted）再交，或者它就是最后一轮，进程随它结束
+                        }
                     }
 
-                    if (slot > persistedThrough)
+                    if (!await next)
                     {
-                        await PersistEventAsync(run, named, slot, options.ToolResults, cancellationToken);
-                        _signalHub.Signal(run.Id);
+                        break;
                     }
 
-                    if (approvals is not null)
+                    next = null;
+                    var evt = events.Current;
+                    watchdog.Observe(evt);
+
+                    if (!string.IsNullOrWhiteSpace(evt.SessionId))
                     {
-                        await approvals.ReplayRecordedAsync();
+                        sessionId = evt.SessionId;
                     }
-                }
-                finally
-                {
-                    sequence.Gate.Release();
+
+                    if (evt.Type == CliAgentEventType.ToolUse)
+                    {
+                        toolCalls++;
+                    }
+
+                    // 序号与停机前那一次逐个对得上（同一份输入、同一个起点），到已落库的为止不再写。
+                    // 批准通道写结局也从同一个序号里取号，所以取号与落库都在闸门里
+                    await sequence.Gate.WaitAsync(CancellationToken.None);
+                    try
+                    {
+                        var slot = ++sequence.Current;
+                        var named = NameToolResult(evt, toolNames);
+                        if (approvals is not null && named.Type == CliAgentEventType.PermissionRequest)
+                        {
+                            named = await approvals.OpenAsync(named, slot);
+                        }
+
+                        // 一轮在运行中途结束（CLI 还有后台任务、之后自己开下一轮）：这一轮的回答现在就写进线程，
+                        // 事件带上那条消息的 id。重放到已落库的那条时消息早已写过
+                        if (named.Type == CliAgentEventType.TurnCompleted && slot > persistedThrough)
+                        {
+                            named = await WriteTurnReplyAsync(run, named);
+                        }
+
+                        // 队列交给这一轮的一条消息被收下：收下之前的那段回答写成一条消息，这条用户消息写在它后面，之后的回答另起一条
+                        if (named.Type == CliAgentEventType.UserMessage && slot > persistedThrough)
+                        {
+                            named = await RecordUserMessageAsync(run, named);
+                        }
+
+                        if (slot > persistedThrough)
+                        {
+                            await PersistEventAsync(run, named, slot, options.ToolResults, cancellationToken);
+                            _signalHub.Signal(run.Id);
+                            await TrackFollowUpAsync(run, named);
+                        }
+
+                        await ReplayRecordedWritesAsync(sequence, queuedInput, approvals);
+                    }
+                    finally
+                    {
+                        sequence.Gate.Release();
+                    }
+
+                    // 这一轮的回答已经在线程里，CLI 在等后台任务：同线程的下一条消息不必排在等待后面，可以来取这个进程
+                    if (mayHandOff && _waiting is null && evt.Type == CliAgentEventType.TurnCompleted && continuable!.IsAwaitingFollowUp)
+                    {
+                        _waiting = _handoffs!.Offer(run.Id, run.ThreadId!.Value, run.AgentId, run.CliRuntimeId);
+                    }
                 }
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // 三种来源：用户取消、宿主停机、看门狗。用 watchdog.Failure 区分 ——
-            // 它是唯一在做出判断的那一刻记下原因的地方。
-            externallyCancelled = watchdog.Failure is null;
-
-            // 宿主停机（不是用户要求取消）而进程接得回来：不终止它，让它在执行宿主上接着跑
-            detach = externallyCancelled && process.ReattachHandle is not null && !await IsCancelRequestedAsync(run.Id);
-        }
-        finally
-        {
-            stopwatch.Stop();
-            await approvalsStop.CancelAsync();
-            await approvalsLoop;
-            RememberSession(sessionId);
-            if (!detach)
+            catch (OperationCanceledException)
             {
-                await process.TerminateAsync(CancellationToken.None);
+                // 三种来源：用户取消、宿主停机、看门狗。用 watchdog.Failure 区分 ——
+                // 它是唯一在做出判断的那一刻记下原因的地方。
+                externallyCancelled = watchdog.Failure is null;
+
+                // 宿主停机（不是用户要求取消）而进程接得回来：不终止它，让它在执行宿主上接着跑。
+                // 接过来的进程的句柄记在起它的那条运行上，这条运行接不回它，照常终止
+                detach = externallyCancelled && live is null && process.ReattachHandle is not null && !await IsCancelRequestedAsync(run.Id);
+            }
+            finally
+            {
+                stopwatch.Stop();
+                await approvalsStop.CancelAsync();
+                await approvalsLoop;
+                await taskStopsLoop;
+                await queuedInputLoop;
+                RememberSession(sessionId);
+                if (handoff is null)
+                {
+                    await DisposeEventsAsync(events, run.Id);
+                }
+
+                if (!detach && handoff is null)
+                {
+                    var stillRunning = !process.HasExited;
+                    await process.TerminateAsync(CancellationToken.None);
+
+                    // 会话已经结束（不是取消、不是看门狗），进程却没有自己干净退出、要靠终止：通常是它起的子进程（dev server 之类）握着它。
+                    // 退出码不改变已经交付的回答（适配器按协议判结局），这里只留下这件事
+                    if (stillRunning && !externallyCancelled && watchdog.Failure is null && process.ExitCode is not 0)
+                    {
+                        _logger.LogInformation(
+                            "CLI run {RunId}: the agent process did not exit by itself after its session ended and was terminated (exit code {ExitCode})",
+                            run.Id, process.ExitCode);
+                    }
+                }
 
                 // 进程已经不在：还没写给 CLI 的权限请求随它结束（按拒绝）。进程留在宿主上等重新附着时它们保持挂起，接回来照常等回答
-                if (approvals is not null)
+                if (!detach && approvals is not null)
                 {
                     await CloseApprovalsAsync(run, approvals);
                 }
             }
-        }
 
-        if (detach)
-        {
-            throw new CliRunDetachedException();
-        }
-
-        // 这个进程已经结束：句柄作废，之后（重试的新进程、或者停机）不能再拿它去接
-        if (process.ReattachHandle is not null)
-        {
-            await ClearReattachHandleAsync(run);
-        }
-
-        if (externallyCancelled)
-        {
-            // 外部取消还要再分一次：用户取消在这里落终态；宿主停机则把决定交回
-            // ExecuteAsync 的停机分支（打回队列）—— 进程已经杀掉，这条运行要在别的副本上重跑。
-            if (!await IsCancelRequestedAsync(run.Id))
+            if (detach)
             {
-                throw new OperationCanceledException(cancellationToken);
+                throw new CliRunDetachedException();
+            }
+
+            // 这个进程已经结束：句柄作废，之后（重试的新进程、或者停机）不能再拿它去接
+            if (handoff is null && process.ReattachHandle is not null)
+            {
+                await ClearReattachHandleAsync(run);
+            }
+
+            if (externallyCancelled)
+            {
+                // 外部取消还要再分一次：用户取消在这里落终态；宿主停机则把决定交回
+                // ExecuteAsync 的停机分支（打回队列）—— 进程已经杀掉，这条运行要在别的副本上重跑。
+                if (!await IsCancelRequestedAsync(run.Id))
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+            }
+
+            var outcome = new CliSessionOutcome
+            {
+                // 交出去的进程还在跑：没有退出码
+                ExitCode = handoff is null ? process.ExitCode : null,
+                StderrTail = process.Transport.StderrTail,
+                // 接回来的进程在停机前就开始跑了：时长从运行开始算，而不是从接回来那一刻
+                Elapsed = reattached is not null && run.StartedAt is { } startedAt ? DateTime.UtcNow - startedAt : stopwatch.Elapsed,
+                Cancelled = externallyCancelled,
+                WatchdogFailure = watchdog.Failure
+            };
+
+            // 交出进程时只结算这次运行的这一段：适配器随后从零算下一条运行的
+            var reported = handoff is null ? adapter.GetResult(outcome) : continuable!.CompleteRunSegment(outcome);
+            await RecordCapabilitiesAsync(run.CliRuntimeId, reported.Capabilities);
+            var turn = await ResolveTurnUsageAsync(run, setup, reported);
+
+            // 从这里起结果里的用量是这一轮的：运行记录、用量日志、配额都只认它
+            var result = reported with { Usage = turn.Usage, UsageIsSessionTotal = false, TurnUsage = null };
+            if (!run.UsageMeteredElsewhere)
+            {
+                usage?.Record(SumCost(ResolveModelCosts(setup, result)));
+            }
+
+            return new CliAttempt(result, sessionId, sequence.Current, turn.SessionTotals, toolCalls) { Handoff = handoff };
+        }
+        finally
+        {
+            // 交出去的进程归接手的运行；不接着用而已经结束掉的不再释放一次
+            if (handoff is null && !released)
+            {
+                await process.DisposeAsync();
+                lifetime.Dispose();
             }
         }
+    }
 
-        var outcome = new CliSessionOutcome
+    /// <summary>结束读取：适配器的收尾（关 stdin）在这里发生。读取本身已经因为取消或进程结束而失败时，收尾的异常不盖掉原来的结局。</summary>
+    private async Task DisposeEventsAsync(IAsyncEnumerator<CliAgentEvent> events, Guid runId)
+    {
+        try
         {
-            ExitCode = process.ExitCode,
-            StderrTail = process.Transport.StderrTail,
-            // 接回来的进程在停机前就开始跑了：时长从运行开始算，而不是从接回来那一刻
-            Elapsed = reattached is not null && run.StartedAt is { } startedAt ? DateTime.UtcNow - startedAt : stopwatch.Elapsed,
-            Cancelled = externallyCancelled,
-            WatchdogFailure = watchdog.Failure
+            await events.DisposeAsync();
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            _logger.LogDebug(ex, "Closing the event stream of CLI run {RunId} failed after the process ended", runId);
+        }
+    }
+
+    /// <summary>
+    /// 接过来的进程接不了这一轮：结束它（后台任务随之结束），说明的话（有的话）落成这一轮的一条 <c>background_tasks_stopped</c> 状态，
+    /// 返回 <see cref="CliAttempt.ContinuationRefused"/>，调用方另起进程续接同一会话。
+    /// </summary>
+    private async Task<CliAttempt> RefuseContinuationAsync(CliRun run, CliLiveSession live, CliToolResultOptions limits, string? notice)
+    {
+        live.Adopted = true;
+        await live.EndAsync();
+
+        if (notice is not null)
+        {
+            run.MessageCount++;
+            await PersistEventAsync(run, new CliAgentEvent
+            {
+                Type = CliAgentEventType.Status,
+                Status = "background_tasks_stopped",
+                Content = notice,
+                SessionId = live.SessionId
+            }, run.MessageCount, limits, CancellationToken.None);
+            _signalHub.Signal(run.Id);
+        }
+
+        return new CliAttempt(new CliAgentResult { Status = CliRunStatus.Failed }, live.SessionId, run.MessageCount, null)
+        {
+            ContinuationRefused = true
         };
+    }
 
-        var reported = adapter.GetResult(outcome);
-        var turn = await ResolveTurnUsageAsync(run, setup, reported);
+    /// <summary>CLI 在这次握手里报的能力记在运行时上，整份覆盖；记不下来只影响展示，不影响这一轮。</summary>
+    private async Task RecordCapabilitiesAsync(Guid runtimeId, CliAgentCapabilities? capabilities)
+    {
+        if (capabilities is null)
+        {
+            return;
+        }
 
-        // 从这里起结果里的用量是这一轮的：运行记录、用量日志、配额都只认它
-        var result = reported with { Usage = turn.Usage, UsageIsSessionTotal = false, TurnUsage = null };
-        usage?.Record(SumCost(ResolveModelCosts(setup, result)));
-        return new CliAttempt(result, sessionId, sequence.Current, turn.SessionTotals, toolCalls);
+        try
+        {
+            var json = JsonSerializer.Serialize(capabilities, TnziJsonDefaults.Options);
+            var now = DateTime.UtcNow;
+            await _runtimeRepository.AsQueryable()
+                .Where(r => r.Id == runtimeId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(r => r.CapabilitiesJson, json)
+                    .SetProperty(r => r.CapabilitiesReportedAt, now), CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not record the capabilities runtime {RuntimeId} reported", runtimeId);
+        }
     }
 
     /// <summary>候选基线最多看几轮：编辑 / 重新生成丢掉的轮次之外，再往前的不会是 CLI 恢复出来的那份。</summary>
@@ -1640,6 +2151,35 @@ public class CliRunExecutor
         }
     }
 
+    /// <summary>这一轮有没有人能回答：启动档案说了算，没说就按调用方给的。</summary>
+    private static bool IsAttended(CliLaunchProfile profile, CliRun run) => profile.Attended ?? run.Attended;
+
+    /// <summary>agent 的问题与计划交不交给使用方：有人值守，且 provider 能让 CLI 把它们交给框架。与档位无关。</summary>
+    private static bool RelaysInteractions(CliProviderDescriptor provider, bool attended)
+        => attended && provider.HostPromptArgs is { Count: > 0 };
+
+    /// <summary>
+    /// 档案收窄了内置工具、而这一轮转发交互请求时，把 provider 的交互工具补进那份清单（档案没收窄或没人值守时原样返回）。
+    /// </summary>
+    /// <remarks>
+    /// 消费方收窄工具是为了限定 agent 能做的事（只许联网搜索之类），问用户、交计划不在它想拿掉的范围里：
+    /// 拿掉了，有人值守的一轮问不了也交不了计划（计划档里 agent 只能把计划写进回复然后停下）。没有人值守时它们本就不该在，不补。
+    /// </remarks>
+    internal static CliLaunchProfile WithInteractionTools(CliLaunchProfile profile, CliProviderDescriptor provider, CliRun run)
+    {
+        if (profile.BuiltInTools is not { } tools || provider.InteractionTools.Count == 0
+            || !RelaysInteractions(provider, IsAttended(profile, run)))
+        {
+            return profile;
+        }
+
+        var missing = provider.InteractionTools.Where(t => !tools.Contains(t, StringComparer.Ordinal)).ToList();
+        return missing.Count == 0 ? profile : profile with { BuiltInTools = [.. tools, .. missing] };
+    }
+
+    /// <summary>provider 能在会话里换强度时，交接不因它不同而另起进程的开关（适配器接手时换成这一轮的值）。</summary>
+    private static readonly string[] InSessionOptions = ["--effort"];
+
     private CliAgentLaunchContext BuildLaunchContext(
         CliRun run, CliRunSetup setup, CliWorkspace workspace, CliLaunchEnvironment launchEnvironment, CliLaunchProfile profile,
         CliAgentOptions options, string? continuation = null)
@@ -1656,31 +2196,38 @@ public class CliRunExecutor
             extraArgs = [.. WithoutOption(extraArgs, ModelOption)];
         }
 
-        // 每轮易变的上下文追加到<b>提示尾部</b>，绝不进 brief：brief 在缓存前缀里，
-        // 一变就作废整段历史的 prompt cache。
+        // 每轮易变的上下文跟着提示走（缺省追加在<b>提示尾部</b>，斜杠命令时适配器可能单独投递），绝不进 brief：
+        // brief 在缓存前缀里，一变就作废整段历史的 prompt cache。
         // 接着上一次的会话跑时，提示与本轮上下文都已经在会话里，只发那句说明
-        var prompt = continuation
-            ?? (string.IsNullOrWhiteSpace(run.PerTurnContext)
-                ? run.Prompt
-                : $"{run.Prompt}\n\n---\n\n{run.PerTurnContext}");
+        var prompt = continuation ?? run.Prompt;
+        var turnContext = continuation is null && !string.IsNullOrWhiteSpace(run.PerTurnContext) ? run.PerTurnContext : null;
+
+        var attended = IsAttended(profile, run);
 
         return new CliAgentLaunchContext
         {
             Provider = setup.Provider,
             ExecutablePath = setup.ExecutablePath,
             Prompt = prompt,
+            TurnContext = turnContext,
+            BackgroundTaskWait = options.BackgroundTaskWait,
             WorkingDirectory = workspace.WorkDirectory,
             Model = !string.IsNullOrWhiteSpace(run.Model) ? run.Model
                 : string.IsNullOrWhiteSpace(bindingModel) ? setup.Provider.DefaultModel : bindingModel,
-            ThinkingLevel = setup.BindingProviderMatches ? setup.Binding.ThinkingLevel : null,
+            // 用户为这一轮选的强度覆盖绑定上的（它已按这一轮的模型校验过）
+            ThinkingLevel = !string.IsNullOrWhiteSpace(run.Effort) ? run.Effort
+                : setup.BindingProviderMatches ? setup.Binding.ThinkingLevel : null,
             ResumeSessionId = run.ProviderSessionId,
             ResumeAtEntryId = string.IsNullOrWhiteSpace(run.ProviderSessionId) ? null : run.ResumeAtEntryId,
             InlineSystemPrompt = ResolveInlineSystemPrompt(run, setup, workspace),
             McpConfigPath = workspace.McpConfigPath,
             McpConfigJson = workspace.McpConfigJson,
             PermissionMode = profile.PermissionMode,
-            // 有人值守才有人能回答：没有人时「先问我」按只读档当场拒绝，不让每个请求挂到超时
-            AsksForApproval = profile.PermissionMode == CliPermissionMode.Ask && (profile.Attended ?? run.Attended),
+            // 有人值守才有人能回答：没有人时「先问我」按只读档当场拒绝，不让每个请求挂到超时；
+            // 计划档获批之后的改动同样逐个问
+            AsksForApproval = profile.PermissionMode is CliPermissionMode.Ask or CliPermissionMode.Plan && attended,
+            // agent 问用户问题、交出计划等批准：只要有人值守、provider 能把它们交给框架，就交给使用方（与档位无关）
+            RelaysInteractions = RelaysInteractions(setup.Provider, attended),
             StrictMcpConfig = profile.StrictMcpConfig,
             // 隔离与档案带来的参数排在部署级 ExtraArgs 之前：档案没接管的开关，部署方写在后面的那个生效。
             ManagedArgs = launchEnvironment.Args,
@@ -1779,7 +2326,50 @@ public class CliRunExecutor
         }
     }
 
+    /// <summary>
+    /// 一条事件落库。写不进去（数据库拒收这一行）时这次运行照常往下走：在它的序号上留一条说明，而不是让异常带走整轮。
+    /// </summary>
+    /// <remarks>
+    /// 事件流是记录，不是这次运行本身：CLI 已经做完的工作（工作区里的改动、已经花掉的用量）不会因为记不下一条事件而撤销，
+    /// 让异常冒上去只会把这一轮的回复、终态与结算一起丢掉，使用方看到的是一句「An error occurred while saving the entity changes」。
+    /// 每条事件在自己的作用域里写，失败的那一行不会留在任何还要再保存的上下文里，后面的事件不受牵连。
+    /// 只接 <see cref="DbUpdateException"/>（这一行被拒）；取消照常抛出，连接层面的失败也照常抛出 —— 那时后面的写也不会成功，
+    /// 运行按失败收尾才是对的。
+    /// </remarks>
     private async Task PersistEventAsync(
+        CliRun run, CliAgentEvent evt, int sequence, CliToolResultOptions limits, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await InsertEventAsync(run, evt, sequence, limits, cancellationToken);
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogError(ex, "Could not record event {Sequence} ({Type}) of CLI run {RunId}; the run goes on without it",
+                sequence, evt.Type, run.Id);
+
+            var notice = new CliAgentEvent
+            {
+                Type = CliAgentEventType.Log,
+                Level = UnrecordedEventLevel,
+                Content = $"A {evt.Type} event could not be recorded and is missing here."
+            };
+            try
+            {
+                await InsertEventAsync(run, notice, sequence, limits, cancellationToken);
+            }
+            catch (DbUpdateException noticeEx)
+            {
+                _logger.LogWarning(noticeEx, "Could not record the notice for the missing event {Sequence} of CLI run {RunId} either",
+                    sequence, run.Id);
+            }
+        }
+    }
+
+    /// <summary>代替一条没记下来的事件的那条说明的日志级别。</summary>
+    internal const string UnrecordedEventLevel = "warning";
+
+    private async Task InsertEventAsync(
         CliRun run, CliAgentEvent evt, int sequence, CliToolResultOptions limits, CancellationToken cancellationToken)
     {
         // 每条事件在自己的作用域里写：这个执行器的作用域（与其中的 DbContext）活过整条运行，
@@ -1801,7 +2391,8 @@ public class CliRunExecutor
             Content = evt.Content,
             Tool = evt.Tool,
             CallId = evt.CallId,
-            InputJson = evt.Input is null ? null : JsonSerializer.Serialize(evt.Input, TnziJsonDefaults.Options),
+            ParentCallId = evt.ParentCallId,
+            InputJson = CliRunMessageConverter.SerializePayload(evt),
             Output = Truncate(evt.Output, ToolOutputMaxLength),
             OutputBlocksJson = CliRunMessageConverter.SerializeBlocks(blocks),
             Status = evt.Status,
@@ -1951,18 +2542,34 @@ public class CliRunExecutor
         return result;
     }
 
-    /// <summary>这次运行要交给 CLI 的附件（随用户消息存档的那些），最早的在前。</summary>
-    private async Task<IReadOnlyList<CliPromptAttachment>> LoadAttachmentsAsync(Guid runId, CancellationToken cancellationToken)
+    /// <summary>
+    /// 这次运行的上传附件（随用户消息存档的那些），最早的在前，分成随提示投递的（图片与 PDF）与文件（其余，位置取自启动档案）。
+    /// </summary>
+    private async Task<(IReadOnlyList<CliPromptAttachment> Inline, IReadOnlyList<CliPromptFile> Files)> LoadAttachmentsAsync(
+        Guid runId, CliLaunchProfile profile, CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var attachments = scope.ServiceProvider.GetService<IAgentAttachmentService>();
         if (attachments is null)
         {
-            return [];
+            return ([], []);
         }
 
         var stored = await attachments.GetForRunAsync(runId, AttachmentOrigin.Upload, cancellationToken);
-        return stored.Select(a => new CliPromptAttachment(a.MediaType, a.FileName, a.Content)).ToList();
+        var inline = stored
+            .Where(a => ChatAttachmentRules.IsInlineMediaType(a.MediaType))
+            .Select(a => new CliPromptAttachment(a.MediaType, a.FileName, a.Content))
+            .ToList();
+        var files = stored
+            .Where(a => !ChatAttachmentRules.IsInlineMediaType(a.MediaType))
+            .Select(a => new CliPromptFile(
+                a.Id,
+                string.IsNullOrWhiteSpace(a.FileName) ? ChatAttachmentRules.DefaultFileName : a.FileName,
+                a.MediaType,
+                a.Size,
+                profile.AttachmentPaths.TryGetValue(a.Id, out var path) && !string.IsNullOrWhiteSpace(path) ? path : null))
+            .ToList();
+        return (inline, files);
     }
 
     private async Task CompleteAsync(CliRun run, CliRunSetup setup, CliAttempt attempt, CancellationToken cancellationToken)
@@ -1990,8 +2597,9 @@ public class CliRunExecutor
             ? JsonSerializer.Serialize(totals, TnziJsonDefaults.Options)
             : null;
 
-        // 回复先于终态写进线程：等终态的流式端点与门面看到「结束」的那一刻，回复消息已经在线程里、id 已经在运行记录上
-        var reply = await WriteReplyAsync(run, result);
+        // 回复先于终态写进线程：等终态的流式端点与门面看到「结束」的那一刻，回复消息已经在线程里、id 已经在运行记录上。
+        // 进程随这次运行结束时（没有交给同线程的下一条运行），还在跑的子 agent 随之停止
+        var reply = await WriteReplyAsync(run, result, processEnds: _handoff is null);
 
         var finished = await _finalizer.FinishAsync(run.Id, new CliRunTermination(result.Status, result.FailureReason, result.Error)
         {
@@ -2001,8 +2609,9 @@ public class CliRunExecutor
             Completion = new CliRunCompletion(sequence, providerSessionId, usageJson, estimatedCost)
             {
                 ProviderSessionEntryId = result.ResumeRejected ? null : result.SessionEntryId,
-                AssistantMessageId = reply?.MessageId,
-                SessionUsageJson = sessionUsageJson
+                AssistantMessageId = reply?.MessageId ?? _lastTurnMessageId,
+                SessionUsageJson = sessionUsageJson,
+                Context = result.Context
             }
         });
 
@@ -2024,10 +2633,6 @@ public class CliRunExecutor
                 "CLI run {RunId} finished with status {Status} here, but it had already been finished elsewhere; keeping the recorded outcome",
                 run.Id, result.Status);
             await WithdrawReplyAsync(run, reply);
-        }
-        else if (reply is { IsFirstReply: true } && result.Status == CliRunStatus.Completed)
-        {
-            await TitleThreadAsync(run, reply);
         }
 
         // 线程已删除时用量照记（花费是真实发生的），只是不再挂在那条线程上：与核心删除线程时对既有用量行的处理一致
@@ -2060,7 +2665,7 @@ public class CliRunExecutor
     /// 写入失败只记日志：回复写不进去不该让运行的终态写不下去。
     /// </para>
     /// </remarks>
-    private async Task<WrittenReply?> WriteReplyAsync(CliRun run, CliAgentResult result)
+    private async Task<WrittenReply?> WriteReplyAsync(CliRun run, CliAgentResult result, bool processEnds = false)
     {
         if (run.ThreadId is not { } threadId || await IsThreadDeletedAsync(run))
         {
@@ -2078,9 +2683,20 @@ public class CliRunExecutor
                 return null;
             }
 
-            var reply = await FoldReplyAsync(services, run.Id);
+            var (reply, previousTurnText, turnMessageIds) = await FoldReplyAsync(services, run.Id);
+            if (processEnds)
+            {
+                reply.SettleTasks();
+            }
+
+            // 后台子 agent 在后面几轮里的进展与结局记在派出它的那一轮：先把那几条消息的工具调用改成现在的样子
+            await RewriteEarlierTurnsAsync(messages, reply, turnMessageIds);
+
             var text = reply.Text;
-            if (result.Status == CliRunStatus.Completed && string.IsNullOrWhiteSpace(text))
+
+            // 交付物兜底只用这一轮自己的：等后台任务到了上限、最后一轮什么都没说时，交付物还是上一轮的回答，那一轮已经写过了
+            if (result.Status == CliRunStatus.Completed && string.IsNullOrWhiteSpace(text)
+                && !string.Equals(result.Output, previousTurnText, StringComparison.Ordinal))
             {
                 text = result.Output ?? string.Empty;
             }
@@ -2088,14 +2704,19 @@ public class CliRunExecutor
             var toolCalls = reply.ToolCalls;
             var usageLimit = result.FailureReason == CliRunFailureReason.UsageLimit;
 
+            // 一轮只压缩了上下文（/compact）：没有回答，留一条空的「已压缩」回复，重新加载后对话里照样看得见
+            var compacted = result.Status == CliRunStatus.Completed && result.Compaction is not null
+                            && string.IsNullOrWhiteSpace(text) && toolCalls.Count == 0;
+
             // 用量上限是一个要让人看见的结局（什么时候能再用），即使一个字都没写出也留一条回复，重新加载后对话里照样有它
-            if (string.IsNullOrWhiteSpace(text) && toolCalls.Count == 0 && !usageLimit)
+            if (string.IsNullOrWhiteSpace(text) && toolCalls.Count == 0 && !usageLimit && !compacted)
             {
                 return null;
             }
 
             var status = result.Status switch
             {
+                CliRunStatus.Completed when compacted => ThreadMessageStatuses.Compacted,
                 CliRunStatus.Completed => null,
                 CliRunStatus.Cancelled => ThreadMessageStatuses.Stopped,
                 _ when usageLimit => ThreadMessageStatuses.UsageLimit,
@@ -2132,11 +2753,10 @@ public class CliRunExecutor
                 await attachments.BindToMessageAsync(run.Id, AttachmentOrigin.ToolResult, saved, CancellationToken.None);
             }
 
-            var replies = await messages.AsQueryable()
-                .IgnoreQueryFilters()
-                .CountAsync(m => m.ThreadId == threadId && m.Role == MessageRole.Assistant, CancellationToken.None);
+            // 先于这一轮的结束事件落库：看着这条线程的页面从流里看到结束后才标已读，已读时间不会早于它
+            await threads.MarkRepliedAsync(threadId, DateTime.UtcNow, CancellationToken.None);
 
-            return new WrittenReply(saved, text, replies == 1);
+            return new WrittenReply(saved, text);
         }
         catch (Exception ex)
         {
@@ -2145,8 +2765,13 @@ public class CliRunExecutor
         }
     }
 
-    /// <summary>从落库的事件流折叠出这次运行的回复（包括被打回队列前那一次执行留下的事件）。</summary>
-    private static async Task<CliReplyAccumulator> FoldReplyAsync(IServiceProvider services, Guid runId)
+    /// <summary>
+    /// 从落库的事件流折叠出这次运行<b>当前这一轮</b>的回复（包括被打回队列前那一次执行留下的事件）：最后一个
+    /// <see cref="CliAgentEventType.TurnCompleted"/> 之前的那些轮次已经各自写成了一条消息。
+    /// </summary>
+    /// <returns>这一轮的回复，以及上一轮（最后一个 TurnCompleted）的交付物文本，没有上一轮时为 null。</returns>
+    private static async Task<(CliReplyAccumulator Reply, string? PreviousTurnText, IReadOnlyList<Guid?> TurnMessageIds)> FoldReplyAsync(
+        IServiceProvider services, Guid runId)
     {
         var events = await services.GetRequiredService<IRepository<CliRunMessage, Guid>>().AsQueryable()
             .IgnoreQueryFilters()
@@ -2155,12 +2780,150 @@ public class CliRunExecutor
             .ToListAsync(CancellationToken.None);
 
         var reply = new CliReplyAccumulator();
+        string? previousTurnText = null;
+        var turnMessageIds = new List<Guid?>();
         foreach (var message in events)
         {
-            reply.Apply(CliRunMessageConverter.ToEvent(message));
+            var evt = CliRunMessageConverter.ToEvent(message);
+            if (message.Type == CliAgentEventType.TurnCompleted)
+            {
+                reply.BeginTurn();
+                previousTurnText = message.Content;
+                turnMessageIds.Add(evt.Turn?.AssistantMessageId);
+                continue;
+            }
+
+            // 队列交给这一轮、被收下的用户消息：它之前的那段回答已经写成一条消息，之后的回答从头折叠
+            if (evt.UserMessage is { Taken: true } taken)
+            {
+                reply.BeginTurn();
+                turnMessageIds.Add(taken.AssistantMessageId);
+                continue;
+            }
+
+            reply.Apply(evt);
         }
 
-        return reply;
+        return (reply, previousTurnText, turnMessageIds);
+    }
+
+    /// <summary>
+    /// 重写前几轮里因为后来的事件（后台子 agent 的进展与结局）而变了的回复的工具调用。那一轮没写成消息的跳过；写失败只记日志。
+    /// </summary>
+    private async Task RewriteEarlierTurnsAsync(
+        IRepository<AgentThreadMessage, Guid> messages, CliReplyAccumulator reply, IReadOnlyList<Guid?> turnMessageIds)
+    {
+        foreach (var turn in reply.EarlierTurnsChanged)
+        {
+            if (turn >= turnMessageIds.Count || turnMessageIds[turn] is not { } messageId)
+            {
+                continue;
+            }
+
+            var toolCalls = reply.ToolCallsOfTurn(turn);
+            var json = toolCalls.Count > 0 ? JsonSerializer.Serialize(toolCalls, TnziJsonDefaults.Options) : null;
+            try
+            {
+                await messages.AsQueryable()
+                    .IgnoreQueryFilters()
+                    .Where(m => m.Id == messageId)
+                    .ExecuteUpdateAsync(s => s.SetProperty(m => m.ToolCalls, json), CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "The tool calls of reply {MessageId} could not be brought up to date", messageId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 运行中途结束的一轮：把它的回答写进线程（与运行结束时写最后一轮同一套折叠与写法），返回带上消息 id 的事件。
+    /// 写不进去时事件照常落库，只是没有消息 id（写回复失败从不拦住运行）。
+    /// </summary>
+    private async Task<CliAgentEvent> WriteTurnReplyAsync(CliRun run, CliAgentEvent turn)
+    {
+        var reply = await WriteReplyAsync(run, new CliAgentResult { Status = CliRunStatus.Completed, Output = turn.Content });
+        _lastTurnMessageId = reply?.MessageId ?? _lastTurnMessageId;
+        return turn with { Turn = (turn.Turn ?? new CliTurnBoundary()) with { AssistantMessageId = reply?.MessageId } };
+    }
+
+    /// <summary>
+    /// 重放中，停机前在此刻序号之后写给 CLI 的那些行原样再交给适配器（持有序号闸门）：先是记在这个序号上的排队消息，
+    /// 再是占下一个序号的批准结局，交替到没有为止（排队消息记的是写它那一刻最后一个已分配的序号，所以排在下一个结局之前）。
+    /// </summary>
+    private static async Task ReplayRecordedWritesAsync(CliEventSequence sequence, CliRunQueuedInput? queuedInput, CliRunApprovals? approvals)
+    {
+        int before;
+        do
+        {
+            before = sequence.Current;
+            if (queuedInput is not null)
+            {
+                await queuedInput.ReplayRecordedAsync();
+            }
+
+            if (approvals is not null)
+            {
+                await approvals.ReplayRecordedAsync();
+            }
+        }
+        while (sequence.Current != before);
+    }
+
+    /// <summary>
+    /// 队列交给这一轮的一条消息有了着落。收下：收下之前的那段回答写进线程（与运行中途结束的一轮同一套折叠与写法，那段什么都没说时不写），
+    /// 再由线程的消息队列把它写成一条用户消息（附件挂在上面），事件带上两条消息的 id。CLI 不收：它在队列里扣住、带上原因。
+    /// 写不进去时事件照常落库，只是没有消息 id（写线程失败从不拦住运行）。
+    /// </summary>
+    private async Task<CliAgentEvent> RecordUserMessageAsync(CliRun run, CliAgentEvent evt)
+    {
+        if (evt.UserMessage is not { } message)
+        {
+            return evt;
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var delivery = scope.ServiceProvider.GetService<IChatQueueDelivery>();
+            if (!message.Taken)
+            {
+                if (delivery is not null)
+                {
+                    await delivery.HoldUntakenAsync(message.MessageId, message.Reason ?? "The agent did not take this message in.", CancellationToken.None);
+                }
+
+                return evt;
+            }
+
+            var reply = await WriteReplyAsync(run, new CliAgentResult { Status = CliRunStatus.Completed });
+            _lastTurnMessageId = reply?.MessageId ?? _lastTurnMessageId;
+            var threadMessageId = delivery is null || await IsThreadDeletedAsync(run)
+                ? null
+                : await delivery.MarkDeliveredAsync(message.MessageId, CancellationToken.None);
+            return evt with { UserMessage = message with { AssistantMessageId = reply?.MessageId, ThreadMessageId = threadMessageId } };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "CLI run {RunId}: the queued message {MessageId} it took in could not be written to its thread", run.Id, message.MessageId);
+            return evt;
+        }
+    }
+
+    /// <summary>记下这次尝试收不收得下运行中的消息（线程的消息队列据此决定「立即发送」停不停下这一轮）。</summary>
+    private async Task RecordTakesMessagesAsync(CliRun run, bool takesMessages)
+    {
+        try
+        {
+            await _runRepository.AcrossTenants()
+                .Where(r => r.Id == run.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.TakesMessagesMidTurn, (bool?)takesMessages), CancellationToken.None);
+            run.TakesMessagesMidTurn = takesMessages;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "CLI run {RunId}: could not record whether it takes messages while it runs", run.Id);
+        }
     }
 
     /// <summary>这一轮的用量合计（写在回复消息上，与内建路径存的形状相同）。</summary>
@@ -2216,34 +2979,6 @@ public class CliRunExecutor
     }
 
     /// <summary>
-    /// 线程的第一条回复写下之后给线程起标题，与内建路径同一套（回退标题 + <c>ThreadFirstReplyCompletedEvent</c>）。
-    /// </summary>
-    /// <remarks>
-    /// 此前由门面在流结束后做，客户端一断就没人做，侧栏里停着占位标题「Thread yyyy-MM-dd HH:mm」。
-    /// 判据「这是线程的第一条回复」取自数据而不是请求：编辑了第一条消息、线程回退到空之后的那一轮同样会重新起标题。
-    /// 处理器自己吞掉并记录自己的异常。
-    /// </remarks>
-    private async Task TitleThreadAsync(CliRun run, WrittenReply reply)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        if (scope.ServiceProvider.GetService<IEventPublisher>() is not { } publisher || string.IsNullOrWhiteSpace(run.Prompt))
-        {
-            return;
-        }
-
-        await publisher.HandleNewThreadTitleAsync(
-            new AgentRunRequest { AgentId = run.AgentId, ThreadId = run.ThreadId, UserMessage = run.Prompt, UserId = run.CreatorId },
-            new AgentRunResult
-            {
-                Response = reply.Text,
-                ThreadId = run.ThreadId,
-                Status = AgentRunStatus.Completed,
-                FinishReason = FinishReasons.Stop
-            },
-            run.Prompt);
-    }
-
-    /// <summary>
     /// 按模型结算这一轮的成本（API 等价费用）：provider 自报值优先，没有才回落到按该模型的 token（含缓存读写）与配置的单价估算。
     /// </summary>
     /// <remarks>
@@ -2287,28 +3022,31 @@ public class CliRunExecutor
         CliRun run, CliRunSetup setup, CliAgentResult result, IReadOnlyDictionary<string, decimal?> modelCosts,
         Guid? threadId, CancellationToken cancellationToken)
     {
-        if (_usageLogService is null || result.Usage.Count == 0)
+        if (_usageLogService is null || result.Usage.Count == 0 || run.UsageMeteredElsewhere)
         {
             return;
         }
 
         foreach (var (model, usage) in result.Usage)
         {
-            await _usageLogService.LogUsageAsync(
-                AIOperationType.AgentRun,
-                setup.Provider.Key,
-                model,
-                ToInt(usage.InputTokens),
-                ToInt(usage.OutputTokens),
-                run.DurationMs,
-                run.Status == CliRunStatus.Completed,
-                run.Error,
-                run.AgentId,
-                threadId,
-                modelCosts.GetValueOrDefault(model),
-                ToInt(usage.CacheReadTokens),
-                ToInt(usage.CacheWriteTokens),
-                cancellationToken);
+            await _usageLogService.LogUsageAsync(new UsageLogEntry
+            {
+                OperationType = AIOperationType.AgentRun,
+                Provider = setup.Provider.Key,
+                Model = model,
+                InputTokens = ToInt(usage.InputTokens),
+                OutputTokens = ToInt(usage.OutputTokens),
+                CachedInputTokens = ToInt(usage.CacheReadTokens),
+                CacheCreationTokens = ToInt(usage.CacheWriteTokens),
+                DurationMs = run.DurationMs,
+                IsSuccess = run.Status == CliRunStatus.Completed,
+                ErrorMessage = run.Error,
+                // 运行在后台跑，没有登录用户：计在发起这次运行的人名下（与用量上限结算的是同一个人）
+                UserId = run.CreatorId,
+                AgentId = run.AgentId,
+                ThreadId = threadId,
+                EstimatedCostUsd = modelCosts.GetValueOrDefault(model)
+            }, cancellationToken);
         }
     }
 
@@ -2362,6 +3100,16 @@ public class CliRunExecutor
     }
 
     /// <summary>
+    /// 这个服务端是否在停机：执行器的令牌已取消（队列处理器的停机令牌），或应用已经开始停机。
+    /// </summary>
+    /// <remarks>
+    /// 应用的 <c>ApplicationStopping</c> 先于各托管服务的 <c>StopAsync</c> 触发：消费方随停机关掉的远程通道可能在队列处理器的令牌
+    /// 取消之前就让执行宿主连不上，只看令牌会把这条运行判成启动失败。
+    /// </remarks>
+    private bool IsHostStopping(CancellationToken cancellationToken)
+        => cancellationToken.IsCancellationRequested || _applicationLifetime?.ApplicationStopping.IsCancellationRequested == true;
+
+    /// <summary>
     /// 宿主停机：把运行打回队列。
     /// </summary>
     /// <remarks>
@@ -2411,6 +3159,15 @@ public class CliRunExecutor
     /// <remarks>
     /// 写不进去（句柄超长）时只记 Warning：这个进程照常跑，只是停机时按接不回来的进程处理（终止、打回队列）。
     /// </remarks>
+    /// <summary>这一次进程的用量在不在别处计量（<see cref="CliLaunchEnvironment.UsageMeteredElsewhere"/>）：写进运行记录，接回来的进程沿用。</summary>
+    private async Task RecordMeteringAsync(CliRun run, bool meteredElsewhere)
+    {
+        await _runRepository.AcrossTenants()
+            .Where(r => r.Id == run.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.UsageMeteredElsewhere, meteredElsewhere), CancellationToken.None);
+        run.UsageMeteredElsewhere = meteredElsewhere;
+    }
+
     private async Task RecordReattachHandleAsync(CliRun run, string handle)
     {
         if (handle.Length > ReattachHandleMaxLength)
@@ -2421,22 +3178,61 @@ public class CliRunExecutor
             return;
         }
 
+        // 新的进程：上一个进程收过的排队消息与它无关
         var written = await _runRepository.AcrossTenants()
             .Where(r => r.Id == run.Id && r.Status == CliRunStatus.Running)
-            .ExecuteUpdateAsync(s => s.SetProperty(r => r.ReattachHandle, handle), CancellationToken.None);
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.ReattachHandle, handle)
+                .SetProperty(r => r.HandedInputs, (string?)null), CancellationToken.None);
         if (written > 0)
         {
             run.ReattachHandle = handle;
+            run.HandedInputs = null;
         }
     }
 
     /// <summary>这一次的进程已经结束：清掉它的句柄。</summary>
+    /// <summary>
+    /// 记下这条运行是不是只在等后台任务（<see cref="CliRun.AwaitingFollowUp"/>）：一轮在中途结束时置上，下一轮开始说话、
+    /// 用工具、要回答或收下一条交来的消息时清掉。只在变化时写；写不进去只记日志（它只决定线程是不是标成「在跑」）。
+    /// </summary>
+    private async Task TrackFollowUpAsync(CliRun run, CliAgentEvent evt)
+    {
+        var awaiting = evt.Type switch
+        {
+            CliAgentEventType.TurnCompleted => true,
+            CliAgentEventType.Text or CliAgentEventType.Thinking or CliAgentEventType.ToolUse
+                or CliAgentEventType.ToolResult or CliAgentEventType.PermissionRequest => false,
+            CliAgentEventType.UserMessage when evt.UserMessage is { Taken: true } => false,
+            _ => run.AwaitingFollowUp
+        };
+        if (awaiting == run.AwaitingFollowUp)
+        {
+            return;
+        }
+
+        try
+        {
+            await _runRepository.AcrossTenants()
+                .Where(r => r.Id == run.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.AwaitingFollowUp, awaiting), CancellationToken.None);
+            run.AwaitingFollowUp = awaiting;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "CLI run {RunId}: could not record whether it only waits on background tasks", run.Id);
+        }
+    }
+
     private async Task ClearReattachHandleAsync(CliRun run)
     {
         await _runRepository.AcrossTenants()
             .Where(r => r.Id == run.Id && r.ReattachHandle != null)
-            .ExecuteUpdateAsync(s => s.SetProperty(r => r.ReattachHandle, (string?)null), CancellationToken.None);
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.ReattachHandle, (string?)null)
+                .SetProperty(r => r.HandedInputs, (string?)null), CancellationToken.None);
         run.ReattachHandle = null;
+        run.HandedInputs = null;
     }
 
     /// <summary>
@@ -2563,7 +3359,7 @@ public class CliRunExecutor
             DurationMs = durationMs
         };
 
-        var reply = await WriteReplyAsync(run, result);
+        var reply = await WriteReplyAsync(run, result, processEnds: true);
         var finished = await _finalizer.FinishAsync(
             run.Id,
             new CliRunTermination(CliRunStatus.Failed, CliRunFailureReason.Interrupted, reason)
@@ -2730,8 +3526,7 @@ public class CliRunExecutor
 
     /// <param name="MessageId">写进线程的回复消息</param>
     /// <param name="Text">回复文本</param>
-    /// <param name="IsFirstReply">是不是线程的第一条回复（要起标题）</param>
-    private sealed record WrittenReply(Guid MessageId, string Text, bool IsFirstReply);
+    private sealed record WrittenReply(Guid MessageId, string Text);
 
     /// <param name="RunId">已结束的那一轮</param>
     /// <param name="SessionId">它留下的会话</param>
@@ -2756,7 +3551,14 @@ public class CliRunExecutor
     /// <param name="ToolCalls">这一次发起的工具调用数（只用于日志：停在上限上时，已经返回的调用都已生效）</param>
     private sealed record CliAttempt(
         CliAgentResult Result, string? SessionId, int Sequence, IReadOnlyDictionary<string, CliAgentTokenUsage>? SessionTotals,
-        int ToolCalls = 0);
+        int ToolCalls = 0)
+    {
+        /// <summary>这次运行在等后台任务时停下、要交给同线程下一条运行的进程（§6.18）；没有时为 null。</summary>
+        public CliLiveSession? Handoff { get; init; }
+
+        /// <summary>接过来的进程接不了这一轮（已经结束掉）：要另起进程续接同一会话。</summary>
+        public bool ContinuationRefused { get; init; }
+    }
 
     // Target：这次运行的执行目标，工作区、登录态查询、进程与清理都在它上面；Scope：取目标时用的身份，问启动档案时原样交出
     private sealed record CliRunSetup(

@@ -27,20 +27,11 @@ const DOC_PATH = path.resolve(
 const NOT_PACKAGE_ROOT_EXPORTS: Record<string, string> = {
   // Owned by @tnzi/ui - the doc says so explicitly at the end of section 0.
   TDescriptions: '@tnzi/ui',
-  TSchemaForm: '@tnzi/ui',
-  // Named in the overlay-density rule for its `size` default (unset, so a
-  // TForm inside a shell resolves to small). Owned by @tnzi/ui.
-  TForm: '@tnzi/ui',
-  // The ⓘ + popover primitive TDetailSection renders for `hintMode="popover"`.
-  // Named in the doc to explain what the mode produces, not as an admin import.
-  THint: '@tnzi/ui',
+  // The icon primitive, named in the doc's style rules. Owned by @tnzi/ui.
+  TSvgIcon: '@tnzi/ui',
   // Horizontal bar-rank widget for "top-N by X" drilldowns. The doc names it in
   // section 5 and spells the package out inline - `TMetricBars`（`@tnzi/ui`）.
   TMetricBars: '@tnzi/ui',
-  // The inline attachment grid the drag-reorder section points at for the
-  // keyboard half. Owned by @tnzi/ui, named there so both reorder surfaces are
-  // findable from one place.
-  TAttachmentWall: '@tnzi/ui',
   // The two artifact iframes C16 cites as the history of the sandbox rule
   // (07-26 fixed one, 09-12 fixed the other). Owned by @tnzi/ui-ai; the doc
   // names them to explain why the cross-package iframe gate exists.
@@ -463,11 +454,9 @@ describe('package public surface', () => {
       expect(name in pkg).toBe(true)
     })
 
-    it('keeps the deprecated TStatCard alias resolving to TKpiCard', () => {
-      // @tnzi/ui no longer ships a TStatCard, so re-exporting the alias
-      // wholesale reintroduces no cross-package clash.
+    it('exports TStatCard as its own component, not an alias of TKpiCard', () => {
       expect('TStatCard' in pkg).toBe(true)
-      expect(pkg.TStatCard).toBe(pkg.TKpiCard)
+      expect(pkg.TStatCard).not.toBe(pkg.TKpiCard)
     })
   })
 

@@ -249,6 +249,30 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               keepAlive: true,
             },
           },
+          {
+            // OpenID Connect provider (Tnzi.Identity.OpenIdConnect sub-module):
+            // the applications that sign users in with this platform's accounts.
+            path: 'oidc-clients',
+            name: 'identity.oidcClients',
+            component: () => import('../pages/identity/OidcClients.vue'),
+            meta: {
+              moduleGate: 'identity-openidconnect',
+              title: 'tnzi.admin.modules.identity.oidcClients.title',
+              permission: 'identity.oidcClient.view',
+              keepAlive: true,
+            },
+          },
+          {
+            path: 'oidc-grants',
+            name: 'identity.oidcGrants',
+            component: () => import('../pages/identity/OidcGrants.vue'),
+            meta: {
+              moduleGate: 'identity-openidconnect',
+              title: 'tnzi.admin.modules.identity.oidcGrants.title',
+              permission: 'identity.oidcGrant.view',
+              keepAlive: true,
+            },
+          },
         ],
       },
 

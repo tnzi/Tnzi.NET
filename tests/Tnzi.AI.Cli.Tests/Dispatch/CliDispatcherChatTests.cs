@@ -11,6 +11,8 @@ public class CliDispatcherChatTests : IntegratedTestBase<CliChatDbContext>
     private static readonly Guid RuntimeId = Guid.Parse("22222222-2222-2222-2222-2222222222d2");
     private static readonly byte[] Png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x02];
 
+    private readonly SwitchableFilePolicy _filePolicy = new();
+
     protected override void ConfigureServices(IServiceCollection services)
     {
         services.AddScoped<IRepository<CliRun, Guid>, EFCoreRepository<CliChatDbContext, CliRun, Guid>>();
@@ -23,6 +25,7 @@ public class CliDispatcherChatTests : IntegratedTestBase<CliChatDbContext>
         services.AddScoped<IRepository<AgentAttachment, Guid>, EFCoreRepository<CliChatDbContext, AgentAttachment, Guid>>();
         services.AddScoped<IAgentAttachmentService, AgentAttachmentService>();
         services.AddScoped<CliRunTokenService>();
+        services.AddScoped<ICliFileAttachmentPolicy>(_ => _filePolicy);
 
         MapperExtensions.SetMapper(new Mapper(new TypeAdapterConfig()));
     }
@@ -61,6 +64,51 @@ public class CliDispatcherChatTests : IntegratedTestBase<CliChatDbContext>
 
         result.Code.ShouldBe(415);
         result.ErrorCode.ShouldBe(ErrorCodes.UnsupportedMediaType);
+        (await DbContext.Set<CliRun>().CountAsync()).ShouldBe(0);
+        (await DbContext.Set<AgentAttachment>().CountAsync()).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task AFile_ForATurnThatTakesFiles_IsStoredWithItsNameAndType_EvenWhereTheProviderTakesNoAttachments()
+    {
+        var (threadId, messageId) = await SeedThreadWithQuestionAsync();
+        _filePolicy.Accepts = true;
+        var csv = "a,b\n1,2\n"u8.ToArray();
+
+        var result = await CreateDispatcher(acceptsAttachments: false).EnqueueAsync(new CliRunRequestDto
+        {
+            AgentId = AgentId, ThreadId = threadId, UserMessageId = messageId, Prompt = "sum column b",
+            Attachments = [new DocumentContentPartDto { Base64Data = Convert.ToBase64String(csv), MediaType = "text/csv", FileName = "data.csv" }]
+        });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        var stored = await DbContext.Set<AgentAttachment>().AsNoTracking().SingleAsync();
+        stored.FileName.ShouldBe("data.csv");
+        stored.MediaType.ShouldBe("text/csv");
+        stored.Content.ShouldBe(csv);
+        stored.RunId.ShouldBe(result.Data);
+        stored.MessageId.ShouldBe(messageId);
+        var asked = _filePolicy.Requests.ShouldHaveSingleItem();
+        asked.AgentId.ShouldBe(AgentId);
+        asked.ThreadId.ShouldBe(threadId);
+        asked.UserMessageId.ShouldBe(messageId);
+        asked.Files.ShouldHaveSingleItem().Size.ShouldBe(csv.Length);
+    }
+
+    [Fact]
+    public async Task AFile_ForATurnThatDoesNotTakeFiles_IsRefusedWith415_AndNothingIsQueued()
+    {
+        var (threadId, messageId) = await SeedThreadWithQuestionAsync();
+
+        var result = await CreateDispatcher().EnqueueAsync(new CliRunRequestDto
+        {
+            AgentId = AgentId, ThreadId = threadId, UserMessageId = messageId, Prompt = "read",
+            Attachments = [new DocumentContentPartDto { Base64Data = Convert.ToBase64String("x"u8.ToArray()), FileName = "x.txt" }]
+        });
+
+        result.Code.ShouldBe(415);
+        result.ErrorCode.ShouldBe(ErrorCodes.UnsupportedMediaType);
+        result.Message.ShouldNotBeNull().ShouldContain("x.txt");
         (await DbContext.Set<CliRun>().CountAsync()).ShouldBe(0);
         (await DbContext.Set<AgentAttachment>().CountAsync()).ShouldBe(0);
     }
@@ -150,7 +198,7 @@ public class CliDispatcherChatTests : IntegratedTestBase<CliChatDbContext>
             ServiceProvider,
             Registry(acceptsAttachments: true));
 
-        (await service.GetByAgentIdAsync(AgentId))!.AcceptsAttachments.ShouldBeTrue();
+        (await service.GetByAgentIdAsync(AgentId))!.AcceptedAttachments.ShouldBe(CliAttachmentKinds.Images | CliAttachmentKinds.Documents);
     }
 
     // ---------------------------------------------------------------- helpers
@@ -179,7 +227,7 @@ public class CliDispatcherChatTests : IntegratedTestBase<CliChatDbContext>
     private static ICliProviderRegistry Registry(bool acceptsAttachments)
     {
         var registry = new Mock<ICliProviderRegistry>();
-        registry.Setup(r => r.Find("claude")).Returns(CliBuiltInProviders.All["claude"] with { AcceptsAttachments = acceptsAttachments });
+        registry.Setup(r => r.Find("claude")).Returns(CliBuiltInProviders.All["claude"] with { Attachments = acceptsAttachments ? CliAttachmentKinds.Images | CliAttachmentKinds.Documents : CliAttachmentKinds.None });
         return registry.Object;
     }
 
@@ -222,5 +270,18 @@ public class CliDispatcherChatTests : IntegratedTestBase<CliChatDbContext>
         await DbContext.SaveChangesAsync();
         DbContext.ChangeTracker.Clear();
         return run.Id;
+    }
+
+    private sealed class SwitchableFilePolicy : ICliFileAttachmentPolicy
+    {
+        public bool Accepts { get; set; }
+
+        public List<CliFileAttachmentRequest> Requests { get; } = [];
+
+        public Task<bool> AcceptsFilesAsync(CliFileAttachmentRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(Accepts);
+        }
     }
 }

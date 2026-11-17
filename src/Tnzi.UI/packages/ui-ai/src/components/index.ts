@@ -3,11 +3,12 @@
  *
  * Two kinds of subdirectory live here, and the distinction is deliberate:
  *
- *   - **Structural domains** (`layout/`, `overlay/`) hold components that
+ *   - **Structural domains** (`layout/`, `overlay/`, `controls/`) hold components that
  *     carry no AI semantics and only divide or float space. They are the
  *     building blocks a consumer reaches for when assembling a custom shell.
  *   - **Business domains** (`chat/`, `agent/`, `reasoning/`, `artifact/`,
- *     `skill/`, `knowledge/`, `context/`, `streaming/`, `workflow/`, `cli/`)
+ *     `skill/`, `knowledge/`, `context/`, `streaming/`, `workflow/`, `cli/`,
+ *     `approvals/`)
  *     hold components tied to one AI capability.
  *
  * Before the structural domains existed, `chat/` was the de-facto bucket for
@@ -20,8 +21,11 @@
 // Layout chrome (topbar, setting rows/groups)
 export * from './layout/index';
 
-// Floating surfaces (popover menu, user menu)
+// Floating surfaces (popover menu, dropdown menu, user menu, dialogs)
 export * from './overlay/index';
+
+// Form controls and status pieces (buttons, fields, dropdowns, switches, tags)
+export * from './controls/index';
 
 // -- Business domains ------------------------------------------------------
 
@@ -36,6 +40,9 @@ export * from './chat/index';
 
 // Context components
 export * from './context/index';
+
+// Cards a conversation waits on its user for (permissions, questions, plans)
+export * from './approvals/index';
 
 // Agent components
 export * from './agent/index';

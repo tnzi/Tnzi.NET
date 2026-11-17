@@ -183,7 +183,7 @@ public class MemoryAutoPersistTurnTests
         var options = new StaticOptionsMonitor<AIOptions>(aiOptions);
 
         _threadService
-            .Setup(s => s.GetOrCreateThreadAsync(_threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(_threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((_threadId, false));
         _threadService
             .Setup(s => s.GetMessageHistoryAsync(_threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))

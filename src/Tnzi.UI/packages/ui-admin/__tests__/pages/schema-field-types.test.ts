@@ -101,7 +101,8 @@ describe('free-text schema fields render an input', () => {
     for (const file of files) {
       const lines = readFileSync(file, 'utf8').split('\n')
       lines.forEach((line, i) => {
-        if (/\btype:\s*(['"])input\1/.test(line)) hits.push(`${relative(srcDir, file)}:${i + 1}  ${line.trim()}`)
+        // A union in a type annotation (`type: 'input' | 'select'`) is not a schema field.
+        if (/\btype:\s*(['"])input\1(?!\s*\|)/.test(line)) hits.push(`${relative(srcDir, file)}:${i + 1}  ${line.trim()}`)
       })
     }
     expect(hits, `use type: 'text' for a free-text field:\n${hits.join('\n')}`).toEqual([])

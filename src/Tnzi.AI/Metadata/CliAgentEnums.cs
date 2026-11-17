@@ -35,16 +35,44 @@ public enum CliAgentEventType
     Log = 6,
 
     /// <summary>
-    /// CLI 请求批准一个动作（<c>can_use_tool</c> / <c>session/request_permission</c>），等使用方回答。
-    /// 只在「先问我」档且这一轮有人值守时出现；<see cref="Dtos.CliAgentEvent.Permission"/> 带请求 id、选项与过期时间。
+    /// 一个等使用方回答的请求（<c>can_use_tool</c> / <c>session/request_permission</c>）：批准一个动作、回答 agent 的问题、批准 agent 的计划，
+    /// 由 <see cref="Dtos.CliAgentPermission.Kind"/> 区分。只在这一轮有人值守时出现；<see cref="Dtos.CliAgentEvent.Permission"/> 带请求 id、种类、
+    /// 选项与过期时间，问题与计划还带各自的内容。
     /// </summary>
     PermissionRequest = 7,
 
     /// <summary>
-    /// 一个权限请求有了结局（允许、拒绝、超时、随运行结束）。<see cref="Dtos.CliAgentEvent.Permission"/> 的 <c>RequestId</c>
+    /// 一个请求有了结局（允许、拒绝、超时、随运行结束）。<see cref="Dtos.CliAgentEvent.Permission"/> 的 <c>RequestId</c>
     /// 指向那条请求，<c>Status</c> 是结局。
     /// </summary>
-    PermissionResolved = 8
+    PermissionResolved = 8,
+
+    /// <summary>
+    /// 一轮对话在运行中途结束，而 CLI 还会接着跑下一轮（它还有后台任务在跑，任务完成时自己开一轮）。
+    /// 这一轮的回答已经作为一条助手消息写进线程，<see cref="Dtos.CliAgentEvent.Turn"/> 带它的 id 与还在跑的后台任务；
+    /// 之后的事件属于下一轮的回答。
+    /// </summary>
+    TurnCompleted = 9,
+
+    /// <summary>
+    /// CLI 压缩了会话上下文（手动的 <c>/compact</c> 或上下文将满时自动压缩）。<see cref="Dtos.CliAgentEvent.Compaction"/>
+    /// 带触发方式与压缩前后的 token 数。
+    /// </summary>
+    Compacted = 10,
+
+    /// <summary>
+    /// 一个 CLI 任务开始、有了进展或结束了：agent 派出的子 agent（claude 的 <c>Agent</c> 工具），或在后台跑的命令。
+    /// <see cref="Dtos.CliAgentEvent.CallId"/> 是起它的那次工具调用，<see cref="Dtos.CliAgentEvent.Task"/> 带种类、说明、状态与用量；
+    /// 嵌套派出的子 agent 在 <see cref="Dtos.CliAgentEvent.ParentCallId"/> 上指向派出它的上一层。
+    /// </summary>
+    Task = 11,
+
+    /// <summary>
+    /// 线程消息队列交给这一轮的一条用户消息有了着落：agent 在两步之间收下了它（<see cref="Dtos.CliUserMessage.Taken"/>），
+    /// 或者 CLI 不收它（拒绝、会话结束时还没轮到）。<see cref="Dtos.CliAgentEvent.UserMessage"/> 带排队消息的 id、正文，
+    /// 收下时还带它写进线程的那条用户消息与它之前那一段回答。收下之后的事件属于对它的回答。
+    /// </summary>
+    UserMessage = 12
 }
 
 /// <summary>
@@ -176,7 +204,41 @@ public enum CliRunFailureReason
     /// 运行时所在的执行目标（例如某个用户的工作区容器）没有上线：使用方拒绝唤起它，
     /// 或者唤起之后在 <c>AI:Cli:Activation:Timeout</c> 之内一直没连上。进程一次都没起，<c>Error</c> 写着原因。
     /// </summary>
-    TargetUnavailable = 19
+    TargetUnavailable = 19,
+
+    /// <summary>
+    /// 这一轮的输入 CLI 收不了：带着图片附件，而 CLI 在握手时报告它不收图片。整轮不跑，而不是只把文字发过去：
+    /// 那样的回合看上去和成功一模一样，用户以为模型看到了图片。
+    /// </summary>
+    UnsupportedInput = 20
+}
+
+/// <summary>
+/// 一个 provider 能随提示接收的附件种类。
+/// </summary>
+[Flags]
+public enum CliAttachmentKinds
+{
+    /// <summary>不收附件。</summary>
+    None = 0,
+
+    /// <summary>PNG / JPEG / GIF / WebP 图片。</summary>
+    Images = 1,
+
+    /// <summary>PDF 文档。</summary>
+    Documents = 2
+}
+
+/// <summary>
+/// <see cref="CliAttachmentKinds"/> 的判断。
+/// </summary>
+public static class CliAttachmentKindsExtensions
+{
+    /// <summary>这些种类收不收某个媒体类型的附件（<c>image/*</c> 算图片，其余算文档）。</summary>
+    public static bool Accepts(this CliAttachmentKinds kinds, string mediaType)
+        => mediaType.StartsWith("image/", StringComparison.Ordinal)
+            ? kinds.HasFlag(CliAttachmentKinds.Images)
+            : kinds.HasFlag(CliAttachmentKinds.Documents);
 }
 
 /// <summary>

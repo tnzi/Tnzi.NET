@@ -15,12 +15,12 @@
  * `pwd-login` (the consumer's `register` callback may also navigate elsewhere).
  */
 import { computed, reactive, ref } from 'vue'
-import { NForm, NFormItem, NInput, NButton, NSpace, type FormRules } from 'naive-ui'
-import { TSvgIcon, TCaptcha } from '@tnzi/ui'
-import { useFormRules } from '@tnzi/ui'
+import { NForm, NFormItem, NInput, NButton, type FormRules } from 'naive-ui'
+import { TSvgIcon } from '@tnzi/ui'
+import TCaptcha from '../../../components/forms/TCaptcha.vue'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
+import { useNaiveFormRules, useNaiveLoginAccountField } from '../../../headless/useNaiveFormRules'
 import { useCaptcha } from '@tnzi/ui'
-import { useLoginAccountField } from '@tnzi/ui'
 import { detectAccountType } from '../../../headless/account-type'
 import { useLoginContext } from '@tnzi/ui'
 import { isScriptCaptchaProvider } from '@tnzi/core/services/captcha'
@@ -28,10 +28,10 @@ import { isScriptCaptchaProvider } from '@tnzi/core/services/captcha'
 defineOptions({ name: 'Register' })
 
 const { translate, toggleLoginModule, callbacks, ui, features, resolveUrl } = useLoginContext()
-const { rules: r } = useFormRules(translate)
+const { rules: r } = useNaiveFormRules(translate)
 const { formRef, validate } = useNaiveForm()
 const { label: codeBtnLabel, isCounting, loading: sending, getCaptcha } = useCaptcha({ translate })
-const { rule: accountRule, label: accountLabel, placeholder: accountPlaceholder } = useLoginAccountField(
+const { rule: accountRule, label: accountLabel, placeholder: accountPlaceholder } = useNaiveLoginAccountField(
   translate,
   () => features.registerChannels,
 )
@@ -176,7 +176,7 @@ async function handleSubmit(): Promise<void> {
     <NFormItem path="confirmPassword" :label="translate('admin.login.labels.confirmPassword', 'Confirm password')">
       <NInput v-model:value="model.confirmPassword" type="password" show-password-on="click" :placeholder="translate('admin.login.confirmPasswordPlaceholder', 'Re-enter password')" />
     </NFormItem>
-    <NSpace vertical :size="18" class="w-full">
+    <div class="flex flex-col gap-18px w-full">
       <NButton type="primary" size="large" :round="ui.pill" block :loading="submitting" @click="handleSubmit">
         <template #icon>
           <TSvgIcon icon="mdi:account-plus-outline" :size="18" />
@@ -190,6 +190,6 @@ async function handleSubmit(): Promise<void> {
         {{ translate('admin.login.back', 'Back') }}
       </NButton>
       <p v-if="submitError" class="m-0 text-13px text-error text-center" role="alert">{{ submitError }}</p>
-    </NSpace>
+    </div>
   </NForm>
 </template>

@@ -452,7 +452,18 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         // 2. 查找用户
-        var user = await FindUserByLoginInputAsync(input.UserName, signInOptions);
+        var (user, phoneAmbiguous) = await FindUserByLoginInputAsync(input.UserName, signInOptions);
+        if (phoneAmbiguous)
+        {
+            // 号码被多个账号共用：不替用户挑一个，也不去逐个试密码。按一次失败计数，
+            // 自适应验证码与失败日志照常生效。
+            if (_captchaService != null)
+            {
+                await _captchaService.RecordLoginFailureAsync(loginIdentifier);
+            }
+            await PublishLoginFailedEventAsync(null, input.UserName, "Phone number matches more than one account", ipAddress, userAgent);
+            return Fail<(User, string)>(PhoneNumberAccountLookup.AmbiguousMessage, 409, ErrorCodes.IDENTITY_PHONE_NUMBER_AMBIGUOUS);
+        }
         if (user == null)
         {
             if (_captchaService != null)
@@ -1563,7 +1574,14 @@ public class AuthService : ApplicationService, IAuthService
         return Fail<T>("Captcha verification is required", 400, ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, details);
     }
 
-    private async Task<User?> FindUserByLoginInputAsync(string loginInput, TnziSignInOptions signInOptions)
+    /// <summary>
+    /// 按密码表单里的账号名找用户：用户名 → 邮箱 → 已验证手机号（各自受开关管辖）。
+    /// </summary>
+    /// <returns>
+    /// 找到的用户；或者 <c>PhoneAmbiguous = true</c>：前两者都没命中，而这个号码被不止一个账号持有，
+    /// 调用方必须拒绝而不是挑一个。
+    /// </returns>
+    private async Task<(User? User, bool PhoneAmbiguous)> FindUserByLoginInputAsync(string loginInput, TnziSignInOptions signInOptions)
     {
         User? user = null;
         if (signInOptions.AllowUserNameLogin)
@@ -1576,9 +1594,11 @@ public class AuthService : ApplicationService, IAuthService
         }
         if (user == null && signInOptions.AllowSmsLogin)
         {
-            user = await _userManager.FindByPhoneNumberAsync(loginInput, requireConfirmed: true);
+            var byPhone = await _userManager.ResolveByPhoneNumberAsync(loginInput, requireConfirmed: true);
+            if (byPhone.IsAmbiguous) return (null, true);
+            user = byPhone.User;
         }
-        return user;
+        return (user, false);
     }
 
     private async Task<IList<string>> GetRolesWithTenantContextAsync(User user)
@@ -1901,9 +1921,21 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         // 查找用户（可能不存在）
-        var existingUser = input.Type == TwoFactorType.Email
-            ? await _userManager.FindByEmailAsync(address)
-            : await _userManager.FindByPhoneNumberAsync(address);
+        User? existingUser;
+        if (input.Type == TwoFactorType.Email)
+        {
+            existingUser = await _userManager.FindByEmailAsync(address);
+        }
+        else
+        {
+            // ★ 号码被多个账号共用时不发码：这枚码不管最后落到哪个账号，都是在替用户挑账号。
+            var byPhone = await _userManager.ResolveByPhoneNumberAsync(address);
+            if (byPhone.IsAmbiguous)
+            {
+                return Fail<string>(PhoneNumberAccountLookup.AmbiguousMessage, 409, ErrorCodes.IDENTITY_PHONE_NUMBER_AMBIGUOUS);
+            }
+            existingUser = byPhone.User;
+        }
         var userId = existingUser?.Id;
 
         // ★★★ 账号不存在、而且这一类快速注册也没开着：这枚码拿到 CodeLoginAsync 那边必然
@@ -1990,7 +2022,15 @@ public class AuthService : ApplicationService, IAuthService
         }
         else
         {
-            user = await _userManager.FindByPhoneNumberAsync(address);
+            // ★ 发码时已经挡过一次，这里还要再挡：发码之后号码可能又被登记到别的账号上，
+            // 而手里这枚码证明的只是「收得到这个号码上的短信」，证明不了是哪一个账号的主人。
+            var byPhone = await _userManager.ResolveByPhoneNumberAsync(address);
+            if (byPhone.IsAmbiguous)
+            {
+                await PublishLoginFailedEventAsync(null, address, "Phone number matches more than one account", ipAddress, userAgent);
+                return Fail<CodeLoginResultDto>(PhoneNumberAccountLookup.AmbiguousMessage, 409, ErrorCodes.IDENTITY_PHONE_NUMBER_AMBIGUOUS);
+            }
+            user = byPhone.User;
         }
 
         // 用户不存在，检查是否可以自动注册
@@ -2309,7 +2349,13 @@ public class AuthService : ApplicationService, IAuthService
         {
             // ★ 找回密码只认**已验证**的号码。手机号无唯一约束，允许未验证的号码走这条路，
             // 等于让「把自己的号码填成别人的」变成一条重置他人密码的入口。
-            user = await _userManager.FindByPhoneNumberAsync(input.PhoneNumber, requireConfirmed: true);
+            // ★ 号码被多个已验证账号共用时拒绝：寄出的码会把其中一个账号的密码交给收短信的人。
+            var byPhone = await _userManager.ResolveByPhoneNumberAsync(input.PhoneNumber, requireConfirmed: true);
+            if (byPhone.IsAmbiguous)
+            {
+                return Fail<string>(PhoneNumberAccountLookup.AmbiguousMessage, 409, ErrorCodes.IDENTITY_PHONE_NUMBER_AMBIGUOUS);
+            }
+            user = byPhone.User;
         }
 
         if (_twoFactorService == null)
@@ -2401,11 +2447,18 @@ public class AuthService : ApplicationService, IAuthService
         {
             user = await _userManager.FindByGuidAsync(verifyResult.Data.Value);
         }
+        else if (input.Type == TwoFactorType.Email)
+        {
+            user = await _userManager.FindByEmailAsync(input.Email!);
+        }
         else
         {
-            user = input.Type == TwoFactorType.Email
-                ? await _userManager.FindByEmailAsync(input.Email!)
-                : await _userManager.FindByPhoneNumberAsync(input.PhoneNumber, requireConfirmed: true);
+            var byPhone = await _userManager.ResolveByPhoneNumberAsync(input.PhoneNumber, requireConfirmed: true);
+            if (byPhone.IsAmbiguous)
+            {
+                return Fail<string>(PhoneNumberAccountLookup.AmbiguousMessage, 409, ErrorCodes.IDENTITY_PHONE_NUMBER_AMBIGUOUS);
+            }
+            user = byPhone.User;
         }
 
         if (user == null)

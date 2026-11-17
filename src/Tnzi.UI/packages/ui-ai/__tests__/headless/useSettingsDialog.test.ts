@@ -105,7 +105,7 @@ describe('useSettingsDialog', () => {
       const sections = ref(makeSections())
       const { groupedSections } = useSettingsDialog({ sections })
       expect(groupedSections.value).toHaveLength(1)
-      expect(groupedSections.value[0]?.label).toBe('')
+      expect(groupedSections.value[0]?.key).toBe('')
       expect(groupedSections.value[0]?.sections).toHaveLength(4)
     })
 
@@ -117,11 +117,22 @@ describe('useSettingsDialog', () => {
       ])
       const { groupedSections } = useSettingsDialog({ sections })
 
-      expect(groupedSections.value.map((g) => g.label)).toEqual(['Settings', 'Capabilities'])
+      expect(groupedSections.value.map((g) => g.key)).toEqual(['Settings', 'Capabilities'])
       // Non-adjacent members of the same group merge rather than opening a
       // second block with a duplicate heading.
       expect(groupedSections.value[0]?.sections.map((s) => s.id)).toEqual(['general', 'account'])
       expect(groupedSections.value[1]?.sections.map((s) => s.id)).toEqual(['skills'])
+    })
+
+    it('takes numbers as group keys', () => {
+      const sections = ref<SettingsSection[]>([
+        { id: 'general', label: 'General', group: 1 },
+        { id: 'skills', label: 'Skills', group: 2 },
+        { id: 'account', label: 'Account', group: 1 },
+      ])
+      const { groupedSections } = useSettingsDialog({ sections })
+      expect(groupedSections.value.map((g) => g.key)).toEqual([1, 2])
+      expect(groupedSections.value[0]?.sections.map((s) => s.id)).toEqual(['general', 'account'])
     })
 
     it('keeps the unlabelled block first when it is declared first', () => {
@@ -130,7 +141,7 @@ describe('useSettingsDialog', () => {
         { id: 'skills', label: 'Skills', group: 'Capabilities' },
       ])
       const { groupedSections } = useSettingsDialog({ sections })
-      expect(groupedSections.value.map((g) => g.label)).toEqual(['', 'Capabilities'])
+      expect(groupedSections.value.map((g) => g.key)).toEqual(['', 'Capabilities'])
     })
   })
 
@@ -160,7 +171,7 @@ describe('useSettingsDialog', () => {
 
       query.value = 'skill'
       expect(groupedSections.value).toHaveLength(1)
-      expect(groupedSections.value[0]?.label).toBe('Capabilities')
+      expect(groupedSections.value[0]?.key).toBe('Capabilities')
     })
 
     it('yields no groups when nothing matches', () => {
@@ -183,43 +194,18 @@ describe('useSettingsDialog', () => {
     })
   })
 
-  /* A narrow sheet shows the section list and one section as two screens. */
-  describe('narrow view', () => {
-    it('opens on the section list when shown plainly', () => {
-      const { narrowView, show } = useSettingsDialog({ sections: ref(makeSections()), initialSection: 'model' })
-      show()
-      expect(narrowView.value).toBe('sections')
-    })
+  it('reopens on the section it was left on when shown plainly', () => {
+    const dialog = useSettingsDialog({ sections: ref(makeSections()) })
+    dialog.show('about')
+    dialog.hide()
+    dialog.show()
+    expect(dialog.activeSection.value).toBe('about')
+  })
 
-    it('opens on the section it was asked for', () => {
-      const { narrowView, activeSection, show } = useSettingsDialog({ sections: ref(makeSections()) })
-      show('language')
-      expect(narrowView.value).toBe('section')
-      expect(activeSection.value).toBe('language')
-    })
-
-    it('stays on the list when asked for a section that does not exist', () => {
-      const { narrowView, show } = useSettingsDialog({ sections: ref(makeSections()) })
-      show('missing')
-      expect(narrowView.value).toBe('sections')
-    })
-
-    it('moves to a section when one is picked, and back to the list', () => {
-      const { narrowView, show, setSection, showSections } = useSettingsDialog({ sections: ref(makeSections()) })
-      show()
-      setSection('about')
-      expect(narrowView.value).toBe('section')
-      showSections()
-      expect(narrowView.value).toBe('sections')
-    })
-
-    it('reopening plainly starts on the list again but keeps the selected section', () => {
-      const dialog = useSettingsDialog({ sections: ref(makeSections()) })
-      dialog.show('about')
-      dialog.hide()
-      dialog.show()
-      expect(dialog.narrowView.value).toBe('sections')
-      expect(dialog.activeSection.value).toBe('about')
-    })
+  it('ignores a section it was asked for that does not exist', () => {
+    const dialog = useSettingsDialog({ sections: ref(makeSections()), initialSection: 'model' })
+    dialog.show('missing')
+    expect(dialog.activeSection.value).toBe('model')
+    expect(dialog.open.value).toBe(true)
   })
 })

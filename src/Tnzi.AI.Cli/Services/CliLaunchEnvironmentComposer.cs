@@ -23,8 +23,28 @@ public sealed record CliLaunchEnvironment
     public IReadOnlyDictionary<string, string> Environment { get; init; }
         = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// <see cref="Environment"/> 里按运行签发的凭据（变量名 → 使用方给的稳定标识）：例如每条运行一份、绑着这条运行 id 的模型网关令牌，
+    /// 每次签出来的字节都不同。两次启动比较时（同线程的下一条运行能不能接着用等后台任务的进程，文档 §6.18）这些变量比标识、不比值：
+    /// 标识相同（都是 null 也算）就是同一种启动，标识不同（例如令牌换了一份上游凭据登录）仍要另起进程。
+    /// </summary>
+    /// <remarks>
+    /// 只在两次启动都把同一个变量登记为按运行签发时比标识；只有一边登记的变量照常比值。没出现在 <see cref="Environment"/> 里的名字不起作用。
+    /// 接着用的进程里留着的是起它的那条运行的值，框架不改写：使用方按 <c>ICliProcessOwnership</c> 从起进程的运行找到此刻拥有进程的运行。
+    /// 标识只用于比较，不进日志与运行记录，但也不要把凭据本身当标识。
+    /// </remarks>
+    public IReadOnlyDictionary<string, string?> RunScopedVariables { get; init; }
+        = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>是否注入了兜底令牌（供日志与测试，不含令牌本身）。</summary>
     public bool UsesFallbackToken { get; init; }
+
+    /// <summary>
+    /// 这次运行的用量由使用方在别处计量（例如它的模型网关换上真实凭据、按上游的应答记账）：执行器照常记下 CLI 报的用量供展示，
+    /// 但不把它计入用户的用量窗口、不写用量日志，免得同一笔花费记两次。记在运行上（<c>CliRun.UsageMeteredElsewhere</c>），
+    /// 服务端重启后接回来的进程同样按它办。
+    /// </summary>
+    public bool UsageMeteredElsewhere { get; init; }
 }
 
 /// <summary>

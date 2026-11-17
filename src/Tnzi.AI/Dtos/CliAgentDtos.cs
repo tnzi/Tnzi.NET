@@ -33,6 +33,10 @@ public class CliRuntimeDto
     public int MaxConcurrentRuns { get; set; }
     /// <summary>用户可见的启动骨架预览，如 "claude (stream-json)"</summary>
     public string? LaunchHeader { get; set; }
+    /// <summary>CLI 最近一次握手时自己报的能力；还没跑过、或协议不报（stream-json）时为 null</summary>
+    public CliAgentCapabilities? Capabilities { get; set; }
+    /// <summary><see cref="Capabilities"/> 是什么时候报的</summary>
+    public DateTime? CapabilitiesReportedAt { get; set; }
     /// <summary>创建时间</summary>
     public DateTime CreationTime { get; set; }
 }
@@ -84,9 +88,9 @@ public class CliAgentBindingDto
     /// <summary>本 agent 的空闲看门狗覆盖（只允许收紧，不允许放宽）</summary>
     public TimeSpan? IdleWatchdog { get; set; }
     /// <summary>
-    /// 绑定的 provider 能否接收消息附件（图片、PDF）。不能的 provider 收到带附件的消息时以 415 拒绝，而不是只发文本。
+    /// 绑定的 provider 能接收的消息附件种类（图片、PDF）。收不了的附件以 415 拒绝整条消息，而不是只发文本。
     /// </summary>
-    public bool AcceptsAttachments { get; set; }
+    public CliAttachmentKinds AcceptedAttachments { get; set; }
 }
 
 /// <summary>
@@ -152,11 +156,12 @@ public class CliRunRequestDto
 
     /// <summary>
     /// 随提示一起交给 CLI 的附件：图片（<see cref="ImageContentPartDto"/>，内联 base64）与 PDF
-    /// （<see cref="DocumentContentPartDto"/>）。文本块不在这里，文本走 <see cref="Prompt"/>。
+    /// （<see cref="DocumentContentPartDto"/>）；这一轮收文件时（<c>ICliFileAttachmentPolicy</c>）还有其余类型的文件
+    /// （<see cref="DocumentContentPartDto"/>，不交给模型，agent 用工具打开）。文本块不在这里，文本走 <see cref="Prompt"/>。
     /// </summary>
     /// <remarks>
     /// 入队时按 <c>AI:Chat:Attachments</c> 校验并存档（与 <see cref="UserMessageId"/> 关联，线程重新加载时随消息显示），
-    /// provider 不接收附件、类型不支持、超出上限都当场拒绝，绝不只发文本。
+    /// provider 不接收附件、类型不支持（或这一轮不收文件）、超出上限都当场拒绝，绝不只发文本。
     /// </remarks>
     public List<ContentPartDto>? Attachments { get; set; }
 
@@ -176,26 +181,52 @@ public class CliRunRequestDto
     public string? Model { get; set; }
 
     /// <summary>
-    /// 这一轮有没有人在等：true = 「先问我」档位下的权限请求交给使用方批准（<c>PermissionRequest</c> 事件 + 回答接口）；
-    /// false = 没有人能回答（定时任务、后台派发），要权限的操作按档位直接拒绝。null = false。
+    /// 这一轮的推理强度（运行时原生值）；null = 用绑定上的 <c>ThinkingLevel</c>。
+    /// </summary>
+    /// <remarks>
+    /// 校验口径同 <see cref="Model"/>：调度器按这一轮的模型可选的档位校验（<c>IUsagePolicyService.ResolveChatTurnAsync</c>），
+    /// 不在其中答 403 <c>AI_EFFORT_NOT_ALLOWED</c>；持 <c>ai.cliRun.execute</c> 的调用方与没有登录用户的进程内调用原样采纳。
+    /// </remarks>
+    [MaxLength(64)]
+    public string? Effort { get; set; }
+
+    /// <summary>
+    /// 这一轮的每轮元数据（聊天门面交来的 <c>ChatRequestDto.Metadata</c>，已校验）；不落库。校验模型与强度时交给应用的
+    /// <c>IChatModelTargetResolver</c>（用户在输入框旁的「运行选择」），落点解析时在 <c>CliRunPlacementRequest.Metadata</c> 里。
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyDictionary<string, JsonElement>? Metadata { get; set; }
+
+    /// <summary>
+    /// 这一轮有没有人在等：true = agent 可以问用户问题（<c>AskUserQuestion</c>）、交出计划等批准（<c>ExitPlanMode</c>），
+    /// 「先问我」与「计划」档的权限请求交给使用方批准（都是 <c>PermissionRequest</c> 事件 + 回答接口）；
+    /// false = 没有人能回答（定时任务、后台派发）：agent 拿不到提问工具，要权限的操作按档位直接拒绝。null = false。
     /// </summary>
     /// <remarks>
     /// 聊天路径（门面）对有登录用户的一轮给 true。启动档案的 <c>CliLaunchProfile.Attended</c> 可以按运行改写它。
-    /// 只影响「先问我」档：全权、改工作区、只读三档从不发权限请求。
+    /// 问题与计划只有 provider 支持时才有（claude）；别的 provider 上这一项只影响「先问我」档的权限请求。
     /// </remarks>
     public bool? Attended { get; set; }
 }
 
 /// <summary>
-/// 回答外部运行的一个权限请求。
+/// 回答外部运行的一个请求（权限、问题或计划，见 <see cref="CliAgentPermission.Kind"/>）。
 /// </summary>
 public class CliPermissionAnswerDto
 {
     /// <summary>选中的选项 id：必须是请求事件 <c>permission.options</c> 里的一个。</summary>
     public string OptionId { get; set; } = null!;
 
-    /// <summary>拒绝时交给 agent 的说明（可选，例如「不要改这个文件，改用……」）。允许时忽略。</summary>
+    /// <summary>
+    /// 拒绝时交给 agent 的说明（可选，例如「不要改这个文件，改用……」；拒绝计划时是对计划的意见）。允许时忽略。
+    /// </summary>
     public string? Message { get; set; }
+
+    /// <summary>
+    /// 问题请求选 <see cref="CliInteractionOptionIds.Submit"/> 时必填：问题原文 → 回答。每个问题都要答；单选的问题恰好一个回答，
+    /// 多选的至少一个。回答通常是选项的标签，也可以是用户自己写的一句话。其余请求忽略。
+    /// </summary>
+    public Dictionary<string, List<string>>? Answers { get; set; }
 }
 
 /// <summary>
@@ -245,6 +276,12 @@ public class CliRunDto
     public decimal? EstimatedCostUsd { get; set; }
     /// <summary>这一轮用户选的模型；null = 绑定上配的模型或 provider 默认</summary>
     public string? Model { get; set; }
+    /// <summary>这一轮选的推理强度（运行时原生值）；null = 绑定上的 ThinkingLevel</summary>
+    public string? Effort { get; set; }
+    /// <summary>这一轮结束时上下文窗口里的 token 数（主对话最后一次模型调用的输入加输出）；协议不报时为 null</summary>
+    public long? ContextTokens { get; set; }
+    /// <summary>那次调用的模型的上下文窗口大小；CLI 没报时为 null</summary>
+    public long? ContextWindow { get; set; }
     /// <summary>这次运行回答的用户消息</summary>
     public Guid? UserMessageId { get; set; }
     /// <summary>运行结束时写进线程的回复消息（没写时为 null）</summary>
@@ -276,6 +313,8 @@ public class CliRunMessageDto
     public string? Tool { get; set; }
     /// <summary>工具调用 ID</summary>
     public string? CallId { get; set; }
+    /// <summary>这条事件发生在哪个子 agent 里：派出它的那次工具调用的 ID；主 agent 的事件为 null</summary>
+    public string? ParentCallId { get; set; }
     /// <summary>工具入参 JSON</summary>
     public string? InputJson { get; set; }
     /// <summary>工具输出（超长截断）</summary>
@@ -288,6 +327,14 @@ public class CliRunMessageDto
     public string? Level { get; set; }
     /// <summary>权限请求与结局（PermissionRequest / PermissionResolved 事件）</summary>
     public CliAgentPermission? Permission { get; set; }
+    /// <summary>一轮在运行中途结束（TurnCompleted 事件）：写进线程的回答与还在跑的后台任务</summary>
+    public CliTurnBoundary? Turn { get; set; }
+    /// <summary>一次上下文压缩（Compacted 事件）</summary>
+    public CliCompaction? Compaction { get; set; }
+    /// <summary>一个子 agent 的开始、进展或结局（Task 事件）</summary>
+    public CliTask? Task { get; set; }
+    /// <summary>线程消息队列交给这一轮的一条用户消息有了着落（UserMessage 事件）</summary>
+    public CliUserMessage? UserMessage { get; set; }
     /// <summary>产生时间</summary>
     public DateTime CreationTime { get; set; }
 }

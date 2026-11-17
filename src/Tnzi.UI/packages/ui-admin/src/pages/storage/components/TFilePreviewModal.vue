@@ -12,7 +12,8 @@
  */
 import { computed } from 'vue'
 import { NModal, NImage, NButton } from 'naive-ui'
-import { TOverlayTheme, TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
+import TOverlayTheme from '../../../components/overlay/TOverlayTheme.vue'
 import { fileGlyph, isImageType } from '../file-icons'
 import type { FileRecordDto } from '@tnzi/core/services/storage'
 

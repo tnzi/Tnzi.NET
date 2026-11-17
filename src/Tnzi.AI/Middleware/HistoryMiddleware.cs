@@ -59,9 +59,10 @@ public class HistoryMiddleware : IAiMiddleware
                 if (!string.IsNullOrWhiteSpace(userTurnText))
                 {
                     var preGenUserId = SequentialGuid.NewGuid();
-                    userMessageId = context.Request.TurnMetadata is { Count: > 0 } metadata
+                    userMessageId = context.Request.TurnMetadata is { Count: > 0 } || context.Request.SentAt is not null
                         ? await _threadService.SaveUserMessageAsync(
-                            threadId.Value, userTurnText, metadata, messageId: preGenUserId, ct: cancellationToken)
+                            threadId.Value, userTurnText, context.Request.TurnMetadata, messageId: preGenUserId,
+                            sentAt: context.Request.SentAt, ct: cancellationToken)
                         : await _threadService.SaveMessageAsync(
                             threadId.Value,
                             "user",
@@ -222,10 +223,11 @@ public class HistoryMiddleware : IAiMiddleware
                 if (!string.IsNullOrWhiteSpace(userTurnText))
                 {
                     var userId = preGenUserMessageId ?? SequentialGuid.NewGuid();
-                    if (context.Request.TurnMetadata is { Count: > 0 } metadata)
+                    if (context.Request.TurnMetadata is { Count: > 0 } || context.Request.SentAt is not null)
                     {
                         await _threadService.SaveUserMessageAsync(
-                            threadId.Value, userTurnText, metadata, messageId: userId, ct: CancellationToken.None);
+                            threadId.Value, userTurnText, context.Request.TurnMetadata, messageId: userId,
+                            sentAt: context.Request.SentAt, ct: CancellationToken.None);
                     }
                     else
                     {

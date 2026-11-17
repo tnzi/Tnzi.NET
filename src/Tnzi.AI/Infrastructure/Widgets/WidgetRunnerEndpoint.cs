@@ -13,10 +13,22 @@ namespace Tnzi.AI.Infrastructure.Widgets;
 /// Here the response's policy applies to the runner and to the widget it shows.
 /// </para>
 /// <para>
-/// <c>sandbox allow-scripts</c> gives both an opaque origin (no cookies, storage or token of any
-/// site), and the fetch directives allow no network at all: images, fonts and media only from
-/// <c>data:</c> / <c>blob:</c>. <c>X-Frame-Options</c> set by the security-headers middleware is
-/// removed, since being framed is this page's purpose; who may frame it is <c>frame-ancestors</c>.
+/// <c>sandbox allow-scripts allow-forms</c> gives both an opaque origin (no cookies, storage or
+/// token of any site), and the fetch directives allow no network at all: images, fonts and media
+/// only from <c>data:</c> / <c>blob:</c>. <c>X-Frame-Options</c> set by the security-headers
+/// middleware is removed, since being framed is this page's purpose; who may frame it is
+/// <c>frame-ancestors</c>.
+/// </para>
+/// <para>
+/// <c>allow-forms</c> is there only so a widget's <c>&lt;form&gt;</c> fires <c>submit</c> (and
+/// Enter in a field submits it): without it the browser drops the submission before the event, and
+/// widget authors write ordinary forms. It grants no way out. A form submission is a navigation,
+/// and <c>form-action 'none'</c> blocks every action URL, for this page and for the widget's srcdoc
+/// frame, which inherits the policy; a <c>target</c> of <c>_blank</c>, <c>_top</c> or
+/// <c>_parent</c> stays blocked by the absence of <c>allow-popups</c> and
+/// <c>allow-top-navigation</c> and by the sandbox's rule that a frame navigates only itself and
+/// its descendants; and the origin stays opaque with <c>connect-src 'none'</c>. The client's bridge
+/// also cancels every submission the widget did not, so a form never starts to navigate at all.
 /// </para>
 /// </remarks>
 public static class WidgetRunnerEndpoint
@@ -32,7 +44,7 @@ public static class WidgetRunnerEndpoint
     public static string BuildContentSecurityPolicy(string frameAncestors)
     {
         Check.NotNullOrWhiteSpace(frameAncestors);
-        return "sandbox allow-scripts; " +
+        return "sandbox allow-scripts allow-forms; " +
                "default-src 'none'; " +
                "script-src 'unsafe-inline'; " +
                "style-src 'unsafe-inline'; " +

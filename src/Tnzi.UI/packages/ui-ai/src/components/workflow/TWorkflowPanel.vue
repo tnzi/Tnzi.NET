@@ -20,7 +20,7 @@ defineProps<{
 <style scoped>
 .t-wf-panel {
   position: absolute;
-  z-index: 10;
+  z-index: var(--tnzi-ai-z-sticky, 10);
 }
 .t-wf-panel--top-left { top: 12px; left: 12px; }
 .t-wf-panel--top-right { top: 12px; right: 12px; }

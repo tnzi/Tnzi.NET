@@ -133,7 +133,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { NAlert, NButton } from 'naive-ui'
-import { THint } from '@tnzi/ui'
+import THint from '../../components/display/THint.vue'
 import { formatCurrency, formatDateOnly } from '@tnzi/core'
 import {
   type BillingAccountDto,

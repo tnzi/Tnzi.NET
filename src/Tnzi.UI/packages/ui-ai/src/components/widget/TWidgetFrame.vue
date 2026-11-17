@@ -5,19 +5,33 @@
  * to it over `postMessage`, the frame as tall as the document says (within `maxHeight`; longer
  * content scrolls inside the frame), the page's theme handed in and kept up to date.
  *
- * Isolation does not depend on the page this sits in. The iframe is `sandbox="allow-scripts"`
- * (no same-origin, no popups, no top navigation, no forms) and the runner page carries its own
- * policy (an origin-less sandbox, no network), so a widget can reach neither this page's storage,
- * cookies or token nor the network, and it runs under the runner's policy, not this page's: a page
- * under `script-src 'self'` only has to allow the runner in `frame-src`. Serve the runner from a
- * host name of its own (`runnerUrl`) to keep the widget off the chat's site altogether.
+ * Isolation does not depend on the page this sits in. The iframe is
+ * `sandbox="allow-scripts allow-forms"` (no same-origin, no popups, no top navigation) and the
+ * runner page carries its own policy (an origin-less sandbox, no network, `form-action 'none'`),
+ * so a widget can reach neither this page's storage, cookies or token nor the network, and it runs
+ * under the runner's policy, not this page's: a page under `script-src 'self'` only has to allow
+ * the runner in `frame-src`. Serve the runner from a host name of its own (`runnerUrl`) to keep the
+ * widget off the chat's site altogether.
+ *
+ * Forms: `allow-forms` is there so a widget's `<form>` fires `submit` (and Enter in a field submits
+ * it), as widget authors expect; without it the browser drops the submission before the event.
+ * It opens nothing else. A form submission is a navigation, and every navigation a form could make
+ * is closed: the runner's `form-action 'none'` (which the widget's srcdoc frame inherits) blocks
+ * any action URL, the bridge cancels every `submit` the widget did not (so a form never even tries
+ * to leave), a `target` of `_blank`, `_top` or `_parent` stays blocked by the missing
+ * `allow-popups` / `allow-top-navigation` and the sandbox's own navigation rule, and the origin
+ * stays opaque with `connect-src 'none'`. Data leaves a widget only through the host's bridge.
+ *
+ * The host context carries the language (`locale`): the `locale` prop, else the language the app
+ * provides with its catalogue (`createAiI18nPlugin` / `createAiI18n`), else `<html lang>`. A change
+ * of any of them, like a change of theme, reaches the widget as `host-context-changed`.
  *
  * A frame far outside the viewport is unmounted (its height kept, so nothing jumps) and mounted
  * again when it comes near, so a long thread does not keep dozens of live frames. Coming back
  * restarts the widget.
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { useAiI18n } from '../../i18n/index'
+import { useAiI18n, useAiLocale } from '../../i18n/index'
 import { composeWidgetDocument, widgetHostContext } from './widget-document'
 import { createWidgetHost, type WidgetHost, type WidgetHostHandlers } from './widget-host'
 import { readWidgetTheme, sameWidgetTheme, watchWidgetTheme, type WidgetTheme } from './widget-theme'
@@ -39,16 +53,23 @@ const props = withDefaults(
     /** Unmount the frame while it is far outside the viewport. */
     lazy?: boolean
     /**
-     * The iframe's sandbox. Scripts only: no same-origin, popups, top navigation, forms or
-     * modals. The runner page also sandboxes itself (its CSP `sandbox allow-scripts`), so adding
-     * tokens here cannot give a widget an origin.
+     * The iframe's sandbox. Scripts and forms: no same-origin, popups, top navigation or modals.
+     * The runner page also sandboxes itself (its CSP `sandbox allow-scripts allow-forms`), so
+     * adding tokens here cannot give a widget an origin; dropping `allow-forms` stops widgets'
+     * forms from firing `submit`.
      */
     sandbox?: string
+    /**
+     * The widget's language (a BCP 47 tag) for its host context. Left out, the language the app
+     * provides with its catalogue, else `<html lang>`.
+     */
+    locale?: string
   }>(),
-  { maxHeight: 640, fill: false, handlers: undefined, lazy: true, sandbox: 'allow-scripts' },
+  { maxHeight: 640, fill: false, handlers: undefined, lazy: true, sandbox: 'allow-scripts allow-forms', locale: undefined },
 )
 
 const t = useAiI18n()
+const appLocale = useAiLocale()
 
 /** Height before the widget has reported one. */
 const INITIAL_HEIGHT = 160
@@ -64,6 +85,8 @@ const navigated = ref(false)
 /** Bumped to replace the iframe with a fresh one. */
 const frameKey = ref(0)
 const theme = shallowRef<WidgetTheme>(readWidgetTheme(null))
+const pageLang = ref(readPageLang())
+const locale = computed(() => props.locale?.trim() || appLocale.value?.trim() || pageLang.value || undefined)
 /** A message the widget wants to send, waiting for the user. */
 const messageRequest = shallowRef<{ text: string; resolve: (ok: boolean) => void } | null>(null)
 
@@ -82,8 +105,12 @@ const live = computed(() => near.value && !navigated.value && src.value !== null
 
 let host: WidgetHost | null = null
 
+function readPageLang(): string {
+  return typeof document === 'undefined' ? '' : document.documentElement.lang.trim()
+}
+
 function context() {
-  return widgetHostContext(theme.value, props.fill ? 'fullscreen' : 'inline', document.documentElement.lang || undefined)
+  return widgetHostContext(theme.value, props.fill ? 'fullscreen' : 'inline', locale.value)
 }
 
 function confirmMessage(text: string): Promise<boolean> {
@@ -132,6 +159,8 @@ function reload(): void {
 
 // A new iframe element (first mount, coming back into view, reload) gets a fresh host.
 watch(frame, (element) => (element ? startHost() : stopHost()))
+// A language switch reaches a running widget as a context change, as a theme switch does.
+watch(locale, () => host?.contextChanged())
 watch(() => props.html, () => {
   if (frame.value) frameKey.value += 1
 })
@@ -142,6 +171,7 @@ let observer: IntersectionObserver | null = null
 onMounted(() => {
   theme.value = readWidgetTheme(root.value)
   stopTheme = watchWidgetTheme(() => {
+    pageLang.value = readPageLang()
     const next = readWidgetTheme(root.value)
     if (sameWidgetTheme(next, theme.value)) return
     theme.value = next

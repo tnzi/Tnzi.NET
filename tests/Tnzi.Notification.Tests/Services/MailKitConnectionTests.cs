@@ -78,7 +78,7 @@ public class MailKitConnectionTests
     /// <summary>
     /// 最小的 SMTP 中继桩：只宣告 8BITMIME（不宣告 AUTH，也不宣告 STARTTLS），收一封信，记下每一条命令。
     /// </summary>
-    private sealed class SmtpRelayStub : IAsyncDisposable
+    internal sealed class SmtpRelayStub : IAsyncDisposable
     {
         private readonly TcpListener _listener;
         private readonly Task _serving;

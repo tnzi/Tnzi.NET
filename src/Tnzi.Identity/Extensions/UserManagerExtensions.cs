@@ -13,30 +13,14 @@ internal static class UserManagerExtensions
         => userManager.FindByIdAsync(userId.ToString());
 
     /// <summary>
-    /// 根据手机号查找用户。
+    /// 按手机号解析账号：查无 / 恰好一个 / 不止一个。见 <see cref="PhoneNumberAccountLookup"/>。
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// ★★★ <strong><paramref name="requireConfirmed"/> 必须进查询谓词，不能事后过滤。</strong>
-    /// 此前是 <c>FirstOrDefault(...)</c> 之后再判 <c>PhoneNumberConfirmed</c>，返回 <c>null</c> ——
-    /// 而手机号<b>没有唯一约束</b>，任何人都可以把自己的号码填成别人的。于是一条未验证的
-    /// 重复行只要被数据库先返回，真正的号主（号码是已验证的）就再也用不了短信登录与短信找回：
-    /// 查询命中的是那条未验证的行，后置过滤把它变成「查无此人」。
-    /// </para>
-    /// <para>
-    /// ★ 排序也是必须的。无 <c>OrderBy</c> 的 <c>FirstOrDefault</c> 取哪一行由数据库决定，
-    /// 同一个号码在两次请求里可能落到两个账号上 —— 已验证的优先、同档取最早建的那条，
-    /// 结果才是确定的。
-    /// </para>
+    /// ★ 刻意不提供返回 <c>User?</c> 的按号查找：那种形状只能在多个账号同号时替用户挑一个，
+    /// 而在号码被共用的部署里，挑中的往往是最早建的那个管理员账号。
+    /// <paramref name="requireConfirmed"/> 进查询谓词而不是事后过滤：手机号没有唯一约束，
+    /// 事后过滤会让一条未验证的重复行把真号主挡在门外。
     /// </remarks>
-    internal static Task<User?> FindByPhoneNumberAsync(this UserManager<User> userManager, string? phoneNumber, bool requireConfirmed = false)
-    {
-        if (string.IsNullOrWhiteSpace(phoneNumber)) return Task.FromResult<User?>(null);
-
-        return userManager.Users
-            .Where(u => u.PhoneNumber == phoneNumber && (!requireConfirmed || u.PhoneNumberConfirmed))
-            .OrderByDescending(u => u.PhoneNumberConfirmed)
-            .ThenBy(u => u.CreationTime)
-            .FirstOrDefaultAsync();
-    }
+    internal static Task<PhoneNumberAccountLookup> ResolveByPhoneNumberAsync(this UserManager<User> userManager, string? phoneNumber, bool requireConfirmed = false)
+        => PhoneNumberAccountLookup.ResolveAsync(userManager.Users, phoneNumber, requireConfirmed);
 }

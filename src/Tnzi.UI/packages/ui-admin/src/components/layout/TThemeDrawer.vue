@@ -19,7 +19,9 @@ import {
   useMessage,
 } from 'naive-ui'
 import { Icon } from '@iconify/vue'
-import { useTheme, THint, TOverlayTheme, type ThemeContext, type ThemeColors } from '@tnzi/ui'
+import { useTheme, type ThemeContext, type ThemeColors } from '@tnzi/ui'
+import THint from '../display/THint.vue'
+import TOverlayTheme from '../overlay/TOverlayTheme.vue'
 import { DEFAULT_DESKTOP_VIBRANCY,
   useAdminThemeStore,
   VALID_SURFACE_STYLES,

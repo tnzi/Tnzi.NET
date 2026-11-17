@@ -17,7 +17,7 @@
  * ```
  */
 import { onMounted, onBeforeUnmount } from 'vue'
-import { useWidget } from '@tnzi/ui'
+import { useWidget } from './useWidget'
 
 export function useWidgetData(loader: () => Promise<void>): {
   reload: () => Promise<void>

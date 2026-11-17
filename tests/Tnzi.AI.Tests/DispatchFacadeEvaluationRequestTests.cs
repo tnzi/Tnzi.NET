@@ -134,7 +134,7 @@ public class DispatchFacadeEvaluationRequestTests
         public List<SavedMessage> Saved { get; } = [];
 
         public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
-            Guid? threadId, Guid? agentId, CancellationToken ct = default)
+            Guid? threadId, Guid? agentId, string? origin, ThreadListing listing = ThreadListing.Listed, CancellationToken ct = default)
         {
             ThreadsResolved++;
             return Task.FromResult((threadId ?? Guid.NewGuid(), threadId is null));

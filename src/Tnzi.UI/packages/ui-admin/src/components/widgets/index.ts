@@ -8,15 +8,11 @@
  */
 
 // --- Types -----------------------------------------------------------------
-export type {
-  SpanValue,
-  WidgetContext,
-  WidgetDef,
-  WorkbenchConfig,
-} from '@tnzi/ui'
+export type { SpanValue, WidgetContext, WidgetDef, WorkbenchConfig } from './widget-types'
 
 // --- Shell helpers ---------------------------------------------------------
-export { useWidget, WIDGET_CONTEXT_KEY } from '@tnzi/ui'
+export { useWidget } from '../../headless/useWidget'
+export { WIDGET_CONTEXT_KEY } from './widget-types'
 export { useWidgetData } from '../../headless/useWidgetData'
 export { default as TWidgetCard } from './TWidgetCard.vue'
 

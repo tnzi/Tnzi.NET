@@ -8,6 +8,11 @@
 
 // Responsive table - near drop-in NDataTable replacement that auto-stacks into
 // cards on phones - and the card-list primitive underneath it.
+// The plain naive data table wrapper (sortable columns, remote pagination) and
+// a paginated list of rows; list pages use the `crud/` shells instead.
+export { default as TTable } from './TTable.vue'
+export { default as TDataList } from './TDataList.vue'
+
 export { default as TResponsiveTable } from './TResponsiveTable.vue'
 export type {
   TResponsiveTableProps,
@@ -35,17 +40,10 @@ export type { ItemCardTag, ItemCardMeta, ItemCardTone } from './TItemCard.vue'
 // rendered between the page header and the list/content per the content-page
 // standard). TEmpty is the unified empty-state visual used by the card
 // renderers and available to bespoke pages.
-// TKpiCard was renamed from TStatCard in the 2026-06 audit to avoid colliding
-// with the globally-registered <TStatCard> of @tnzi/ui; a deprecated TStatCard
-// alias is kept for back-compat. @tnzi/ui still exports and globally registers
-// its own TStatCard, so a template that writes <TStatCard> without importing
-// it gets that one, not this alias: import TKpiCard by name.
+// TKpiCard is the content-page KPI card; `TStatCard` (`card/`) is a different
+// component, an `NStatistic` with a trend.
 export { default as TKpiCard } from './TKpiCard.vue'
 export type { TKpiCardProps, TKpiCardTone } from './TKpiCard.vue'
-/** @deprecated use TKpiCard. */
-export { default as TStatCard } from './TKpiCard.vue'
-/** @deprecated use TKpiCardProps / TKpiCardTone. */
-export type { TKpiCardProps as TStatCardProps, TKpiCardTone as TStatCardTone } from './TKpiCard.vue'
 export { default as TKpiRow } from './TKpiRow.vue'
 // Moved to `@tnzi/ui` on 2026-08-02 (framework-wide empty state, also used by
 // `@tnzi/ui-ai`). Re-exported so existing imports keep resolving.

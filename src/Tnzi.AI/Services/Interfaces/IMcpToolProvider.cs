@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// MCP 工具提供者 - 从已配置的 MCP 服务器拉取工具列表，按 AllowedTools 过滤并按 McpServerConfig 做审批包装后返回。
+/// MCP 工具提供者 - 从已配置的 MCP 服务器拉取工具列表，按 AllowedTools / DeniedTools 过滤并按 McpServerConfig 做审批包装后返回。
 /// 审批仅在此处按每服务器配置完成，AgentFactory 不再对 MCP 工具做全局 ToolApproval 包装。
 /// </summary>
 public interface IMcpToolProvider

@@ -14,7 +14,7 @@
     :show-selection="props.showSelection"
     :selected-keys="checkedRowKeys"
     :serial-start="serialStart"
-    :empty-text="emptyText"
+    :empty-text="emptyLine"
     :card-props="cardPropsFn"
     @toggle="onToggleOne"
   >
@@ -30,18 +30,15 @@
       <slot v-else name="rowActions" :row="(row as T)" />
     </template>
     <template #empty>
-      <TEmpty :text="emptyText">
-        <NButton
-          v-if="showCreateCta"
-          class="t-crud-empty-cta"
-          size="small"
-          tertiary
-          type="primary"
-          @click="onEmptyCreate"
-        >
-          {{ createCtaLabel }}
-        </NButton>
-      </TEmpty>
+      <slot name="empty">
+        <TListEmpty
+          :text="emptyLine"
+          :hint="emptyHintLine"
+          :show-create="showCreateCta"
+          :create-label="createCtaLabel"
+          @create="onEmptyCreate"
+        />
+      </slot>
     </template>
   </TDataCardList>
 
@@ -69,31 +66,28 @@
          A first-load empty list on a creatable page also offers a small
          Create call-to-action (hidden for search/filter misses). -->
     <template #empty>
-      <TEmpty :text="emptyText">
-        <NButton
-          v-if="showCreateCta"
-          class="t-crud-empty-cta"
-          size="small"
-          tertiary
-          type="primary"
-          @click="onEmptyCreate"
-        >
-          {{ createCtaLabel }}
-        </NButton>
-      </TEmpty>
+      <slot name="empty">
+        <TListEmpty
+          :text="emptyLine"
+          :hint="emptyHintLine"
+          :show-create="showCreateCta"
+          :create-label="createCtaLabel"
+          @create="onEmptyCreate"
+        />
+      </slot>
     </template>
   </NDataTable>
 </template>
 
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
 import { computed, h, useSlots } from 'vue'
-import { NButton, NDataTable } from 'naive-ui'
+import { NDataTable } from 'naive-ui'
 import { useBreakpoint } from '../../../headless/useBreakpoint'
 import TDataCardList, { type CardColumn } from '../../data/TDataCardList.vue'
-import { TEmpty } from '@tnzi/ui'
 import TRowActions from '../TRowActions.vue'
 import { estimateRowActionsWidth, type RowAction } from '../../../headless/row-actions'
 import { useEmptyCreateCta } from '../../../headless/useEmptyCreateCta'
+import TListEmpty from './TListEmpty.vue'
 import type { UseCrudPageReturn } from '../../../headless/useCrudPage'
 
 export interface TTableRendererProps<T, TId extends string | number = string | number> {
@@ -127,6 +121,10 @@ export interface TTableRendererProps<T, TId extends string | number = string | n
    * checkbox stop propagation, so they keep working over a clickable row.
    */
   rowProps?: (row: T) => Record<string, unknown>
+  /** The page's own empty line (already translated), on a first-load empty list. */
+  emptyText?: string
+  /** A muted sentence under it: what the page is for (already translated). */
+  emptyHint?: string
   translate?: (key: string) => string
 }
 
@@ -139,10 +137,12 @@ const props = withDefaults(defineProps<TTableRendererProps<T, TId>>(), {
   rowActionsCollapse: true,
   rowKey: undefined,
   disableMobileCards: false,
+  emptyText: undefined,
+  emptyHint: undefined,
   translate: undefined,
 })
 
-defineSlots<{ rowActions?: (props: { row: T }) => unknown }>()
+defineSlots<{ rowActions?: (props: { row: T }) => unknown; empty?: () => unknown }>()
 
 const slots = useSlots()
 const bp = useBreakpoint()
@@ -187,15 +187,12 @@ function t(key: string): string {
   return props.translate ? props.translate(key) : key
 }
 
-/** Translated empty text; without a translator let TEmpty/TDataCardList fall
- *  back to 'No data' instead of leaking the raw `admin.crud.empty` key. */
-const emptyText = computed(() => (props.translate ? t('admin.crud.empty') : undefined))
-
 /** First-load empty on a creatable list → offer a small Create CTA inside the
  *  empty state (table + mobile cards). Search/filter misses stay plain. */
-const { showCreateCta, createCtaLabel, onEmptyCreate } = useEmptyCreateCta<T, TId>(
+const { showCreateCta, createCtaLabel, onEmptyCreate, emptyText: emptyLine, emptyHint: emptyHintLine } = useEmptyCreateCta<T, TId>(
   () => props.state,
   () => props.translate,
+  () => ({ text: props.emptyText, hint: props.emptyHint }),
 )
 
 function maybeTranslate(value: string | undefined, fallback: string): string {
@@ -409,8 +406,13 @@ function onToggleOne(key: string | number): void {
    the column header. Mirrors the old monolith's `.t-crud-page__table
    { flex: 1 1 auto; min-height: 0 }`. Container mode keeps natural height. */
 .t-table-renderer--page { flex: 1 1 auto; min-height: 0; }
-/* The card list owns its own scroll; in page mode let it fill + scroll. */
-.t-table-renderer--cards.t-table-renderer--page { overflow: hidden; }
+/* The card list owns its own scroll. This class lands on TDataCardList's root
+   (`.t-data-cards`), so whatever is set here outranks that component's own
+   `overflow-y: auto`: setting `overflow` here once made every phone list in
+   page mode unscrollable (only the first cards reachable, wheel and touch
+   dead). Only the horizontal axis is clipped; the vertical one stays the card
+   list's. Guarded by __tests__/components/crud/phone-card-list-scroll.test.ts. */
+.t-table-renderer--cards.t-table-renderer--page { overflow-x: hidden; overflow-y: auto; }
 :deep(.n-data-table-th) { padding: 8px 12px; }
 :deep(.n-data-table-td) { padding: 9px 12px; }
 </style>

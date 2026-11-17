@@ -6,9 +6,8 @@
  * Slot: #header for custom header content.
  */
 
-import { NButton } from 'naive-ui';
 import { watch } from 'vue';
-import { Icon } from '@iconify/vue';
+import TIconButton from '../components/controls/TIconButton.vue';
 import { useEmbedMode } from '../headless/useEmbedMode';
 import TChatBox from '../components/chat/TChatBox.vue';
 import type { ChatMessage } from '../headless/useChat';
@@ -89,9 +88,7 @@ watch(isOpen, (v) => {
         <slot name="header">
           <span class="text-sm font-medium">{{ t.embed.title }}</span>
         </slot>
-        <NButton text size="small" :aria-label="t.embed.close" @click="toggle()">
-          <template #icon><Icon icon="lucide:x" class="size-4" /></template>
-        </NButton>
+        <TIconButton icon="lucide:x" :label="t.embed.close" @click="toggle()" />
       </div>
 
       <!-- Chat -->
@@ -116,26 +113,29 @@ watch(isOpen, (v) => {
 .t-sidebar-chat__overlay {
   position: fixed;
   inset: 0;
-  z-index: 40;
-  background-color: rgba(0, 0, 0, 0.2);
+  z-index: calc(var(--tnzi-ai-z-drawer, 50) - 1);
+  background-color: var(--tnzi-ai-backdrop);
 }
 .t-sidebar-chat__panel {
   position: fixed;
   top: var(--tnzi-overlay-inset-top, 0px);
   right: 0;
   bottom: 0;
-  z-index: 50;
+  z-index: var(--tnzi-ai-z-drawer, 50);
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--tnzi-border);
-  background-color: var(--tnzi-container-bg);
+  /* A phone narrower than the panel gets the whole width. */
+  max-width: 100vw;
+  border-left: 1px solid var(--tnzi-ai-border);
+  background-color: var(--tnzi-ai-surface);
   box-shadow: -4px 0 20px rgba(0, 0, 0, 0.1);
 }
 .t-sidebar-chat__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--tnzi-border);
-  padding: 8px 16px;
+  border-bottom: 1px solid var(--tnzi-ai-border);
+  padding: 6px 8px 6px 16px;
+  color: var(--tnzi-ai-text);
 }
 </style>

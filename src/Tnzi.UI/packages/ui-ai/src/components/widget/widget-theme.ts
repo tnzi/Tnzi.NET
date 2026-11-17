@@ -42,6 +42,11 @@ const SOURCES: Readonly<Record<string, readonly [token: string | null, light: st
   '--border-radius-sm': [null, '6px', '6px'],
   '--border-radius-md': [null, '10px', '10px'],
   '--border-radius-lg': [null, '14px', '14px'],
+  // The scrollbar the widget document draws itself with (see `widget-document.ts`), the
+  // conversation's own: a host that retints its scrollbar retints the widget's too.
+  '--scrollbar-size': ['--tnzi-ai-scrollbar-size', '8px', '8px'],
+  '--scrollbar-thumb': ['--tnzi-ai-scrollbar-thumb', 'rgba(0, 0, 0, 0.18)', 'rgba(255, 255, 255, 0.18)'],
+  '--scrollbar-thumb-hover': ['--tnzi-ai-scrollbar-thumb-hover', 'rgba(0, 0, 0, 0.32)', 'rgba(255, 255, 255, 0.34)'],
 };
 
 /** The variable names a widget can use. */
@@ -73,13 +78,13 @@ export function sameWidgetTheme(a: WidgetTheme, b: WidgetTheme): boolean {
 }
 
 /**
- * Calls `onChange` when the page may have switched theme (a class, `data-theme` or inline style
- * changed on `<html>` or `<body>`). Returns the function that stops watching.
+ * Calls `onChange` when the page may have switched theme or language (a class, `data-theme`,
+ * inline style or `lang` changed on `<html>` or `<body>`). Returns the function that stops watching.
  */
 export function watchWidgetTheme(onChange: () => void): () => void {
   if (typeof MutationObserver === 'undefined' || typeof document === 'undefined') return () => {};
   const observer = new MutationObserver(() => onChange());
-  const options: MutationObserverInit = { attributes: true, attributeFilter: ['class', 'data-theme', 'style'] };
+  const options: MutationObserverInit = { attributes: true, attributeFilter: ['class', 'data-theme', 'style', 'lang'] };
   observer.observe(document.documentElement, options);
   if (document.body) observer.observe(document.body, options);
   return () => observer.disconnect();

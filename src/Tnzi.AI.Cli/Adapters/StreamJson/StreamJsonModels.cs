@@ -16,6 +16,13 @@ internal sealed class StreamJsonFrame
     [JsonPropertyName("subtype")]
     public string? Subtype { get; set; }
 
+    /// <summary>
+    /// <c>system</c> 的 <c>init</c> / <c>status</c> 帧：会话此刻的权限档位（<c>plan</c>、<c>default</c>、<c>acceptEdits</c>……）。
+    /// 实测 claude 2.1.317 每次换档都发一条 <c>status</c>：进计划（<c>EnterPlanMode</c> 或启动即计划档）、计划获批后回到原档位。
+    /// </summary>
+    [JsonPropertyName("permissionMode")]
+    public string? PermissionMode { get; set; }
+
     [JsonPropertyName("session_id")]
     public string? SessionId { get; set; }
 
@@ -28,6 +35,13 @@ internal sealed class StreamJsonFrame
 
     [JsonPropertyName("message")]
     public JsonElement? Message { get; set; }
+
+    /// <summary>
+    /// assistant / user 帧：这条消息属于哪个工具调用里的子 agent（<c>Task</c>）；主对话的消息为 null。
+    /// 上下文窗口的占用只看主对话：子 agent 有它自己的上下文。
+    /// </summary>
+    [JsonPropertyName("parent_tool_use_id")]
+    public string? ParentToolUseId { get; set; }
 
     [JsonPropertyName("result")]
     public string? ResultText { get; set; }
@@ -59,6 +73,10 @@ internal sealed class StreamJsonFrame
     [JsonPropertyName("request")]
     public JsonElement? Request { get; set; }
 
+    /// <summary><c>control_response</c> 帧：CLI 对框架发出的控制请求的应答（<c>subtype</c> <c>success</c> / <c>error</c>、<c>request_id</c>、<c>error</c>）。</summary>
+    [JsonPropertyName("response")]
+    public JsonElement? Response { get; set; }
+
     /// <summary>
     /// assistant 帧：这条消息包着一次 API 错误时的公开分类（<c>rate_limit</c>、<c>authentication_failed</c>……）。
     /// </summary>
@@ -80,6 +98,95 @@ internal sealed class StreamJsonFrame
     /// <summary><c>rate_limit_event</c> 帧：配额窗口的状态。</summary>
     [JsonPropertyName("rate_limit_info")]
     public JsonElement? RateLimitInfo { get; set; }
+
+    /// <summary><c>system/background_tasks_changed</c> 帧：此刻还在跑的后台任务（整份，不是增量）。</summary>
+    [JsonPropertyName("tasks")]
+    public JsonElement? Tasks { get; set; }
+
+    /// <summary><c>system/task_notification</c> 帧：哪个任务。</summary>
+    [JsonPropertyName("task_id")]
+    public string? TaskId { get; set; }
+
+    /// <summary><c>system/task_notification</c> 帧：CLI 写的一句结果（"Background command "…" completed (exit code 0)"）。</summary>
+    [JsonPropertyName("summary")]
+    public string? Summary { get; set; }
+
+    // 任务帧的字段。description / prompt / is_backgrounded / status 这几个常见的名字按元素收、读时再看类型：
+    // 同名字段在别的帧上可能是别的类型，类型不符会让整帧反序列化失败、被丢掉。
+
+    /// <summary>
+    /// <c>system/task_started</c> / <c>task_progress</c> / <c>task_notification</c> 帧：派出这个任务的那次工具调用。子 agent 的帧上
+    /// <see cref="ParentToolUseId"/> 就是它。
+    /// </summary>
+    [JsonPropertyName("tool_use_id")]
+    public string? ToolUseId { get; set; }
+
+    /// <summary><c>system/task_started</c> 帧：任务的种类（<c>local_agent</c> = 子 agent，<c>local_bash</c> = 后台命令……）。</summary>
+    [JsonPropertyName("task_type")]
+    public string? TaskType { get; set; }
+
+    /// <summary><c>system/task_started</c> / <c>task_progress</c> 帧：子 agent 的类型（<c>general-purpose</c>、<c>Explore</c>……）。</summary>
+    [JsonPropertyName("subagent_type")]
+    public string? SubagentType { get; set; }
+
+    /// <summary><c>system/task_started</c> 帧：任务的简短说明；<c>task_progress</c> 帧：它此刻在做什么。</summary>
+    [JsonPropertyName("description")]
+    public JsonElement? Description { get; set; }
+
+    /// <summary><c>system/task_started</c> 帧：交给子 agent 的任务。</summary>
+    [JsonPropertyName("prompt")]
+    public JsonElement? Prompt { get; set; }
+
+    /// <summary><c>system/task_started</c> 帧：是不是在后台跑。</summary>
+    [JsonPropertyName("is_backgrounded")]
+    public JsonElement? IsBackgrounded { get; set; }
+
+    /// <summary><c>system/task_started</c> 帧：嵌套派出时上一层子 agent 的任务 id。</summary>
+    [JsonPropertyName("parent_task_id")]
+    public string? ParentTaskId { get; set; }
+
+    /// <summary><c>system/task_progress</c> 帧：子 agent 最近调的工具。</summary>
+    [JsonPropertyName("last_tool_name")]
+    public string? LastToolName { get; set; }
+
+    /// <summary><c>system/task_notification</c> 帧：任务的结局（<c>completed</c> / <c>failed</c> / <c>stopped</c>）。</summary>
+    [JsonPropertyName("status")]
+    public JsonElement? Status { get; set; }
+
+    /// <summary><c>system/compact_boundary</c> 帧：触发方式与压缩前后的 token 数。</summary>
+    [JsonPropertyName("compact_metadata")]
+    public JsonElement? CompactMetadata { get; set; }
+
+    /// <summary>result 帧：这一轮是 CLI 自己处理的本地命令（<c>compact</c> 之类）时它的名字。按元素收，读时再看类型。</summary>
+    [JsonPropertyName("local_command")]
+    public JsonElement? LocalCommand { get; set; }
+
+    /// <summary>result 帧：CLI 排着队、还没开始的轮次数（2.1.316 起有）。</summary>
+    [JsonPropertyName("queued_turn_count")]
+    public int? QueuedTurnCount { get; set; }
+
+    /// <summary>
+    /// result 帧：这一轮是谁开的（<c>{"kind":"task-notification", ...}</c> = 一条任务通知）；人发的那一轮没有它。按元素收，读时再看类型。
+    /// </summary>
+    [JsonPropertyName("origin")]
+    public JsonElement? Origin { get; set; }
+
+    /// <summary>
+    /// result 帧：这一轮回答了哪些带 uuid 的用户消息（开出它的那条，加上一轮进行中收下的），按收下的先后。按元素收，读时再看类型。
+    /// </summary>
+    [JsonPropertyName("user_message_uuids")]
+    public JsonElement? UserMessageUuids { get; set; }
+
+    /// <summary><c>command_lifecycle</c> 帧：带 uuid 的那条用户消息（我们写进 stdin 时给的 uuid）。</summary>
+    [JsonPropertyName("command_uuid")]
+    public string? CommandUuid { get; set; }
+
+    /// <summary>
+    /// <c>command_lifecycle</c> 帧：它此刻的处境：<c>queued</c>（进了 CLI 的队列）、<c>started</c>（并进一轮，agent 收下了）、
+    /// <c>completed</c>、<c>cancelled</c>、<c>discarded</c>、<c>refused</c>。
+    /// </summary>
+    [JsonPropertyName("state")]
+    public string? LifecycleState { get; set; }
 }
 
 /// <summary>
@@ -200,6 +307,18 @@ internal sealed class StreamJsonUsage
 
     [JsonPropertyName("cache_creation_input_tokens")]
     public long CacheCreationInputTokens { get; set; }
+
+    /// <summary><c>system/task_progress</c> / <c>task_notification</c> 帧：子 agent 到目前为止用的 token 合计。</summary>
+    [JsonPropertyName("total_tokens")]
+    public long? TotalTokens { get; set; }
+
+    /// <summary><c>system/task_progress</c> / <c>task_notification</c> 帧：子 agent 到目前为止调了几次工具。</summary>
+    [JsonPropertyName("tool_uses")]
+    public int? ToolUses { get; set; }
+
+    /// <summary><c>system/task_progress</c> / <c>task_notification</c> 帧：子 agent 到目前为止跑了多久（毫秒）。</summary>
+    [JsonPropertyName("duration_ms")]
+    public long? DurationMs { get; set; }
 }
 
 /// <summary>token 用量（camelCase 形态，出现在 result.modelUsage）。</summary>
@@ -219,6 +338,10 @@ internal sealed class StreamJsonModelUsage
 
     [JsonPropertyName("costUSD")]
     public decimal? CostUsd { get; set; }
+
+    /// <summary>这个模型的上下文窗口大小（2.1.316 实测有，如 <c>1000000</c>）；没报时为 null。</summary>
+    [JsonPropertyName("contextWindow")]
+    public long? ContextWindow { get; set; }
 }
 
 /// <summary>log 帧的负载。</summary>

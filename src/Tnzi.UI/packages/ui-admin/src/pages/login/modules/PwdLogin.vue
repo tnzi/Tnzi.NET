@@ -26,13 +26,13 @@ import {
   NFormItem,
   NInput,
   NButton,
-  NSpace,
   NDivider,
   type FormRules,
 } from 'naive-ui'
-import { TSvgIcon, TCaptcha } from '@tnzi/ui'
-import { useFormRules } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
+import TCaptcha from '../../../components/forms/TCaptcha.vue'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
+import { useNaiveFormRules } from '../../../headless/useNaiveFormRules'
 import { isModuleAvailable } from '@tnzi/ui'
 import { useLoginContext, type LoginDemoAccount } from '@tnzi/ui'
 
@@ -51,7 +51,7 @@ const {
   pendingCaptcha,
   resolveUrl,
 } = useLoginContext()
-const { rules: r } = useFormRules(translate)
+const { rules: r } = useNaiveFormRules(translate)
 const { formRef, validate } = useNaiveForm()
 
 // Adaptive login captcha - hidden until the backend demands one (after repeated
@@ -250,7 +250,7 @@ async function handleAccountLogin(account: LoginDemoAccount): Promise<void> {
         </p>
       </div>
     </NFormItem>
-    <NSpace vertical :size="24">
+    <div class="flex flex-col gap-24px">
       <div v-if="showRecovery" class="flex-y-center justify-end">
         <NButton quaternary @click="toggleLoginModule('reset-pwd')">{{ translate('admin.login.forgotPassword', 'Forgot password?') }}</NButton>
       </div>
@@ -301,7 +301,7 @@ async function handleAccountLogin(account: LoginDemoAccount): Promise<void> {
         </div>
       </template>
       <p v-if="submitError" class="m-0 text-13px text-error text-center" role="alert">{{ submitError }}</p>
-    </NSpace>
+    </div>
   </NForm>
 </template>
 

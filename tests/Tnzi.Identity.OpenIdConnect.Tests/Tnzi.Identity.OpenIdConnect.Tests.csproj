@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="10.1.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="10.0.13" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.13" />
+    <!-- 提升传递依赖：EFCore.Sqlite 带来的 bundle 内含有漏洞的 SQLite 原生库（GHSA-2m69-gcr7-jv3q） -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Shouldly" Version="4.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Shouldly" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tnzi.TestBase\Tnzi.TestBase.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Hosting\Tnzi.Hosting.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Identity\Tnzi.Identity.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Authorization\Tnzi.Authorization.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Identity.OpenIdConnect\Tnzi.Identity.OpenIdConnect.csproj" />
+  </ItemGroup>
+
+</Project>

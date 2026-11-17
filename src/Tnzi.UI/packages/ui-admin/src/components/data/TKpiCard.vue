@@ -15,6 +15,7 @@
     size="small"
     :bordered="false"
     class="t-stat-card t-surface-card"
+    content-class="t-stat-card__body"
     :class="{ 't-stat-card--clickable': clickable }"
     :role="clickable ? 'button' : undefined"
     :tabindex="clickable ? 0 : undefined"
@@ -234,8 +235,19 @@ const precision = computed<number>(() => {
   font-weight: 400;
   color: var(--tnzi-base-text-muted, #888);
 }
+/* The body is a column so the footer can sit on the card's bottom edge. Alone
+   the card is exactly as tall as its content and nothing moves; stretched by
+   TKpiRow to the tallest tile in its row, the label and value stay at the top,
+   the footer stays at the bottom, and a card without one keeps the space empty
+   instead of shrinking. `padding-top` rather than `margin-top` because the
+   auto margin is what takes up the slack. */
+.t-stat-card :deep(.t-stat-card__body) {
+  display: flex;
+  flex-direction: column;
+}
 .t-stat-card__footer {
-  margin-top: 10px;
+  margin-top: auto;
+  padding-top: 10px;
 }
 /* Phone: step the figure down rather than let a long money value push past the
    card. Paired with the no-truncation rule above - the number stays whole, it

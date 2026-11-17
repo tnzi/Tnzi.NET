@@ -4,6 +4,7 @@ import vue from '@vitejs/plugin-vue';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { preservedModuleFileName } from '../../tools/vite/preserved-module-filename.mjs';
+import { hoverMediaPlugin } from '../../tools/vite/hover-media.mjs';
 
 const packageJson = JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8')) as {
   dependencies?: Record<string, string>;
@@ -24,6 +25,13 @@ export default defineConfig({
     vue(),
     // .d.ts emitted by `vue-tsc -p tsconfig.build.json` in the build script.
   ],
+  css: {
+    postcss: {
+      // `:hover` only where hovering exists: on a touch screen a tapped
+      // control would otherwise keep its hover style (tools/vite/hover-media.mjs).
+      plugins: [hoverMediaPlugin()],
+    },
+  },
   resolve: {
     alias: {
       '@': resolve(import.meta.dirname, 'src'),
@@ -34,6 +42,12 @@ export default defineConfig({
       entry: {
         index: resolve(import.meta.dirname, 'src/index.ts'),
         components: resolve(import.meta.dirname, 'src/components/index.ts'),
+        // Buttons, fields, dropdowns, switches, menus, tooltip: only `vue` and
+        // `@iconify/vue` behind it, for an app that builds its pages from them
+        // without naive-ui or @tnzi/ui (gate: conventions/controls-entry.test.ts).
+        controls: resolve(import.meta.dirname, 'src/controls.ts'),
+        // TDialog and the confirmation for a page of controls; styled by controls.css too.
+        dialogs: resolve(import.meta.dirname, 'src/dialogs.ts'),
         // Pre-auth surface. Its own entry so a consumer can load the sign-in
         // page without pulling `TChatApp` and the conversation tree with it.
         auth: resolve(import.meta.dirname, 'src/auth/index.ts'),

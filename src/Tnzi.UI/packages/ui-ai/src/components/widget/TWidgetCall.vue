@@ -13,12 +13,11 @@
  */
 import { computed, ref } from 'vue'
 import { Icon } from '@iconify/vue'
-import { useFocusTrap } from '@tnzi/ui'
 import { useAiI18n } from '../../i18n/index'
 import type { ToolCallInfo } from '../../headless/useChat'
-import { useBodyScrollLock } from '../../headless/useBodyScrollLock'
 import TToolCallCard from '../reasoning/TToolCallCard.vue'
 import TStreamLoader from '../streaming/TStreamLoader.vue'
+import TDialog from '../overlay/TDialog.vue'
 import { toolCallState } from '../reasoning/tool-call-status'
 import TWidgetFrame from './TWidgetFrame.vue'
 import type { WidgetHostHandlers } from './widget-host'
@@ -62,23 +61,11 @@ const view = computed<'building' | 'widget' | 'card'>(() => {
 
 const root = ref<HTMLElement | null>(null)
 const expanded = ref(false)
-const dialog = ref<HTMLElement | null>(null)
-const closeButton = ref<HTMLButtonElement | null>(null)
 const copied = ref(false)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
-useFocusTrap(dialog, () => expanded.value, {
-  onEscape: () => close(),
-  initialFocus: () => closeButton.value,
-})
-useBodyScrollLock(() => expanded.value)
-
 function open(): void {
   expanded.value = true
-}
-
-function close(): void {
-  expanded.value = false
 }
 
 async function copySource(): Promise<void> {
@@ -138,21 +125,11 @@ function download(): void {
     </figcaption>
     <TWidgetFrame :runner-url="runnerUrl" :html="input.html" :title="input.title" :max-height="maxHeight" :handlers="handlers" />
 
-    <Teleport to="body">
-      <div v-if="expanded" class="t-widget-overlay t-ai-scroll-scope" @click.self="close">
-        <div ref="dialog" class="t-widget-overlay__dialog" role="dialog" aria-modal="true" :aria-label="input.title">
-          <div class="t-widget-overlay__bar">
-            <span class="t-widget__title">{{ input.title }}</span>
-            <button ref="closeButton" type="button" class="t-widget__action" :title="t.widget.close" :aria-label="t.widget.close" @click="close">
-              <Icon icon="lucide:x" aria-hidden="true" />
-            </button>
-          </div>
-          <div class="t-widget-overlay__body">
-            <TWidgetFrame :runner-url="runnerUrl" :html="input.html" :title="input.title" fill :lazy="false" :handlers="handlers" />
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <!-- The larger view is the package's dialog: same backdrop, header and close
+         button as every other dialog, the widget edge to edge under it. -->
+    <TDialog v-model="expanded" :title="input.title" :width="1200" :height="900" flush>
+      <TWidgetFrame :runner-url="runnerUrl" :html="input.html" :title="input.title" fill :lazy="false" :handlers="handlers" />
+    </TDialog>
   </figure>
 
   <TToolCallCard v-else :tool-call="toolCall" :streaming="streaming" />
@@ -184,8 +161,7 @@ function download(): void {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.t-widget__bar,
-.t-widget-overlay__bar {
+.t-widget__bar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -236,34 +212,7 @@ function download(): void {
   color: var(--tnzi-ai-text);
 }
 .t-widget__action:focus-visible {
-  outline: 2px solid var(--tnzi-ai-accent);
+  outline: var(--tnzi-ai-focus-outline);
   outline-offset: 1px;
-}
-.t-widget-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
-  background: var(--tnzi-ai-backdrop);
-  backdrop-filter: blur(var(--tnzi-ai-backdrop-blur));
-}
-.t-widget-overlay__dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: min(1200px, 100%);
-  height: min(900px, 100%);
-  padding: 10px 12px 12px;
-  border: var(--tnzi-ai-modal-border);
-  border-radius: var(--tnzi-ai-modal-radius);
-  background: var(--tnzi-ai-bg);
-  color: var(--tnzi-ai-text);
-}
-.t-widget-overlay__body {
-  flex: 1;
-  min-height: 0;
 }
 </style>

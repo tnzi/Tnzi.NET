@@ -15,6 +15,10 @@
     <ProjectReference Include="..\Tnzi.SignalR\Tnzi.SignalR.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tnzi.System.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
   <!-- Microsoft.EntityFrameworkCore is provided by Tnzi.EFCore project reference -->
 
 </Project>

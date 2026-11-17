@@ -22,6 +22,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.13" />
     <!-- 只为在 SQL Server 的模型 / 建表脚本上断言（不连库）；真实 SQL Server 上的插入测试由 TNZI_TEST_SQLSERVER 打开 -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.13" />
+    <!-- 只为 PostgreSQL 上的写入测试（TNZI_TEST_POSTGRES 给出服务器时才连库），版本与框架的 PostgreSQL 提供程序一致 -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <!-- 提升传递依赖：EFCore.Sqlite 带来的 bundle 2.1.11 内含有漏洞的 SQLite 原生库（GHSA-2m69-gcr7-jv3q） -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
   </ItemGroup>

@@ -86,10 +86,9 @@
             </NButton>
           </div>
 
-          <NSpace
+          <div
             v-if="currentFolder"
-            size="small"
-            class="t-storage-file-page__folder-actions"
+            class="t-storage-file-page__folder-actions flex flex-wrap items-center gap-x-8px gap-y-4px"
           >
             <NButton v-if="can('storage.file.update')" size="small" tertiary @click="openRenameFolder(currentFolder)">
               <template #icon><TSvgIcon icon="mdi:pencil-outline" :size="14" /></template>
@@ -114,7 +113,7 @@
               </template>
               {{ t('confirmDeleteFolder') }}
             </NPopconfirm>
-          </NSpace>
+          </div>
         </header>
 
         <div v-if="selectedIds.length" class="t-storage-file-page__batch">
@@ -281,7 +280,7 @@
           </div>
           <template v-else-if="metadataEditable">
             <NEmpty v-if="!metadataRows.length" :description="t('metadata.empty')" class="my-12px" />
-            <NSpace v-else vertical size="small">
+            <div v-else class="flex flex-col gap-4px">
               <div v-for="(row, i) in metadataRows" :key="i" class="flex items-center gap-8px">
                 <NInput v-model:value="row.key" :placeholder="t('metadata.key')" size="small" class="flex-1" />
                 <NInput v-model:value="row.value" :placeholder="t('metadata.value')" size="small" class="flex-1" />
@@ -289,7 +288,7 @@
                   <template #icon><TSvgIcon icon="mdi:close" :size="14" /></template>
                 </NButton>
               </div>
-            </NSpace>
+            </div>
             <NButton size="small" dashed class="mt-8px" @click="addMetadataRow">
               <template #icon><TSvgIcon icon="mdi:plus" :size="14" /></template>
               {{ t('metadata.add') }}
@@ -351,9 +350,9 @@
 
           <div v-if="detailFileTags.length" class="mt-14px">
             <p class="text-13px font-600 mb-6px">{{ t('detail.tags') }}</p>
-            <NSpace size="small">
+            <div class="flex flex-wrap items-center gap-x-8px gap-y-4px">
               <NTag v-for="tag in detailFileTags" :key="tag" size="small">{{ tag }}</NTag>
-            </NSpace>
+            </div>
           </div>
 
           <div class="mt-16px">
@@ -405,7 +404,7 @@ import type { DataTableColumns, DropdownOption } from 'naive-ui'
 import {
   NButton, NButtonGroup, NInput, NSelect, NSpin, NPagination,
   NForm, NFormItem, NInputNumber, NPopconfirm,
-  NDropdown, NDynamicTags, NEmpty, NSpace, NSwitch,
+  NDropdown, NDynamicTags, NEmpty, NSwitch,
   NDescriptions, NDescriptionsItem, NTag,
 } from 'naive-ui'
 import { useSafeMessage } from '../_shared/safe-message'

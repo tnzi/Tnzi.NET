@@ -123,6 +123,41 @@ describe('TUsageLimitDefaultsPanel', () => {
     expect(text).toContain('Session $5.00 · weekly Unlimited · models: Opus 5.5, Sonnet 5.5')
   })
 
+  it("lists each model's thinking efforts, following the model list until set", async () => {
+    const bridge = makeBridge()
+    bridge.getDefaults.mockResolvedValue(defaults({
+      catalog: [
+        { id: 'claude-opus-5-5', displayName: 'Opus 5.5', provider: 'claude', efforts: ['low', 'medium', 'max'], defaultEffort: 'medium' },
+        { id: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5', provider: 'claude', efforts: [] },
+      ],
+    }))
+    const w = mount(TUsageLimitDefaultsPanel, { props: { bridge: bridge as never } })
+    await flushPromises()
+
+    const opus = w.find('[data-effort-model="claude-opus-5-5"]')
+    expect(opus.text()).toContain('Currently low, medium, max (starts on medium)')
+    expect(w.find('[data-effort-model="claude-sonnet-5-5"]').text()).toContain('Currently no effort choice')
+
+    const set = opus.findAll('label').find((el) => el.text().trim() === 'Set')!
+    await set.find('input').setValue(true)
+    await flushPromises()
+    const last = formOf(w).emitted('update:modelValue')!.at(-1)![0] as SaveUsagePolicyDto
+    expect(last.modelEfforts).toEqual({ 'claude-opus-5-5': { efforts: ['low', 'medium', 'max'], defaultEffort: 'medium' } })
+  })
+
+  it('a default effort outside its list is stopped before the round trip', async () => {
+    const bridge = makeBridge()
+    const w = mount(TUsageLimitDefaultsPanel, { props: { bridge: bridge as never } })
+    await flushPromises()
+    const draft = formOf(w).props('modelValue') as SaveUsagePolicyDto
+    formOf(w).vm.$emit('update:modelValue', { ...draft, modelEfforts: { 'claude-opus-5-5': { efforts: ['low'], defaultEffort: 'max' } } })
+    await flushPromises()
+
+    expect(w.text()).toContain("A model's default effort must be one of its efforts.")
+    await buttonByText(w, 'Save')?.trigger('click')
+    expect(bridge.saveDefaults).not.toHaveBeenCalled()
+  })
+
   it('a limited item without an amount is stopped before the round trip', async () => {
     const bridge = makeBridge()
     const w = mount(TUsageLimitDefaultsPanel, { props: { bridge: bridge as never } })
@@ -157,6 +192,7 @@ describe('TUsageLimitDefaultsPanel', () => {
       weeklyLimit: { mode: UsageLimitMode.Unlimited, amountUsd: null },
       allowedModels: null,
       defaultModel: null,
+      modelEfforts: null,
       note: 'pilot group',
     })
   })

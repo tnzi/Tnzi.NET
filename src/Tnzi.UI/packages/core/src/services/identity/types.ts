@@ -68,7 +68,13 @@ export interface UserProfile {
   email?: string | null;
   phoneNumber?: string | null;
   nickname?: string | null;
+  /**
+   * The picture to render: the uploaded photo (`avatarId`) when there is one,
+   * otherwise the external link. Already resolved to a URL.
+   */
   avatar?: string | null;
+  /** The uploaded avatar file, when the user set one (see `profileAvatarUrl`). */
+  avatarId?: string | null;
   roles: string[];
   permissions: string[];
 }

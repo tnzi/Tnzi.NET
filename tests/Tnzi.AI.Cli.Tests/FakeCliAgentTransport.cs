@@ -76,6 +76,18 @@ internal sealed class FakeCliAgentTransport : ICliAgentTransport
         return Task.CompletedTask;
     }
 
+    /// <summary>测试让 CLI 在任意时刻写出一行（后台任务结束这类不由 stdin 引起的输出）。</summary>
+    public void Emit(params string[] lines)
+    {
+        foreach (var line in lines)
+        {
+            _lines.Writer.TryWrite(line);
+        }
+    }
+
+    /// <summary>写出了、还没被读走的行数。</summary>
+    public int PendingLines => _lines.Reader.Count;
+
     /// <summary>测试主动结束 stdout 流。</summary>
     public void CompleteOutput() => _lines.Writer.TryComplete();
 

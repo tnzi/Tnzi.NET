@@ -509,3 +509,133 @@ internal static class AcpMcpServerTranslator
         return entries;
     }
 }
+
+/// <summary>
+/// ACP 的一个会话选项（<c>session/new</c>、<c>session/resume</c>、<c>session/set_config_option</c> 的应答里的 <c>configOptions</c>）。
+/// </summary>
+/// <remarks>
+/// 按 <c>category</c> 认，不按 <c>id</c> 认：各家的 id 不一样（codex-acp 的推理强度是 <c>reasoning_effort</c>，Kimi Code 是 <c>thinking</c>），
+/// category 是协议定的（<c>model</c> / <c>thought_level</c> / <c>mode</c>）。
+/// </remarks>
+internal sealed record AcpConfigOption(string Id, string? Category, IReadOnlyList<string> Values)
+{
+    /// <summary>模型选项的 category。</summary>
+    public const string ModelCategory = "model";
+
+    /// <summary>推理强度选项的 category。</summary>
+    public const string ThoughtLevelCategory = "thought_level";
+
+    /// <summary>按 category 找一个选项。</summary>
+    public static AcpConfigOption? Find(IReadOnlyList<AcpConfigOption> options, string category)
+        => options.FirstOrDefault(o => string.Equals(o.Category, category, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>读一个应答里的 <c>configOptions</c>；应答里没有这一项时返回 null（而不是空表：没报不等于报了没有）。</summary>
+    public static List<AcpConfigOption>? ReadAll(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Object
+            || !result.TryGetProperty("configOptions", out var options)
+            || options.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var all = new List<AcpConfigOption>();
+        foreach (var option in options.EnumerateArray())
+        {
+            if (option.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            // 协议里是 id；早期草案写作 configId
+            var id = ReadString(option, "id") ?? ReadString(option, "configId");
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                continue;
+            }
+
+            var values = new List<string>();
+            if (option.TryGetProperty("options", out var choices) && choices.ValueKind == JsonValueKind.Array)
+            {
+                CollectValues(choices, values);
+            }
+
+            all.Add(new AcpConfigOption(id, ReadString(option, "category"), values));
+        }
+
+        return all;
+    }
+
+    /// <summary>可选值可以平铺（<c>{value, name}</c>），也可以分组（<c>{group, name, options: [...]}</c>）。</summary>
+    private static void CollectValues(JsonElement choices, List<string> values)
+    {
+        foreach (var choice in choices.EnumerateArray())
+        {
+            if (choice.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            if (ReadString(choice, "value") is { Length: > 0 } value)
+            {
+                values.Add(value);
+            }
+            else if (choice.TryGetProperty("options", out var nested) && nested.ValueKind == JsonValueKind.Array)
+            {
+                CollectValues(nested, values);
+            }
+        }
+    }
+
+    private static string? ReadString(JsonElement element, string name)
+        => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+}
+
+/// <summary>
+/// 从 <c>initialize</c> 的应答里读 CLI 报的能力。
+/// </summary>
+internal static class AcpCapabilities
+{
+    /// <summary>读 <c>agentInfo</c> 与 <c>agentCapabilities</c>；字段缺了按协议的缺省值（都是 false）。</summary>
+    public static CliAgentCapabilities Read(JsonElement initializeResult)
+    {
+        var capabilities = Child(initializeResult, "agentCapabilities");
+        var prompt = Child(capabilities, "promptCapabilities");
+        var mcp = Child(capabilities, "mcpCapabilities");
+        var session = Child(capabilities, "sessionCapabilities");
+        var info = Child(initializeResult, "agentInfo");
+
+        return new CliAgentCapabilities
+        {
+            AgentName = String(info, "name"),
+            AgentVersion = String(info, "version"),
+            Images = True(prompt, "image"),
+            Audio = True(prompt, "audio"),
+            EmbeddedContext = True(prompt, "embeddedContext"),
+            // 续接走 session/resume（sessionCapabilities.resume）；只报 loadSession 的运行时也能接回会话
+            ResumeSession = session.ValueKind == JsonValueKind.Object && session.TryGetProperty("resume", out _)
+                            || True(capabilities, "loadSession"),
+            McpHttp = True(mcp, "http"),
+            McpSse = True(mcp, "sse")
+        };
+    }
+
+    /// <summary>加上会话选项里的模型与推理强度的可选值。</summary>
+    public static CliAgentCapabilities WithSessionOptions(CliAgentCapabilities capabilities, IReadOnlyList<AcpConfigOption> options)
+        => capabilities with
+        {
+            Models = AcpConfigOption.Find(options, AcpConfigOption.ModelCategory)?.Values ?? [],
+            ReasoningEfforts = AcpConfigOption.Find(options, AcpConfigOption.ThoughtLevelCategory)?.Values ?? []
+        };
+
+    private static JsonElement Child(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var child) ? child : default;
+
+    private static bool True(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+
+    private static string? String(JsonElement element, string name)
+        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+}

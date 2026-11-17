@@ -66,8 +66,7 @@ vi.mock('../../../src/services/bridges/identity-bridge', () => ({
     return bridge
   },
 }))
-vi.mock('@tnzi/ui', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tnzi/ui')>()),
+vi.mock('../../../src/headless/useSafeMessage', () => ({
   useSafeMessage: () => messageApi,
 }))
 

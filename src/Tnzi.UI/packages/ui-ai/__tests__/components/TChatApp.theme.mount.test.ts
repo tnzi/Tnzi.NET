@@ -11,7 +11,8 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp, h, nextTick, ref, type App } from 'vue';
-import { THEME_CONTEXT_KEY, createThemeContext, mergeThemeSettings, type ThemeContext } from '@tnzi/ui';
+import { THEME_CONTEXT_KEY, createThemeContext, type ThemeContext } from '@tnzi/ui/headless';
+import { mergeThemeSettings } from '@tnzi/ui/theme';
 
 const { default: TChatApp } = await import('../../src/components/chat/TChatApp.vue');
 

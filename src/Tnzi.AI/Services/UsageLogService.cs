@@ -9,17 +9,20 @@ public class UsageLogService : ApplicationService, IUsageLogService
     private readonly IRepository<UsageLog, Guid> _repository;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ICostCalculator? _costCalculator;
+    private readonly IRepository<AgentThread, Guid>? _threadRepository;
 
     public UsageLogService(
         IRepository<UsageLog, Guid> repository,
         IHttpContextAccessor httpContextAccessor,
         IServiceProvider serviceProvider,
-        ICostCalculator? costCalculator = null)
+        ICostCalculator? costCalculator = null,
+        IRepository<AgentThread, Guid>? threadRepository = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _httpContextAccessor = Check.NotNull(httpContextAccessor);
         _costCalculator = costCalculator;
+        _threadRepository = threadRepository;
     }
 
     public Task LogUsageAsync(
@@ -34,11 +37,12 @@ public class UsageLogService : ApplicationService, IUsageLogService
         Guid? agentId = null,
         Guid? threadId = null,
         CancellationToken ct = default)
-    {
-        // 自动计算成本
-        var cost = _costCalculator?.CalculateCost(provider, model, inputTokens, outputTokens);
-        return LogUsageCoreAsync(operationType, provider, model, inputTokens, outputTokens, durationMs, isSuccess, errorMessage, agentId, threadId, cost, 0, 0, ct);
-    }
+        => LogUsageCoreAsync(new UsageLogEntry
+        {
+            OperationType = operationType, Provider = provider, Model = model,
+            InputTokens = inputTokens, OutputTokens = outputTokens, DurationMs = durationMs,
+            IsSuccess = isSuccess, ErrorMessage = errorMessage, AgentId = agentId, ThreadId = threadId
+        }, _costCalculator?.CalculateCost(provider, model, inputTokens, outputTokens), ct);
 
     public Task LogUsageAsync(
         string operationType,
@@ -53,11 +57,13 @@ public class UsageLogService : ApplicationService, IUsageLogService
         Guid? threadId,
         decimal? estimatedCostUsd,
         CancellationToken ct = default)
-    {
-        // 使用外部传入的成本，若为 null 则自动计算
-        var cost = estimatedCostUsd ?? _costCalculator?.CalculateCost(provider, model, inputTokens, outputTokens);
-        return LogUsageCoreAsync(operationType, provider, model, inputTokens, outputTokens, durationMs, isSuccess, errorMessage, agentId, threadId, cost, 0, 0, ct);
-    }
+        => LogUsageCoreAsync(new UsageLogEntry
+        {
+            OperationType = operationType, Provider = provider, Model = model,
+            InputTokens = inputTokens, OutputTokens = outputTokens, DurationMs = durationMs,
+            IsSuccess = isSuccess, ErrorMessage = errorMessage, AgentId = agentId, ThreadId = threadId,
+            EstimatedCostUsd = estimatedCostUsd
+        }, estimatedCostUsd ?? _costCalculator?.CalculateCost(provider, model, inputTokens, outputTokens), ct);
 
     public Task LogUsageAsync(
         string operationType,
@@ -73,10 +79,13 @@ public class UsageLogService : ApplicationService, IUsageLogService
         int cachedInputTokens,
         int cacheCreationTokens,
         CancellationToken ct = default)
-    {
-        var cost = _costCalculator?.CalculateCost(provider, model, inputTokens, outputTokens, cachedInputTokens, cacheCreationTokens);
-        return LogUsageCoreAsync(operationType, provider, model, inputTokens, outputTokens, durationMs, isSuccess, errorMessage, agentId, threadId, cost, cachedInputTokens, cacheCreationTokens, ct);
-    }
+        => LogUsageCoreAsync(new UsageLogEntry
+        {
+            OperationType = operationType, Provider = provider, Model = model,
+            InputTokens = inputTokens, OutputTokens = outputTokens, DurationMs = durationMs,
+            IsSuccess = isSuccess, ErrorMessage = errorMessage, AgentId = agentId, ThreadId = threadId,
+            CachedInputTokens = cachedInputTokens, CacheCreationTokens = cacheCreationTokens
+        }, _costCalculator?.CalculateCost(provider, model, inputTokens, outputTokens, cachedInputTokens, cacheCreationTokens), ct);
 
     public Task LogUsageAsync(
         string operationType,
@@ -93,48 +102,52 @@ public class UsageLogService : ApplicationService, IUsageLogService
         int cachedInputTokens,
         int cacheCreationTokens,
         CancellationToken ct = default)
+        => LogUsageCoreAsync(new UsageLogEntry
+        {
+            OperationType = operationType, Provider = provider, Model = model,
+            InputTokens = inputTokens, OutputTokens = outputTokens, DurationMs = durationMs,
+            IsSuccess = isSuccess, ErrorMessage = errorMessage, AgentId = agentId, ThreadId = threadId,
+            EstimatedCostUsd = estimatedCostUsd,
+            CachedInputTokens = cachedInputTokens, CacheCreationTokens = cacheCreationTokens
+        }, estimatedCostUsd ?? _costCalculator?.CalculateCost(provider, model, inputTokens, outputTokens, cachedInputTokens, cacheCreationTokens), ct);
+
+    public Task LogUsageAsync(UsageLogEntry entry, CancellationToken ct = default)
     {
-        var cost = estimatedCostUsd
-                   ?? _costCalculator?.CalculateCost(provider, model, inputTokens, outputTokens, cachedInputTokens, cacheCreationTokens);
-        return LogUsageCoreAsync(operationType, provider, model, inputTokens, outputTokens, durationMs, isSuccess, errorMessage, agentId, threadId, cost, cachedInputTokens, cacheCreationTokens, ct);
+        Check.NotNull(entry);
+
+        // 调用方给的成本优先，没给按配置的单价算
+        var estimatedCostUsd = entry.EstimatedCostUsd
+                               ?? _costCalculator?.CalculateCost(entry.Provider, entry.Model, entry.InputTokens,
+                                   entry.OutputTokens, entry.CachedInputTokens, entry.CacheCreationTokens);
+        return LogUsageCoreAsync(entry, estimatedCostUsd, ct);
     }
 
-    private async Task LogUsageCoreAsync(
-        string operationType,
-        string provider,
-        string model,
-        int inputTokens,
-        int outputTokens,
-        long durationMs,
-        bool isSuccess,
-        string? errorMessage,
-        Guid? agentId,
-        Guid? threadId,
-        decimal? estimatedCostUsd,
-        int cachedInputTokens,
-        int cacheCreationTokens,
-        CancellationToken ct)
+    /// <summary>写一行。<paramref name="estimatedCostUsd"/> 已由入口算好（各重载调成本计算器的方式不同）。</summary>
+    private async Task LogUsageCoreAsync(UsageLogEntry entry, decimal? estimatedCostUsd, CancellationToken ct)
     {
+        var userId = entry.UserId ?? await ResolveUserIdAsync(entry.ThreadId, ct);
+
         UsageLog? log = null;
         try
         {
             var httpContext = _httpContextAccessor.HttpContext;
             log = new UsageLog
             {
-                OperationType = operationType,
-                Provider = provider,
-                Model = model,
-                InputTokens = inputTokens,
-                OutputTokens = outputTokens,
-                TotalTokens = inputTokens + outputTokens,
-                DurationMs = durationMs,
-                IsSuccess = isSuccess,
-                ErrorMessage = errorMessage,
-                AgentId = agentId,
-                ThreadId = threadId,
+                OperationType = entry.OperationType,
+                Provider = entry.Provider,
+                Model = entry.Model,
+                InputTokens = entry.InputTokens,
+                OutputTokens = entry.OutputTokens,
+                TotalTokens = entry.InputTokens + entry.OutputTokens,
+                DurationMs = entry.DurationMs,
+                IsSuccess = entry.IsSuccess,
+                ErrorMessage = entry.ErrorMessage,
+                UserId = userId,
+                AgentId = entry.AgentId,
+                ThreadId = entry.ThreadId,
                 EstimatedCostUsd = estimatedCostUsd,
-                CachedInputTokens = cachedInputTokens,
-                CacheCreationTokens = cacheCreationTokens,
+                CachedInputTokens = entry.CachedInputTokens,
+                CacheCreationTokens = entry.CacheCreationTokens,
                 // 走 GetClientIp：支持反向代理，且受隐私开关
                 // AspNetCoreOptions.CollectClientIpAddress 统一约束。
                 IpAddress = httpContext?.Request?.GetClientIp(),
@@ -145,7 +158,7 @@ public class UsageLogService : ApplicationService, IUsageLogService
 
             Logger.LogDebug(
                 "Usage logged: {OperationType}, Provider={Provider}, Model={Model}, Tokens={TotalTokens}, Cost={Cost:F6}USD, Duration={Duration}ms, Success={Success}",
-                operationType, provider, model, log.TotalTokens, estimatedCostUsd, durationMs, isSuccess);
+                entry.OperationType, entry.Provider, entry.Model, log.TotalTokens, estimatedCostUsd, entry.DurationMs, entry.IsSuccess);
         }
         catch (Exception ex)
         {
@@ -157,6 +170,33 @@ public class UsageLogService : ApplicationService, IUsageLogService
             }
 
             Logger.LogWarning(ex, "Failed to log usage");
+        }
+    }
+
+    /// <summary>
+    /// 调用方没给用户时这一行计在谁名下：正在执行的运行请求的用户（续跑、后台子运行没有登录用户，只有请求用户），
+    /// 其次当前登录用户，再次线程的创建人（没有登录上下文的后台调用只知道线程）。都没有就是不属于任何用户的调用。
+    /// </summary>
+    /// <remarks>查线程失败只记日志：少了归属的一行仍比丢掉一行账目好。</remarks>
+    private async Task<Guid?> ResolveUserIdAsync(Guid? threadId, CancellationToken ct)
+    {
+        var userId = ServiceProvider.GetService<IAgentExecutionContextAccessor>()?.CurrentRequest?.UserId ?? CurrentUser?.Id;
+        if (userId.HasValue || !threadId.HasValue || _threadRepository is null)
+        {
+            return userId;
+        }
+
+        try
+        {
+            return await _threadRepository.AsNoTracking()
+                .Where(t => t.Id == threadId.Value)
+                .Select(t => t.CreatorId)
+                .FirstOrDefaultAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Could not resolve the owner of thread {ThreadId} for a usage log row", threadId);
+            return null;
         }
     }
 }

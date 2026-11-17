@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Cli.Entities;
 
 /// <summary>
-/// 外部运行的一个权限请求：CLI 要做一件「先问我」档位不自动放行的事，等使用方回答。
+/// 外部运行的一个等使用方回答的请求：CLI 要做一件档位不自动放行的事、agent 问用户问题、agent 交出计划等批准（<see cref="Kind"/>）。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -31,6 +31,15 @@ public class CliRunPermissionRequest : CreationAuditedEntity<Guid>, IMultiTenant
 
     /// <summary>工具名。</summary>
     public string? Tool { get; set; }
+
+    /// <summary>请求的种类（<c>CliInteractionKinds</c>）：权限、问题或计划。</summary>
+    public string Kind { get; set; } = CliInteractionKinds.Permission;
+
+    /// <summary>问题请求的问题（<c>CliQuestion</c> 的 JSON 数组），回答接口按它校验回答；其余种类为 null。</summary>
+    public string? QuestionsJson { get; set; }
+
+    /// <summary>问题请求交出的回答（问题原文 → 回答列表的 JSON 对象）；其余种类、拒绝回答时为 null。</summary>
+    public string? AnswersJson { get; set; }
 
     /// <summary>可选的回答（<c>CliPermissionOption</c> 的 JSON 数组）。</summary>
     public string OptionsJson { get; set; } = "[]";

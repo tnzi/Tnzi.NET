@@ -5,9 +5,9 @@ import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
 import { createApp } from 'vue'
 import { provideAdminSettingsConfig } from '../../src/plugin/settings-config'
 
-function setUser(permissions: string[], isSuper = false) {
+function setUser(permissions: string[], isSuper = false, roles: string[] = []) {
   const auth = useAdminAuthStore()
-  auth.setUserInfo({ id: '1', username: 'u', displayName: 'u', roles: [], permissions })
+  auth.setUserInfo({ id: '1', username: 'u', displayName: 'u', roles, permissions })
   auth.setSuperUser(isSuper)
 }
 
@@ -58,5 +58,63 @@ describe('usePermissionGuard.canAnySettings', () => {
     } finally {
       provideAdminSettingsConfig(createApp({}), {})
     }
+  })
+
+  // A configuration whose endpoints answer super administrators by role, with
+  // no permission code: the section must not open the gear for anyone else.
+  it('a roles-only section opens the Settings Center for holders of the role only', () => {
+    const section = { key: 'root', label: 'Root', roles: ['SuperAdmin'], component: {} }
+    provideAdminSettingsConfig(createApp({}), { sections: [section] })
+    try {
+      setUser(['user.view'], false, ['Admin'])
+      expect(usePermissionGuard().canAnySettings()).toBe(false)
+      setUser(['user.view'], false, ['superadmin'])
+      expect(usePermissionGuard().canAnySettings()).toBe(true)
+    } finally {
+      provideAdminSettingsConfig(createApp({}), {})
+    }
+  })
+
+  it('a section declaring both a permission and roles opens it only when both hold', () => {
+    const section = { key: 'b', label: 'B', permission: 'payment.account.view', roles: ['Finance'], component: {} }
+    provideAdminSettingsConfig(createApp({}), { sections: [section] })
+    try {
+      setUser(['payment.account.view'], false, ['Admin'])
+      expect(usePermissionGuard().canAnySettings()).toBe(false)
+      setUser([], false, ['Finance'])
+      expect(usePermissionGuard().canAnySettings()).toBe(false)
+      setUser(['payment.account.view'], false, ['FINANCE'])
+      expect(usePermissionGuard().canAnySettings()).toBe(true)
+    } finally {
+      provideAdminSettingsConfig(createApp({}), {})
+    }
+  })
+
+  it('an ungated section does not open the Settings Center', () => {
+    provideAdminSettingsConfig(createApp({}), { sections: [{ key: 'open', label: 'Open', component: {} }] })
+    try {
+      setUser(['user.view'])
+      expect(usePermissionGuard().canAnySettings()).toBe(false)
+    } finally {
+      provideAdminSettingsConfig(createApp({}), {})
+    }
+  })
+})
+
+describe('usePermissionGuard.canAnyRole', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it('fails open before the user is loaded and for a super-user', () => {
+    expect(usePermissionGuard().canAnyRole(['SuperAdmin'])).toBe(true)
+    setUser([], true, [])
+    expect(usePermissionGuard().canAnyRole(['SuperAdmin'])).toBe(true)
+  })
+
+  it('matches any one role, case-insensitively; an empty list passes', () => {
+    setUser([], false, ['Admin'])
+    const { canAnyRole } = usePermissionGuard()
+    expect(canAnyRole(['superadmin', 'ADMIN'])).toBe(true)
+    expect(canAnyRole(['SuperAdmin'])).toBe(false)
+    expect(canAnyRole([])).toBe(true)
   })
 })

@@ -15,11 +15,11 @@
         </NFormItem>
       </NGi>
       <NGi v-if="!hideSubmit" :span="searchButtonSpan" class="t-crud-page__search-actions-cell">
-        <NSpace justify="end" class="t-crud-page__search-actions">
+        <div class="t-crud-page__search-actions flex flex-wrap items-center gap-x-12px gap-y-8px justify-end">
           <NButton type="primary" @click="onApplyAdvancedSearch">
             {{ t('admin.crud.search') }}
           </NButton>
-        </NSpace>
+        </div>
       </NGi>
     </NGrid>
   </NForm>
@@ -37,10 +37,9 @@ import {
   NInput,
   NInputNumber,
   NSelect,
-  NSpace,
   NSwitch,
 } from 'naive-ui'
-import type { FormSchemaItem } from '@tnzi/ui'
+import { formSchemaOptionLabel, type FormSchemaItem } from '../forms/TSchemaForm'
 import type { SearchableState } from './TCrudSearch.vue'
 import { isoDateToTs, tsToIsoDate } from '../../utils/calendar-date'
 
@@ -114,7 +113,7 @@ function fieldPlaceholder(item: FormSchemaItem): string {
 }
 
 function fieldOptions(item: FormSchemaItem): Array<{ label: string; value: string | number }> {
-  return (item.options ?? []).map((o) => ({ label: tr(o.labelKey, o.label), value: o.value }))
+  return (item.options ?? []).map((o) => ({ label: formSchemaOptionLabel(o, tr), value: o.value }))
 }
 
 function isShown(item: SearchFieldItem): boolean {

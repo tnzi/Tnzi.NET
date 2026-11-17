@@ -41,6 +41,25 @@ public static class McpToolNames
     public static string? OriginalName(AITool tool)
         => tool.GetService<McpClientTool>()?.ProtocolTool.Name ?? tool.Name;
 
+    /// <summary>
+    /// 工具是否在一份名单里：模型看到的名字或服务器原名命中其一即算。名单的比较规则（大小写）由集合自己决定。
+    /// </summary>
+    internal static bool IsNamedIn(AITool tool, IReadOnlySet<string> names)
+    {
+        if (names.Count == 0)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(tool.Name) && names.Contains(tool.Name))
+        {
+            return true;
+        }
+
+        var original = OriginalName(tool);
+        return !string.IsNullOrWhiteSpace(original) && names.Contains(original);
+    }
+
     private static string Sanitize(string value)
     {
         var chars = value.Trim().ToCharArray();

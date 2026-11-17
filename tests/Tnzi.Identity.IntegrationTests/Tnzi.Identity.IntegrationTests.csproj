@@ -17,6 +17,8 @@
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.13" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.13" />
+    <!-- 只为在 PostgreSQL 提供程序上检查发出的命令（不连库），版本与框架的 PostgreSQL 提供程序一致 -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <!-- 提升传递依赖：EFCore.Sqlite 带来的 bundle 2.1.11 内含有漏洞的 SQLite 原生库（GHSA-2m69-gcr7-jv3q） -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.13">

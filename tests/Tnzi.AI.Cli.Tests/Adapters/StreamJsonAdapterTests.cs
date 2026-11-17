@@ -55,6 +55,20 @@ public class StreamJsonAdapterTests
     }
 
     [Fact]
+    public void BuildProcess_PassesTheTurnsEffortAsTheOnlyEffortArgument()
+    {
+        var spec = Adapter().BuildProcess(Context() with { ThinkingLevel = "xhigh", CustomArgs = ["--effort", "low"], ExtraArgs = ["--effort=max"] });
+
+        ValueOf(spec.Arguments, "--effort").ShouldBe("xhigh");
+        spec.Arguments.Count(a => a.StartsWith("--effort", StringComparison.Ordinal)).ShouldBe(1);
+        spec.Arguments.ShouldNotContain("low");
+    }
+
+    [Fact]
+    public void BuildProcess_WithoutAnEffort_GivesNone()
+        => Adapter().BuildProcess(Context()).Arguments.ShouldNotContain("--effort");
+
+    [Fact]
     public void BuildProcess_StripsShellQuotesFromCustomArgs()
     {
         var spec = Adapter().BuildProcess(Context() with { CustomArgs = ["--deny-tool='write'"] });
@@ -345,6 +359,94 @@ public class StreamJsonAdapterTests
         result.Status.ShouldBe(CliRunStatus.Failed);
         result.FailureReason.ShouldBe(CliRunFailureReason.ProcessCrashed);
         // 失败时不给交付物：一段被截断的记录被当成"最终答案"回给用户，比一条明确的失败更糟。
+        result.Output.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// 最后一轮的 result 已到且不是错误：之后进程没自己退出（它起的子进程还握着它，比如一个 dev server），执行器把它终止，
+    /// 退出码是 143（SIGTERM）或别的非零值。回答已经交付，这一轮是完成的；判成崩溃会把一份已经付过钱的答案丢掉，
+    /// 续接过的会话还会被当成被拒、开新会话把整段提示重跑一遍。
+    /// </summary>
+    [Theory]
+    [InlineData(143)]
+    [InlineData(137)]
+    [InlineData(1)]
+    public async Task GetResult_NonZeroExitAfterTheDeliveredResult_IsCompleted(int exitCode)
+    {
+        var transport = new FakeCliAgentTransport(
+            [
+                """{"type":"system","session_id":"sess-1"}""",
+                """{"type":"assistant","message":{"role":"assistant","model":"m","content":[{"type":"text","text":"All done."}]}}""",
+                """{"type":"result","subtype":"success","session_id":"sess-1","result":"All done.","num_turns":12,"total_cost_usd":1.5}"""
+            ],
+            stderrTail: "Terminated",
+            onWrite: _ => []);
+
+        var adapter = Adapter();
+        await DrainAsync(adapter, transport, Context("sess-1"));
+
+        var result = adapter.GetResult(new CliSessionOutcome { ExitCode = exitCode, StderrTail = "Terminated" });
+        result.Status.ShouldBe(CliRunStatus.Completed);
+        result.FailureReason.ShouldBeNull();
+        result.Error.ShouldBeNull();
+        result.Output.ShouldBe("All done.");
+        result.ResumeRejected.ShouldBeFalse("a delivered answer never sends the prompt round again");
+        result.SessionId.ShouldBe("sess-1");
+    }
+
+    /// <summary>对照：result 是错误时，非零退出照常是失败（错误的 result 不算交付）。</summary>
+    [Fact]
+    public async Task GetResult_NonZeroExitAfterAnErrorResult_StillFails()
+    {
+        var transport = new FakeCliAgentTransport(
+            ["""{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 500","num_turns":3,"total_cost_usd":0.2}"""],
+            onWrite: _ => []);
+
+        var adapter = Adapter();
+        await DrainAsync(adapter, transport, Context());
+
+        var result = adapter.GetResult(new CliSessionOutcome { ExitCode = 143 });
+        result.Status.ShouldBe(CliRunStatus.Failed);
+        result.FailureReason.ShouldBe(CliRunFailureReason.ProviderError);
+    }
+
+    /// <summary>
+    /// 对照：交付的是中间一轮（CLI 还有后台任务、之后自己开下一轮），最后一轮的 result 没到进程就非零退出了：照常是崩溃。
+    /// 只有最后一轮的 result 算交付。
+    /// </summary>
+    [Fact]
+    public async Task GetResult_NonZeroExitAfterAnIntermediateTurn_IsStillACrash()
+    {
+        var transport = new FakeCliAgentTransport(
+        [
+            """{"type":"system","subtype":"init","session_id":"s"}""",
+            """{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"mine","task_type":"local_bash","description":"build"}],"session_id":"s"}""",
+            """{"type":"assistant","message":{"model":"m","id":"msg_1","role":"assistant","content":[{"type":"text","text":"started"}]},"session_id":"s"}""",
+            """{"type":"result","subtype":"success","result":"started","session_id":"s","num_turns":1}"""
+        ]);
+
+        var adapter = Adapter();
+        await DrainAsync(adapter, transport, Context() with { BackgroundTaskWait = TimeSpan.FromMinutes(5) })
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        var result = adapter.GetResult(new CliSessionOutcome { ExitCode = 1 });
+        result.Status.ShouldBe(CliRunStatus.Failed);
+        result.FailureReason.ShouldBe(CliRunFailureReason.ProcessCrashed);
+    }
+
+    /// <summary>对照：没有 result 就被终止（崩溃、或在回答之前被杀）照常是崩溃。</summary>
+    [Fact]
+    public async Task GetResult_NonZeroExitWithoutAResult_IsStillACrash()
+    {
+        var transport = new FakeCliAgentTransport(
+            ["""{"type":"assistant","message":{"role":"assistant","model":"m","content":[{"type":"text","text":"partial"}]}}"""]);
+
+        var adapter = Adapter();
+        await DrainAsync(adapter, transport, Context());
+
+        var result = adapter.GetResult(new CliSessionOutcome { ExitCode = 143 });
+        result.Status.ShouldBe(CliRunStatus.Failed);
+        result.FailureReason.ShouldBe(CliRunFailureReason.ProcessCrashed);
         result.Output.ShouldBeNull();
     }
 

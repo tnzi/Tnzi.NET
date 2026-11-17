@@ -121,7 +121,7 @@
       </NAlert>
     </template>
     <template #footer>
-      <NSpace justify="end">
+      <div class="flex flex-wrap items-center gap-x-12px gap-y-8px justify-end">
         <NButton @click="sendDetail.close()">{{ t('actions.cancel') }}</NButton>
         <NButton
           type="primary"
@@ -131,7 +131,7 @@
         >
           {{ t('actions.send') }}
         </NButton>
-      </NSpace>
+      </div>
     </template>
   </TDetailHost>
 </template>
@@ -147,7 +147,6 @@ import {
   NFormItem,
   NInput,
   NSelect,
-  NSpace,
   useMessage,
 } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'

@@ -1,12 +1,16 @@
 <script setup lang="ts">
 /**
  * TArtifactPreview - iframe preview with address bar and console
+ *
+ * The address bar is a draft: typing does not navigate the frame, Enter
+ * does. Refresh goes back to `src` and reloads the frame even when it is
+ * already there. With `srcdoc` the bar is read-only.
  */
 
-import { NInput, NButton, NTooltip } from 'naive-ui';
 import { ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '../../i18n/index';
+import TIconButton from '../controls/TIconButton.vue';
 const t = useAiI18n();
 
 const props = withDefaults(
@@ -41,10 +45,29 @@ const props = withDefaults(
   },
 );
 
+/** The address the frame shows. */
 const localUrl = ref(props.src ?? '');
+/** What is typed in the address bar; becomes `localUrl` on Enter. */
+const draftUrl = ref(localUrl.value);
+/** Bumped by Refresh, so the frame reloads even when its address is unchanged. */
+const reloadKey = ref(0);
 const consoleOpen = ref(false);
 
-watch(() => props.src, (v) => { if (v) localUrl.value = v; });
+watch(() => props.src, (v) => {
+  if (!v) return;
+  localUrl.value = v;
+  draftUrl.value = v;
+});
+
+function navigate(): void {
+  localUrl.value = draftUrl.value.trim();
+}
+
+function refresh(): void {
+  localUrl.value = props.src ?? '';
+  draftUrl.value = localUrl.value;
+  reloadKey.value += 1;
+}
 
 function openExternal(): void {
   window.open(localUrl.value || props.src, '_blank', 'noopener,noreferrer');
@@ -59,32 +82,27 @@ const logLevelClass: Record<string, string> = {
 
 <template>
   <div class="flex h-full flex-col">
-    <div class="flex items-center gap-1 border-b px-2 py-1.5">
-      <NTooltip>
-        <template #trigger>
-          <NButton quaternary size="tiny" @click="localUrl = src ?? ''">
-            <template #icon><Icon icon="lucide:refresh-cw" /></template>
-          </NButton>
-        </template>
-        {{ t.common.refresh }}
-      </NTooltip>
-      <NInput v-model:value="localUrl" size="small" :readonly="!!srcdoc" class="font-mono" style="height: 28px" @keydown.enter="localUrl = ($event.target as HTMLInputElement).value" />
-      <NTooltip>
-        <template #trigger>
-          <NButton quaternary size="tiny" @click="openExternal">
-            <template #icon><Icon icon="lucide:square-arrow-out-up-right" /></template>
-          </NButton>
-        </template>
-        {{ t.artifact.openExternal }}
-      </NTooltip>
+    <div class="t-artifact-preview__bar">
+      <TIconButton icon="lucide:refresh-cw" :label="t.common.refresh" size="xs" @click="refresh" />
+      <input
+        v-model="draftUrl"
+        type="text"
+        class="t-input t-mono t-artifact-preview__url"
+        :aria-label="t.artifact.address"
+        :readonly="!!srcdoc"
+        spellcheck="false"
+        autocomplete="off"
+        @keydown.enter="navigate"
+      />
+      <TIconButton icon="lucide:square-arrow-out-up-right" :label="t.artifact.openExternal" size="xs" @click="openExternal" />
     </div>
     <div class="relative flex-1 min-h-0">
-      <iframe v-if="srcdoc" :srcdoc="srcdoc" class="h-full w-full border-0" :sandbox="iframeSandbox ?? undefined" />
-      <iframe v-else-if="localUrl" :src="localUrl" class="h-full w-full border-0" :sandbox="iframeSandbox ?? undefined" />
+      <iframe v-if="srcdoc" :key="`doc-${reloadKey}`" :srcdoc="srcdoc" class="h-full w-full border-0" :sandbox="iframeSandbox ?? undefined" />
+      <iframe v-else-if="localUrl" :key="`src-${reloadKey}`" :src="localUrl" class="h-full w-full border-0" :sandbox="iframeSandbox ?? undefined" />
       <div v-else class="flex h-full items-center justify-center text-sm text-tnzi-muted">{{ t.artifact.noPreview }}</div>
     </div>
     <div v-if="logs?.length">
-      <button class="flex w-full items-center gap-1.5 border-t px-3 py-1 text-xs text-tnzi-muted hover:bg-tnzi-layout/50 transition-colors" @click="consoleOpen = !consoleOpen">
+      <button type="button" :aria-expanded="consoleOpen" class="flex w-full items-center gap-1.5 border-t px-3 py-1 text-xs text-tnzi-muted hover:bg-tnzi-layout/50 transition-colors" @click="consoleOpen = !consoleOpen">
         <Icon icon="lucide:terminal" class="size-3" />
         <span>{{ t.artifact.console }}</span>
         <span class="ml-auto tabular-nums">{{ logs.length }}</span>
@@ -98,10 +116,21 @@ const logLevelClass: Record<string, string> = {
 </template>
 
 <style scoped>
+.t-artifact-preview__bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--tnzi-ai-border);
+}
+input.t-artifact-preview__url {
+  flex: 1;
+  height: 28px;
+}
 .t-preview-log--warn {
-  color: var(--tnzi-warning);
+  color: var(--tnzi-ai-warning);
 }
 .t-preview-log--error {
-  color: var(--tnzi-error);
+  color: var(--tnzi-ai-danger);
 }
 </style>

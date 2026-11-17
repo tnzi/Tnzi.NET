@@ -4,7 +4,19 @@
  * TLandingPage - empty-state hero for chat applications.
  *
  * Renders a serif display headline above a chat composer and a row of
- * suggestion chips. The composer is `TThreadComposer` in its non-sticky
+ * suggestion chips.
+ *
+ * Layout guarantee: only the hero (plan, headline, subline, composer) is
+ * centred. The space above it and the band below it (chips, then footer)
+ * share the free height equally, so the headline and composer sit at the same
+ * height whether there are no chips, one row or several, and when chips load
+ * late or change; the chips stay directly under the composer. Chips and footer
+ * that need more than their half run on below the window and the page
+ * scrolls to them; a window shorter than the hero itself scrolls from the
+ * top. Nothing is clipped or overlapped. The hero's own content (plan,
+ * headline, subline) does move it, by half its change in height.
+ *
+ * The composer is `TThreadComposer` in its non-sticky
  * layout, so text + voice input, attachments (paperclip / drag-drop /
  * paste-image) and `composerActions` behave identically here and in an active
  * thread. All content is slot-driven so consumers can tailor every region
@@ -18,6 +30,8 @@
  *   - composer-right ..... right cluster of the composer toolbar (before send)
  *   - chips      ........ overrides the default chip row
  *   - footer     ........ free area below everything
+ *   - suggestions ....... a menu anchored above the composer (TThreadComposer's
+ *                         `#suggestions`, same `ComposerSuggestionContext` props)
  */
 import { computed, nextTick, useTemplateRef } from 'vue'
 import { Icon } from '@iconify/vue'
@@ -51,6 +65,8 @@ const props = withDefaults(
     maxWidth?: number
     /** Show the send button even when the input is empty. */
     alwaysShowSend?: boolean
+    /** Iconify name of the send button (see TThreadComposer `sendIcon`). */
+    sendIcon?: string
     /** Declarative extra toolbar buttons. */
     composerActions?: ReadonlyArray<ComposerAction>
     /** Built-in voice (speech-to-text) mic button. Default true. */
@@ -72,6 +88,8 @@ const props = withDefaults(
      * sets it below its narrow-screen breakpoint.
      */
     compact?: boolean
+    /** Attributes for the composer's textarea (see TThreadComposer `inputAttrs`). */
+    inputAttrs?: Readonly<Record<string, string | number | boolean | undefined>>
   }>(),
   {
     modelValue: '',
@@ -86,6 +104,7 @@ const props = withDefaults(
     voiceLang: 'en-US',
     compact: false,
     disabled: false,
+    inputAttrs: undefined,
   },
 )
 
@@ -96,6 +115,8 @@ const emit = defineEmits<{
   action: [id: string]
   /** Files the composer refused (size or type), from any way they arrived. */
   'attachments-rejected': [rejected: readonly RejectedAttachment[]]
+  /** A key pressed in the composer, before it acts on it (see TThreadComposer `input-keydown`). */
+  'input-keydown': [event: KeyboardEvent]
 }>()
 
 const composerRef = useTemplateRef<InstanceType<typeof TThreadComposer>>('composerRef')
@@ -132,87 +153,145 @@ function addAttachments(incoming: FileList | readonly File[]): AddAttachmentsRes
   return composerRef.value?.addAttachments(incoming) ?? null
 }
 
+/* The greeting's room is the composer's width: content in the `headline` slot
+   sized in container units (`cqi`) scales with the box under it. */
+const headlineStyle = computed(() => (props.maxWidth == null ? undefined : { maxWidth: `${props.maxWidth}px` }))
+
 defineExpose({ addAttachments, focus: () => composerRef.value?.focus() })
 </script>
 
 <template>
   <section class="t-landing t-ai-scroll" :class="{ 't-landing--compact': compact }">
-    <div v-if="$slots.plan" class="t-landing__plan">
-      <slot name="plan" />
+    <!-- Equal share of the free height with the below region: what makes the
+         hero's position independent of the chips and footer. -->
+    <div class="t-landing__above" aria-hidden="true" />
+
+    <div class="t-landing__hero">
+      <div v-if="$slots.plan" class="t-landing__plan">
+        <slot name="plan" />
+      </div>
+
+      <h1 class="t-landing__headline" :style="headlineStyle">
+        <slot name="headline">{{ greetingText }}</slot>
+      </h1>
+
+      <div v-if="subline || $slots.subline" class="t-landing__subline">
+        <slot name="subline">{{ subline }}</slot>
+      </div>
+
+      <TThreadComposer
+        ref="composerRef"
+        v-model="text"
+        class="t-landing__composer"
+        :sticky="false"
+        :rows="2"
+        :compact="compact"
+        :max-width="maxWidth"
+        :placeholder="placeholderText"
+        :disabled="disabled"
+        :composer-actions="composerActions"
+        :enable-voice="enableVoice"
+        :enable-attachments="enableAttachments"
+        :accept="accept"
+        :max-file-size="maxFileSize"
+        :voice-lang="voiceLang"
+        :always-show-send="alwaysShowSend"
+        :send-icon="sendIcon"
+        :input-attrs="inputAttrs"
+        @send="onSubmit"
+        @action="emit('action', $event)"
+        @attachments-rejected="emit('attachments-rejected', $event)"
+        @input-keydown="emit('input-keydown', $event)"
+      >
+        <template v-if="$slots.suggestions" #suggestions="context">
+          <slot name="suggestions" v-bind="context" />
+        </template>
+        <template v-if="$slots['composer-notice']" #notice>
+          <slot name="composer-notice" />
+        </template>
+        <template v-if="$slots['composer-left']" #left>
+          <slot name="composer-left" />
+        </template>
+        <template v-if="$slots['composer-right']" #right>
+          <slot name="composer-right" />
+        </template>
+      </TThreadComposer>
     </div>
 
-    <h1 class="t-landing__headline">
-      <slot name="headline">{{ greetingText }}</slot>
-    </h1>
+    <div class="t-landing__below">
+      <div v-if="$slots.chips || (chips && chips.length > 0)" class="t-landing__chips">
+        <slot name="chips">
+          <button
+            v-for="(chip, i) in chips"
+            :key="chip.id ?? chip.label ?? i"
+            type="button"
+            class="t-landing__suggestion"
+            @click="onChipClick(chip)"
+          >
+            <Icon v-if="chip.icon" :icon="chip.icon" />
+            <span>{{ chip.label }}</span>
+          </button>
+        </slot>
+      </div>
 
-    <div v-if="subline || $slots.subline" class="t-landing__subline">
-      <slot name="subline">{{ subline }}</slot>
-    </div>
-
-    <TThreadComposer
-      ref="composerRef"
-      v-model="text"
-      class="t-landing__composer"
-      :sticky="false"
-      :rows="2"
-      :compact="compact"
-      :max-width="maxWidth"
-      :placeholder="placeholderText"
-      :disabled="disabled"
-      :composer-actions="composerActions"
-      :enable-voice="enableVoice"
-      :enable-attachments="enableAttachments"
-      :accept="accept"
-      :max-file-size="maxFileSize"
-      :voice-lang="voiceLang"
-      :always-show-send="alwaysShowSend"
-      @send="onSubmit"
-      @action="emit('action', $event)"
-      @attachments-rejected="emit('attachments-rejected', $event)"
-    >
-      <template v-if="$slots['composer-notice']" #notice>
-        <slot name="composer-notice" />
-      </template>
-      <template v-if="$slots['composer-left']" #left>
-        <slot name="composer-left" />
-      </template>
-      <template v-if="$slots['composer-right']" #right>
-        <slot name="composer-right" />
-      </template>
-    </TThreadComposer>
-
-    <div v-if="$slots.chips || (chips && chips.length > 0)" class="t-landing__chips">
-      <slot name="chips">
-        <button
-          v-for="(chip, i) in chips"
-          :key="chip.id ?? chip.label ?? i"
-          type="button"
-          class="t-landing__suggestion"
-          @click="onChipClick(chip)"
-        >
-          <Icon v-if="chip.icon" :icon="chip.icon" />
-          <span>{{ chip.label }}</span>
-        </button>
-      </slot>
-    </div>
-
-    <div v-if="$slots.footer" class="t-landing__footer">
-      <slot name="footer" />
+      <div v-if="$slots.footer" class="t-landing__footer">
+        <slot name="footer" />
+      </div>
     </div>
   </section>
 </template>
 
 <style scoped>
+/* Three bands: an empty band above, the hero, and the chips + footer below.
+   No `justify-content: center`: centring an overflowing column pushes its top
+   out of reach of the scroller. Instead the bands above and below grow from a
+   zero basis with equal weight, so they split the free height evenly and the
+   hero sits in the middle whatever the band below holds. The band below is
+   allowed to be smaller than its content (`min-height: 0`): chips that need
+   more than their half run on past it and the page scrolls to them, rather
+   than lifting the hero. Nothing shrinks, so a window shorter than the hero
+   scrolls from the top. */
 .t-landing {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 40px 24px 80px;
+  --t-landing-pad-bottom: 80px;
+  padding: 40px 24px var(--t-landing-pad-bottom);
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  /* Same gutter as the thread that replaces it, so the composer does not move
+     sideways when the first message turns the landing into a conversation. */
+  scrollbar-gutter: stable both-edges;
   position: relative;
+}
+.t-landing__above {
+  flex: 1 0 0;
+  width: 100%;
+}
+.t-landing__hero {
+  flex: none;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.t-landing__below {
+  flex: 1 0 0;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+/* Content that runs past the band ends the scroll area without the page's
+   bottom padding (that padding belongs to the box, not to what overflows it).
+   Padding on the band's last child keeps the same gap after the last chip or
+   the footer: it is part of that child's box, so it counts toward the scroll
+   area, and while the content fits it only takes room the band had anyway. */
+.t-landing__below > :last-child {
+  padding-bottom: var(--t-landing-pad-bottom);
 }
 
 .t-landing__plan {
@@ -221,7 +300,11 @@ defineExpose({ addAttachments, focus: () => composerRef.value?.focus() })
   margin-bottom: 22px;
 }
 
+/* As wide as the composer (`maxWidth`), and a size container: a greeting in
+   the slot can size itself to the room it has (`font-size: min(36px, 7cqi)`). */
 .t-landing__headline {
+  width: 100%;
+  container-type: inline-size;
   margin: 0 0 28px;
   padding: 0;
   font-family: var(--tnzi-ai-font-display, 'Libre Baskerville', Georgia, serif);
@@ -286,7 +369,8 @@ defineExpose({ addAttachments, focus: () => composerRef.value?.focus() })
    generous outer padding centred the hero in a desktop window; on a phone it
    only pushed the composer down. */
 .t-landing--compact {
-  padding: 16px 12px 24px;
+  --t-landing-pad-bottom: 24px;
+  padding: 16px 12px var(--t-landing-pad-bottom);
 }
 .t-landing--compact .t-landing__plan { margin-bottom: 12px; }
 .t-landing--compact .t-landing__headline {

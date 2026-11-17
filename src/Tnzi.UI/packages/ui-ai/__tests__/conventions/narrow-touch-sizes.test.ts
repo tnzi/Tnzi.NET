@@ -54,7 +54,7 @@ describe('narrow shell touch sizes', () => {
   });
 
   it('the top bar and sidebar header buttons read the icon-button token', () => {
-    for (const selector of ['.t-chat-app__topbar-toggle', '.t-chat-app__brand-collapse']) {
+    for (const selector of ['.t-chat-app__topbar-toggle', '.t-chat-app__brand-toggle']) {
       expect(decl(rule(CHAT_APP, selector), 'width')).toBe('var(--tnzi-ai-icon-button-size, 32px)');
     }
   });
@@ -69,7 +69,7 @@ describe('narrow shell touch sizes', () => {
 
 describe('Recents active row', () => {
   it('is marked by its background alone, no edge bar', () => {
-    expect(decl(rule(THREADS, '.t-thread-list__row.is-active'), 'background')).toBe('var(--tnzi-ai-accent-soft)');
+    expect(decl(rule(THREADS, '.t-thread-list__row.is-active'), 'background')).toBe('var(--tnzi-ai-sidebar-hover)');
     expect(THREADS).not.toContain('.t-thread-list__row.is-active::before');
   });
 });

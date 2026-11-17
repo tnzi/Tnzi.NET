@@ -64,8 +64,9 @@ public class AnthropicThinkingWireTests : IDisposable
         thinking.GetProperty("budget_tokens").GetInt32().ShouldBe(5000);
         doc.RootElement.GetProperty("max_tokens").GetInt32().ShouldBeGreaterThan(5000);
         doc.RootElement.GetProperty("model").GetString().ShouldBe(Model);
-        // the raw-representation path must not drop the ordinary options
-        doc.RootElement.GetProperty("temperature").GetSingle().ShouldBe(0.3f);
+        // the raw-representation path must not drop the ordinary options; temperature is the exception:
+        // Anthropic rejects any temperature other than the default while thinking is on
+        doc.RootElement.TryGetProperty("temperature", out _).ShouldBeFalse();
         doc.RootElement.GetProperty("messages").GetArrayLength().ShouldBe(1);
     }
 

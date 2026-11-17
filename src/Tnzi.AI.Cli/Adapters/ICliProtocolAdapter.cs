@@ -37,8 +37,8 @@ public interface ICliProtocolAdapter
     CliAgentResult GetResult(CliSessionOutcome outcome);
 
     /// <summary>
-    /// 把使用方对一个权限请求的回答写给 CLI（<see cref="CliAgentLaunchContext.AsksForApproval"/> 时，适配器产出的
-    /// <see cref="CliAgentEventType.PermissionRequest"/> 事件带的 <see cref="CliAgentPermission.ProtocolKey"/>）。
+    /// 把使用方对一个请求的回答写给 CLI（<see cref="CliAgentLaunchContext.AsksForApproval"/> / <see cref="CliAgentLaunchContext.RelaysInteractions"/>
+    /// 时，适配器产出的 <see cref="CliAgentEventType.PermissionRequest"/> 事件带的 <see cref="CliAgentPermission.ProtocolKey"/>）。
     /// </summary>
     /// <remarks>
     /// <para>可以在 <see cref="RunAsync"/> 迭代期间从别的线程调用。写入在返回之前已经交给 transport（重放时按调用次序计 stdin 行）。</para>
@@ -50,12 +50,14 @@ public interface ICliProtocolAdapter
 }
 
 /// <summary>
-/// 交给 CLI 的一个权限回答。
+/// 交给 CLI 的一个回答（权限、问题或计划，见 <see cref="CliAgentPermission.Kind"/>）。
 /// </summary>
-/// <param name="Allow">允许还是拒绝。</param>
+/// <param name="Allow">允许还是拒绝（问题：交出回答还是不答；计划：批准还是不批准）。</param>
 /// <param name="OptionId">选中的选项 id（请求给出的那些之一）；超时、随运行结束时为 null，适配器自己挑一个单次拒绝。</param>
-/// <param name="Message">拒绝时交给 agent 的说明。</param>
-public sealed record CliPermissionDecision(bool Allow, string? OptionId, string? Message);
+/// <param name="Message">拒绝时交给 agent 的说明（计划：对计划的意见）。</param>
+/// <param name="Answers">问题的回答：问题原文 → 回答。只对问题、且 <paramref name="Allow"/> 时有意义；为空时适配器按不答处理，绝不交给 agent 一份空回答。</param>
+public sealed record CliPermissionDecision(
+    bool Allow, string? OptionId, string? Message, IReadOnlyDictionary<string, IReadOnlyList<string>>? Answers = null);
 
 /// <summary>
 /// 按协议族解析适配器实例。

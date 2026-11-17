@@ -3,7 +3,7 @@
  * `TwoFactorChallenge` - second-factor verification module.
  *
  * Design language: matches its sibling login modules (PwdLogin / CodeLogin) -
- * lean naive-ui primitives (`NInputOtp` / `NButton` / `NSpace` / `NDivider`)
+ * lean naive-ui primitives (`NInputOtp` / `NButton` / `NDivider`)
  * over UnoCSS atoms, no bespoke chrome. The shell (`TLoginPage`) already renders
  * the "Two-Factor Verification" heading, so this module only shows the body:
  *   - one full-sentence instruction (per method; includes the masked
@@ -41,7 +41,7 @@
  * so instead of showing an unanswerable form.
  */
 import { computed, ref, watch } from 'vue'
-import { NButton, NDivider, NInputOtp, NSpace, NSpin } from 'naive-ui'
+import { NButton, NDivider, NInputOtp, NSpin } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { useCaptcha } from '@tnzi/ui'
 import { useLoginContext, type TwoFactorMethodName } from '@tnzi/ui'
@@ -357,7 +357,7 @@ function handleCancel(): void {
     </div>
 
     <!-- Primary actions - mirrors CodeLogin (full-width stacked buttons). -->
-    <NSpace vertical :size="18" class="w-full">
+    <div class="flex flex-col gap-18px w-full">
       <NButton v-if="isPasskey" type="primary" size="large" :round="ui.pill" block :loading="submitting" @click="handlePasskey">
         <template #icon>
           <TSvgIcon icon="mdi:key-outline" :size="18" />
@@ -376,7 +376,7 @@ function handleCancel(): void {
         </template>
         {{ translate('admin.login.back', 'Back') }}
       </NButton>
-    </NSpace>
+    </div>
 
     <!-- Switch to another enabled method (e.g. can't reach the authenticator). -->
     <div v-if="otherMethods.length" class="flex flex-col gap-8px">

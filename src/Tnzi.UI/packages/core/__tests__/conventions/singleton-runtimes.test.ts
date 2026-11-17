@@ -34,15 +34,20 @@
  * build and test), but never in `dependencies`. A `dependency` is a promise to
  * ship our own copy, which is the one thing that must not happen.
  *
- * **R2 - the dedupe list may only name runtimes the host is guaranteed to
+ * **R2 - the dedupe list may only name runtimes every host is guaranteed to
  * own.** `resolve.dedupe` re-resolves a specifier from the app's own root; when
  * the app has no copy there, Vite's `tryNodeResolve` returns nothing rather
  * than falling back to the importer. So a dedupe entry for something the app
  * does not directly depend on cannot fire - which is exactly what happened to
- * the `@vue/reactivity` entry that was supposed to prevent this bug. R2 pins
- * `TNZI_SINGLETON_DEPS` to the runtimes below that are demanded as required
- * peers, so the list cannot silently grow an entry that can never fire, nor
- * lose one that must.
+ * the `@vue/reactivity` entry that was supposed to prevent this bug. An app is
+ * built on one of the app-facing packages, so R2 pins `TNZI_SINGLETON_DEPS` to
+ * the runtimes below that EVERY one of them demands as a required peer: the
+ * list cannot silently grow an entry an app on some package lacks (naive-ui
+ * for an app on `@tnzi/ui-ai`), nor lose one that must.
+ *
+ * **R3 - the rest are deduped where the app owns them.** Every other runtime
+ * an app-facing package peers on is on `TNZI_SINGLETON_DEPS_WHEN_INSTALLED`,
+ * which `tnziSingletons()` dedupes only when the app's root resolves it.
  *
  * Plus a source-level rule: nothing may import `@vue/reactivity` directly.
  * `vue` re-exports the same bindings and is the copy every consumer already
@@ -56,6 +61,8 @@ import { dirname, resolve, join } from 'node:path';
 
 const packagesDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const PACKAGES = ['core', 'ui', 'ui-ai', 'ui-admin', 'mobile'];
+/** The packages an application is built on (core is never used alone). */
+const APP_FACING = ['ui', 'ui-ai', 'ui-admin', 'mobile'];
 
 /**
  * Runtimes that must be host-owned: a second copy silently breaks the
@@ -119,24 +126,46 @@ describe('single-instance runtimes', () => {
     expect(violations).toEqual([]);
   });
 
-  it('R2: the dedupe list matches the set of required peers', async () => {
+  it('R2: the dedupe list is the set of runtimes every app-facing package requires', async () => {
     const { TNZI_SINGLETON_DEPS } = await import(
-      pathToFileURL(join(packagesDir, 'ui', 'vite.mjs')).href
+      pathToFileURL(join(packagesDir, 'core', 'vite.mjs')).href
     );
 
-    // A runtime is "host-owned" once some package demands it as a NON-optional
-    // peer - that is what guarantees the app has its own copy to dedupe to.
-    const requiredPeers = new Set<string>();
-    for (const pkg of PACKAGES) {
+    // A runtime is owned by EVERY host only when each package an app can be
+    // built on demands it as a NON-optional peer.
+    const requiredBy = (pkg: string): Set<string> => {
       const manifest = readManifest(pkg);
-      for (const [name, _range] of Object.entries(manifest.peerDependencies ?? {})) {
-        if (!SINGLETON_RUNTIMES.includes(name)) continue;
-        if (manifest.peerDependenciesMeta?.[name]?.optional) continue;
-        requiredPeers.add(name);
-      }
-    }
+      return new Set(
+        Object.keys(manifest.peerDependencies ?? {}).filter(
+          (name) => SINGLETON_RUNTIMES.includes(name) && !manifest.peerDependenciesMeta?.[name]?.optional,
+        ),
+      );
+    };
+    const sets = APP_FACING.map(requiredBy);
+    const everywhere = [...sets[0]!].filter((name) => sets.every((set) => set.has(name)));
 
-    expect([...TNZI_SINGLETON_DEPS].sort()).toEqual([...requiredPeers].sort());
+    expect(everywhere).toContain('vue');
+    expect([...TNZI_SINGLETON_DEPS].sort()).toEqual(everywhere.sort());
+  });
+
+  // A singleton some app-facing package peers on (an optional peer included:
+  // vue-router for @tnzi/ui-ai) and that is not on the unconditional list
+  // must be deduped wherever an app owns it, or a linked install hands the
+  // framework a second copy (TAuthRoute reading the framework's router).
+  it('R3: every singleton a package peers on is deduped where the app owns it', async () => {
+    const { TNZI_SINGLETON_DEPS, TNZI_SINGLETON_DEPS_WHEN_INSTALLED } = await import(
+      pathToFileURL(join(packagesDir, 'core', 'vite.mjs')).href
+    );
+    const peered = new Set(
+      APP_FACING.flatMap((pkg) => Object.keys(readManifest(pkg).peerDependencies ?? {})).filter((name) =>
+        SINGLETON_RUNTIMES.includes(name),
+      ),
+    );
+    const covered = new Set([...TNZI_SINGLETON_DEPS, ...TNZI_SINGLETON_DEPS_WHEN_INSTALLED]);
+    expect(peered.has('vue-router')).toBe(true);
+    expect([...peered].filter((name) => !covered.has(name))).toEqual([]);
+    // And the conditional list names nothing no package uses.
+    expect([...TNZI_SINGLETON_DEPS_WHEN_INSTALLED].filter((name: string) => !peered.has(name))).toEqual([]);
   });
 
   it('nothing imports @vue/reactivity directly - use "vue"', () => {

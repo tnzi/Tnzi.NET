@@ -20,15 +20,33 @@
  * same goes for renaming (`renamingId`).
  *
  * Row geometry deliberately matches `TSidebarNav`'s items (height, padding,
- * gap, radius, column inset), so the rows line up with the nav above. The rows
- * carry no icon: their titles start where the nav's icons do.
+ * gap, radius, column inset), so the rows line up with the nav above. Every
+ * title starts at the same x, where the nav's icons do. A row's origin icon
+ * (`threadIcon`) sits at its end, in the place of the "..." menu: at rest the
+ * rows with an origin show it and the others show nothing there; on hover,
+ * keyboard focus, an open menu or a touch screen the "..." takes its place. The
+ * origin's label is the row button's tooltip and the start of its accessible name.
+ * A conversation waiting for the user (`awaitingOwner`), with a turn going on
+ * (`running`) or with a reply not seen yet (`unread`) shows that in the same cell
+ * instead of its origin (`TThreadStatus`), and the row's name ends with the state
+ * in words.
+ *
+ * The rows are drawn in the order given; `useChatThreads` keeps them in the list's
+ * order (`compareThreads`: awaiting the user, then running, then the rest, each by
+ * the user's last message). Grouped by date, the first two tiers sit above the date
+ * headings under headings of their own (Needs you, Working), and the rest are
+ * grouped on the user's last message (on creation when sorted by it).
  */
 import { computed, nextTick, ref } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useDebounced } from '@tnzi/core/headless'
 import { isImeComposing } from '@tnzi/core/utils'
 import { useAiI18n } from '../../i18n/index'
+import { vTitleReveal } from '../../headless/title-reveal'
 import TActionMenu, { type ActionMenuItem } from '../overlay/TActionMenu.vue'
+import TThreadIcon from './TThreadIcon.vue'
+import TThreadStatus from './TThreadStatus.vue'
+import { resolveThreadIcon, type ThreadIcon, type ThreadIconResolver } from './thread-icon'
 import {
   RECENTS_ACTIVITY_WINDOWS,
   RECENTS_GROUP_BYS,
@@ -42,12 +60,45 @@ import {
 export interface ThreadItem {
   readonly id: string
   readonly title: string
-  /** Last activity (ISO). */
+  /** Last activity (ISO): any message, the user's or a reply. Shown, not ordered by. */
   readonly updatedAt?: string
+  /**
+   * When the user last sent a message in the conversation (ISO; `AgentThreadDto.lastUserMessageTime`).
+   * Each tier of the list is ordered and grouped by it, or by `createdAt` when it is missing
+   * (`compareThreads` in `headless/recents`).
+   */
+  readonly userMessageAt?: string
   /** Creation time (ISO); grouping by date uses it when the list is sorted by creation. */
   readonly createdAt?: string
   /** Archived conversations leave the Active list (see `RecentThreadsController`). */
   readonly archived?: boolean
+  /**
+   * The server is still generating an AI title: `title` is the fallback and will change
+   * (`useChatThreads` reads the thread again until it does).
+   */
+  readonly titlePending?: boolean
+  /**
+   * Where the conversation came from (`AgentThreadDto.origin`): a value the
+   * application defines. The lists do not read it themselves; a `threadIcon`
+   * resolver usually does.
+   */
+  readonly origin?: string
+  /**
+   * A turn of the conversation is going on (`AgentThreadDto.running`, or the turn streaming on
+   * screen): the row's end shows a quiet running mark in place of the origin icon.
+   */
+  readonly running?: boolean
+  /**
+   * A turn of the conversation is blocked waiting for the user (`AgentThreadDto.awaitingOwner`: a
+   * permission request, a question, an application's confirmation card): the row goes to the top of
+   * the list and its end shows an accent mark (it takes precedence over the running and unread marks).
+   */
+  readonly awaitingOwner?: boolean
+  /**
+   * A reply landed that the user has not seen (`AgentThreadDto.unread`): the row's end shows an
+   * accent dot in place of the origin icon (a running mark takes precedence).
+   */
+  readonly unread?: boolean
   /**
    * An optimistic row for a conversation the backend has not committed yet
    * (`useChatThreads` adds one on the first turn). It IS the conversation on
@@ -94,6 +145,11 @@ const props = withDefaults(
     preferences?: RecentsPreferences
     /** Clicking the label folds the list away. */
     collapsible?: boolean
+    /**
+     * Maps a thread to the icon shown before its title (`{ icon, label }`), or
+     * null for none. The label is the icon's tooltip and accessible name.
+     */
+    threadIcon?: ThreadIconResolver
     /** Whether the list is folded away. Optional `v-model:collapsed`. */
     collapsed?: boolean
     /** More threads exist than the list shows: a "Show more" row emits `load-more`. */
@@ -114,6 +170,7 @@ const props = withDefaults(
     showViewAll: false,
     searchable: false,
     preferences: undefined,
+    threadIcon: undefined,
     collapsible: true,
     collapsed: undefined,
     hasMore: false,
@@ -211,7 +268,7 @@ const groupLabels = computed(() => ({ date: t.value.recents.groupDate, none: t.v
 const sortLabels = computed(() => ({
   name: t.value.recents.sortName,
   created: t.value.recents.sortCreated,
-  activity: t.value.recents.sortActivity,
+  lastMessage: t.value.recents.sortLastMessage,
 }))
 
 const filterItems = computed<ActionMenuItem[]>(() => {
@@ -280,12 +337,14 @@ const sections = computed<ThreadSection[]>(() => {
   if (!p || p.groupBy !== 'date') return [{ key: 'all', heading: '', threads: props.threads }]
   const now = new Date()
   const headings: Record<string, string> = {
+    awaitingOwner: t.value.recents.groupAwaitingOwner,
+    running: t.value.recents.groupRunning,
     today: t.value.recents.today,
     yesterday: t.value.recents.yesterday,
     previous7: t.value.recents.previous7,
     previous30: t.value.recents.previous30,
   }
-  return groupThreadsByDate(props.threads, { now, field: p.sort === 'created' ? 'createdAt' : 'updatedAt' }).map((group) => ({
+  return groupThreadsByDate(props.threads, { now, field: p.sort === 'created' ? 'createdAt' : 'lastMessage' }).map((group) => ({
     key: group.key,
     heading: group.month ? formatRecentsMonth(group.month, now, t.value.recents.dateLocale) : headings[group.key] ?? '',
     threads: group.threads,
@@ -298,6 +357,10 @@ const isNarrowed = computed(() => {
   const p = props.preferences
   return Boolean(keyword.value) || (p !== undefined && (p.status !== 'active' || p.lastActivity !== 'all'))
 })
+
+/* Each row's icon, resolved once per change of the list or the resolver. */
+const icons = computed(() => new Map(props.threads.map((thread) => [thread.id, resolveThreadIcon(props.threadIcon, thread)])))
+const iconOf = (thread: ThreadItem): ThreadIcon | null => icons.value.get(thread.id) ?? null
 
 function rowItems(thread: ThreadItem): ActionMenuItem[] {
   const items: ActionMenuItem[] = []
@@ -394,24 +457,27 @@ function cancelDelete(): void {
   <div class="t-thread-list" :class="{ 'is-collapsed': isCollapsed }">
     <div
       v-if="labelText || showAddButton || showViewAll || searchable || preferences"
-      class="t-thread-list__head"
+      class="t-thread-list__head t-sidebar-heading"
       :class="{ 'is-engaged': filterMenuOpen || searchOpen }"
     >
+      <!-- The sidebar's shared heading style (styles/index.css), so this
+           reads as the same kind of heading as a titled nav group. -->
       <button
         v-if="collapsible"
         type="button"
-        class="t-thread-list__head-label"
+        class="t-thread-list__head-label t-sidebar-heading__label"
         :aria-expanded="!isCollapsed"
         @click="toggleCollapsed"
       >
         <span>{{ labelText }}</span>
         <Icon
-          :icon="isCollapsed ? 'lucide:chevron-right' : 'lucide:chevron-down'"
-          class="t-thread-list__head-chevron"
+          icon="lucide:chevron-down"
+          class="t-thread-list__head-chevron t-sidebar-heading__chevron"
+          :class="{ 'is-collapsed': isCollapsed }"
           aria-hidden="true"
         />
       </button>
-      <span v-else class="t-thread-list__head-text">{{ labelText }}</span>
+      <span v-else class="t-thread-list__head-text t-sidebar-heading__label"><span>{{ labelText }}</span></span>
 
       <div class="t-thread-list__head-actions">
         <button
@@ -495,6 +561,7 @@ function cancelDelete(): void {
           v-for="thread in section.threads"
           :key="thread.id"
           class="t-thread-list__row"
+          data-title-reveal-host
           :class="{
             'is-active': isHighlighted(thread),
             'is-opening': thread.id === openingThreadId,
@@ -530,37 +597,81 @@ function cancelDelete(): void {
               class="t-thread-list__select"
               :aria-current="isHighlighted(thread) ? 'true' : undefined"
               :aria-busy="thread.id === openingThreadId ? 'true' : undefined"
+              :title="iconOf(thread)?.label || undefined"
               @click="emit('select', thread.id)"
             >
-              <slot name="row" :thread="thread" :opening="thread.id === openingThreadId">
-                <span class="t-thread-list__title">{{ thread.title }}</span>
+              <slot
+                name="row"
+                :thread="thread"
+                :opening="thread.id === openingThreadId"
+                :icon="iconOf(thread)"
+              >
+                <!-- The origin is drawn at the row's end, outside this button;
+                     its label is read here, before the title, so the row is
+                     announced as "<origin> <title>". -->
+                <span v-if="iconOf(thread)?.label" class="sr-only">{{ iconOf(thread)!.label }}</span>
+                <!-- A long title scrolls to its end under the pointer, and stays
+                     revealed while this row's menu is open. -->
+                <span v-title-reveal="menuOpenId === thread.id" class="t-thread-list__title">{{ thread.title }}</span>
+                <span v-if="thread.awaitingOwner || thread.running || thread.unread" class="sr-only">{{ thread.awaitingOwner ? t.recents.threadAwaitingOwner : thread.running ? t.recents.threadRunning : t.recents.threadUnread }}</span>
               </slot>
             </button>
-            <Icon
-              v-if="thread.id === openingThreadId"
-              icon="lucide:loader-circle"
-              class="t-thread-list__spinner is-spinning"
-              aria-hidden="true"
+            <!-- On a touch screen the "..." always shows: the state sits just before it. -->
+            <TThreadStatus
+              v-if="hasRowActions && !thread.pending"
+              class="t-thread-list__touch-status"
+              :awaiting="thread.awaitingOwner" :running="thread.running"
+              :unread="thread.unread"
             />
-            <TActionMenu
-              v-else-if="hasRowActions && !thread.pending"
-              :items="rowItems(thread)"
-              :label="t.recents.moreActions"
-              @update:open="(open) => onRowMenuOpen(thread.id, open)"
-              @select="(action) => onRowAction(thread, action)"
+            <!-- The row's end: at rest the conversation's state (running, unread) or
+                 else its origin icon, the "..." menu in the same place on hover,
+                 keyboard focus, an open menu or a touch screen; the spinner while
+                 the conversation opens. -->
+            <span
+              v-if="thread.id === openingThreadId || thread.awaitingOwner || thread.running || thread.unread || iconOf(thread) || (hasRowActions && !thread.pending)"
+              class="t-thread-list__end"
+              :class="{ 'has-menu': hasRowActions && !thread.pending && thread.id !== openingThreadId }"
             >
-              <template #trigger="{ toggle, attrs }">
-                <button
-                  type="button"
-                  class="t-thread-list__row-act"
-                  v-bind="attrs"
-                  :aria-label="t.recents.moreActions"
-                  @click="toggle"
+              <Icon
+                v-if="thread.id === openingThreadId"
+                icon="lucide:loader-circle"
+                class="t-thread-list__spinner is-spinning"
+                aria-hidden="true"
+              />
+              <template v-else>
+                <TThreadStatus
+                  v-if="thread.awaitingOwner || thread.running || thread.unread"
+                  class="t-thread-list__icon"
+                  :awaiting="thread.awaitingOwner" :running="thread.running"
+                  :unread="thread.unread"
+                />
+                <TThreadIcon
+                  v-else-if="iconOf(thread)"
+                  class="t-thread-list__icon"
+                  :spec="iconOf(thread)!"
+                  decorative
+                />
+                <TActionMenu
+                  v-if="hasRowActions && !thread.pending"
+                  :items="rowItems(thread)"
+                  :label="t.recents.moreActions"
+                  @update:open="(open) => onRowMenuOpen(thread.id, open)"
+                  @select="(action) => onRowAction(thread, action)"
                 >
-                  <Icon icon="lucide:ellipsis" />
-                </button>
+                  <template #trigger="{ toggle, attrs }">
+                    <button
+                      type="button"
+                      class="t-thread-list__row-act"
+                      v-bind="attrs"
+                      :aria-label="t.recents.moreActions"
+                      @click="toggle"
+                    >
+                      <Icon icon="lucide:ellipsis" />
+                    </button>
+                  </template>
+                </TActionMenu>
               </template>
-            </TActionMenu>
+            </span>
           </template>
         </div>
       </template>
@@ -590,60 +701,15 @@ function cancelDelete(): void {
      the alignment note above depends on. It was 10px, which put every thread
      row and the heading 2px right of the nav above them (measured: labels at
      49 vs 47, headings at 20 vs 18). */
-  padding: 14px 8px 4px;
+  /* The space above the heading is the sidebar's section gap, the same as
+     above a titled nav group. */
+  padding: 0 8px 4px;
+  padding-top: var(--tnzi-ai-sidebar-section-gap, 12px);
 }
-.t-thread-list__head {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 28px;
-  padding: 0 4px 2px 9px;
-}
-.t-thread-list__head-label,
-.t-thread-list__head-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  margin-right: auto;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--tnzi-ai-text-tertiary);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 20px;
-  text-align: left;
-}
-.t-thread-list__head-label {
-  cursor: pointer;
-  border-radius: 4px;
-}
-.t-thread-list__head-label > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.t-thread-list__head-label:hover,
-.t-thread-list__head-label:focus-visible {
-  color: var(--tnzi-ai-text-secondary);
-}
-.t-thread-list__head-chevron {
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  opacity: 0;
-  transition: opacity var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
-}
-/* The header's chevron and actions are hidden until the header is hovered or
-   holds keyboard focus: a sidebar section should not be a row of buttons. A
-   folded list keeps its chevron, the only sign there is something to unfold. */
-.t-thread-list__head:hover .t-thread-list__head-chevron,
-.t-thread-list__head-label:focus-visible .t-thread-list__head-chevron,
-.t-thread-list.is-collapsed .t-thread-list__head-chevron {
-  opacity: 1;
-}
+/* The heading box, label and chevron are the shared `.t-sidebar-heading`
+   style (styles/index.css). Its actions stay here: they are this list's. They
+   are hidden until the heading is hovered or holds keyboard focus, so the
+   section does not read as a row of buttons. */
 .t-thread-list__head-actions {
   display: flex;
   align-items: center;
@@ -672,7 +738,7 @@ function cancelDelete(): void {
 }
 .t-thread-list__head-act:hover,
 .t-thread-list__head-act.is-on {
-  background: var(--tnzi-ai-hover);
+  background: var(--tnzi-ai-sidebar-hover);
   color: var(--tnzi-ai-text);
 }
 .t-thread-list__search {
@@ -700,17 +766,19 @@ function cancelDelete(): void {
   font-size: 13px;
   outline: none;
 }
-.t-thread-list__search-input:focus { border-color: var(--tnzi-ai-border-strong); }
+.t-thread-list__search-input:focus { border-color: var(--tnzi-ai-focus-border); box-shadow: var(--tnzi-ai-focus-ring); }
 .t-thread-list__empty {
   padding: 6px 9px;
   font-size: 13px;
   color: var(--tnzi-ai-text-tertiary);
 }
 .t-thread-list__group {
+  /* A date sub-heading inside the list (Today, Yesterday): one level below
+     the list's own heading, so smaller, in the heading colour. */
   padding: 10px 9px 4px;
   font-size: 12px;
   line-height: 16px;
-  color: var(--tnzi-ai-text-tertiary);
+  color: var(--tnzi-ai-sidebar-heading);
 }
 .t-thread-list__more {
   display: flex;
@@ -726,7 +794,7 @@ function cancelDelete(): void {
   font-size: 13px;
   cursor: pointer;
 }
-.t-thread-list__more:hover:not(:disabled) { background: var(--tnzi-ai-hover); }
+.t-thread-list__more:hover:not(:disabled) { background: var(--tnzi-ai-sidebar-hover); }
 .t-thread-list__more:disabled { cursor: default; opacity: 0.7; }
 .t-thread-list__more .is-spinning,
 .t-thread-list__spinner.is-spinning { animation: t-thread-list-spin 1s linear infinite; }
@@ -743,7 +811,9 @@ function cancelDelete(): void {
   border: none;
   background: transparent;
   border-radius: 8px;
-  color: var(--tnzi-ai-text-secondary);
+  /* The nav entries' colour: against the lighter heading above, colour is
+     what tells a row from a heading. */
+  color: var(--tnzi-ai-text);
   font-family: inherit;
   font-size: var(--tnzi-ai-row-font-size, 14px);
   cursor: pointer;
@@ -752,13 +822,14 @@ function cancelDelete(): void {
   transition: background var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
 }
 .t-thread-list__row:hover,
-.t-thread-list__row.is-menu-open { background: var(--tnzi-ai-hover); }
+.t-thread-list__row.is-menu-open { background: var(--tnzi-ai-sidebar-hover); }
 /* The open conversation is marked by its background alone, as the nav rows
    above it are: no edge bar. */
 .t-thread-list__row.is-active {
-  background: var(--tnzi-ai-accent-soft);
-  color: var(--tnzi-ai-accent-text);
-  font-weight: 500;
+  /* The hover fill, not the nav's selected one: a long list of titles reads
+     quieter with the open one only lifted, and colour and weight stay the
+     row's own (no brand tint). `aria-current` on the button says which. */
+  background: var(--tnzi-ai-sidebar-hover);
 }
 .t-thread-list__select {
   display: flex;
@@ -775,14 +846,26 @@ function cancelDelete(): void {
   cursor: pointer;
   padding: 0;
 }
+/* The row's end: one box the size of the "..." button, in which the origin
+   icon, the "..." button and the opening spinner are stacked in the same cell,
+   so whichever shows sits in the same place. */
+.t-thread-list__end {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: var(--tnzi-ai-row-action-size, 24px);
+  height: var(--tnzi-ai-row-action-size, 24px);
+  margin-right: -5px;
+}
+.t-thread-list__end > * {
+  grid-area: 1 / 1;
+}
 /* Hidden until the row is hovered or something in it has keyboard focus, so a
    long list is not a column of buttons; on a touch screen there is no hover,
    so it always shows. */
 .t-thread-list__row-act {
-  flex-shrink: 0;
   width: var(--tnzi-ai-row-action-size, 24px);
   height: var(--tnzi-ai-row-action-size, 24px);
-  margin-right: -5px;
   border: none;
   background: none;
   color: var(--tnzi-ai-text-tertiary);
@@ -804,18 +887,37 @@ function cancelDelete(): void {
 }
 @media (hover: none) {
   .t-thread-list__row-act,
-  .t-thread-list__head-actions,
-  .t-thread-list__head-chevron {
+  .t-thread-list__head-actions {
     opacity: 1;
   }
 }
+/* The origin icon gives way to the "..." wherever that shows. Not clickable, so
+   a click at the row's end reaches the "..." under it, or nothing. */
+.t-thread-list__icon {
+  pointer-events: none;
+  transition: opacity var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
+}
+.t-thread-list__row:hover .has-menu .t-thread-list__icon,
+.t-thread-list__row:focus-within .has-menu .t-thread-list__icon,
+.t-thread-list__row.is-menu-open .has-menu .t-thread-list__icon {
+  opacity: 0;
+}
+@media (hover: none) {
+  .has-menu .t-thread-list__icon {
+    opacity: 0;
+  }
+}
+.t-thread-list__touch-status { display: none; }
+@media (hover: none) {
+  .t-thread-list__touch-status { display: block; margin-right: -6px; }
+}
 .t-thread-list__row-act:hover,
 .t-thread-list__row.is-menu-open .t-thread-list__row-act {
-  background: var(--tnzi-ai-press);
+  /* Over the row's own hover fill, so the two add up to the selected wash. */
+  background: var(--tnzi-ai-sidebar-hover);
   color: var(--tnzi-ai-text);
 }
 .t-thread-list__spinner {
-  flex-shrink: 0;
   width: 16px;
   height: 16px;
   color: var(--tnzi-ai-text-tertiary);
@@ -852,7 +954,7 @@ function cancelDelete(): void {
   color: var(--tnzi-ai-text-secondary);
 }
 .t-thread-list__confirm:hover {
-  background: var(--tnzi-ai-hover);
+  background: var(--tnzi-ai-sidebar-hover);
 }
 .t-thread-list__confirm--yes {
   color: var(--tnzi-ai-danger);

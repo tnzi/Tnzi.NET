@@ -144,6 +144,21 @@ public class CliRun : MultiTenantAuditedEntity<Guid>
     public string? Model { get; set; }
 
     /// <summary>
+    /// 这一轮选的推理强度（运行时原生值）；null = 用绑定上的 <c>ThinkingLevel</c>。有值时覆盖绑定：stream-json 以 <c>--effort</c>、
+    /// ACP 以 <c>thought_level</c> 会话选项交给运行时。
+    /// </summary>
+    public string? Effort { get; set; }
+
+    /// <summary>
+    /// 这一轮结束时上下文窗口里的 token 数：主对话最后一次模型调用的输入（含缓存读写）加输出。协议不报（ACP）或这一轮没有完整的模型调用时为 null。
+    /// </summary>
+    /// <remarks>续接的下一轮从这里开始；同一线程最新一轮的值就是这个会话现在的占用。</remarks>
+    public long? ContextTokens { get; set; }
+
+    /// <summary>那次调用的模型的上下文窗口大小（claude 在 <c>result.modelUsage</c> 里报）；没报时为 null。</summary>
+    public long? ContextWindow { get; set; }
+
+    /// <summary>
     /// 当前这次进程的重新附着句柄：执行宿主在起进程时交出（<see cref="Hosting.ICliProcess.ReattachHandle"/>），进程结束即清空。
     /// 非空 = 服务端停机时进程留在宿主上继续跑，运行保持 <c>Running</c>，重启后经 <see cref="Hosting.ICliHostTarget.ReattachAsync"/> 接回来。
     /// 本机宿主不给句柄，这一列恒为 null。
@@ -151,16 +166,69 @@ public class CliRun : MultiTenantAuditedEntity<Guid>
     public string? ReattachHandle { get; set; }
 
     /// <summary>
+    /// 这条运行的用量由使用方在别处计量（<see cref="Services.CliLaunchEnvironment.UsageMeteredElsewhere"/>）：
+    /// 运行记录上照样有 CLI 报的用量，但不计入用户的用量窗口、不写用量日志。起进程时写下，接回来的进程沿用。
+    /// </summary>
+    public bool UsageMeteredElsewhere { get; set; }
+
+    /// <summary>
     /// 这条运行从什么时候起没有服务端在驱动它（停机时离开、或租约过期后第一次被发现），接回来时清空。
     /// <c>AI:Cli:Reattach:Timeout</c> 从这里算起，过了还接不上就以 <see cref="CliRunFailureReason.Interrupted"/> 结束。
     /// </summary>
     public DateTime? DetachedAt { get; set; }
+
+    /// <summary>
+    /// 这条运行接着跑的进程是哪条运行起的（文档 §6.18「等待期间的下一条消息」）；null = 进程是它自己起的（或还没起）。
+    /// </summary>
+    /// <remarks>
+    /// 进程的启动环境（消费方按运行签的令牌之类）绑在起它的那条运行上，起来之后改不了。同线程的下一条运行接过一个等后台任务的进程时，
+    /// 这里记下起它的那条（一路交接下去也记最初起它的那条），在新提示写进 stdin 之前写下：按起进程的运行 id 授权或记账的消费方据此找到此刻拥有进程的运行
+    /// （<c>ICliProcessOwnership</c>）。接过来的进程接不了这一轮、另起进程时清空。
+    /// </remarks>
+    public Guid? ProcessLaunchedByRunId { get; set; }
 
     /// <summary>已产生的事件条数（下一个 Sequence 的来源）。</summary>
     public int MessageCount { get; set; }
 
     /// <summary>取消请求标记。执行中的宿主看到它就整树终止子进程。</summary>
     public bool CancelRequested { get; set; }
+
+    /// <summary>
+    /// 要停下的单个任务（子 agent、后台命令）的 CLI 任务 id，每行一个，只追加。
+    /// </summary>
+    /// <remarks>
+    /// 停下请求由任一服务端副本追加（一条按列的 SQL 拼接，不读改写），执行这条运行的副本轮询到新的 id 就把 <c>stop_task</c> 写给 CLI。
+    /// 同一个 id 写两次无害：CLI 对已经结束的任务答一个错误，不会停别的。
+    /// </remarks>
+    public string? StopTaskRequests { get; set; }
+
+    /// <summary>
+    /// 执行它的这次尝试能不能在一轮进行中收下线程消息队列交来的用户消息：协议做得到（<c>ICliTurnInput</c>）、provider 实测过
+    /// （<c>CliProviderDescriptor.TakesMessagesMidTurn</c>）、运行有线程。执行器在开始读进程输出时写下；
+    /// 还没开始执行时为 null（调度器按 provider 预计）。
+    /// </summary>
+    public bool? TakesMessagesMidTurn { get; set; }
+
+    /// <summary>
+    /// 这条运行此刻只在等后台任务：一轮已经在中途结束（<see cref="CliAgentEventType.TurnCompleted"/>，回答已写进线程），
+    /// CLI 还有后台任务在跑、任务完成时自己开下一轮。执行器在那个事件落库时置 true，下一轮开始说话（或交来的消息被收下）时置回 false。
+    /// </summary>
+    /// <remarks>
+    /// 运行在等待期间保持 <c>Running</c>（等的可能是一个开发服务器，一等几个小时），所以「线程上有没有在跑的一轮」
+    /// 不能只看状态：<c>ICliAgentDispatcher.GetRunningThreadIdsAsSystemAsync</c> 把这样的运行算作没在跑。
+    /// </remarks>
+    public bool AwaitingFollowUp { get; set; }
+
+    /// <summary>
+    /// 一轮进行中写进当前这个可重新附着进程（<see cref="ReattachHandle"/>）的排队消息，按写入的先后，每行 <c>序号 消息id</c>：
+    /// 序号是写它那一刻最后一个已分配的事件序号。没有句柄的进程不记；换了进程、进程结束、运行到达终态时清空。
+    /// </summary>
+    /// <remarks>
+    /// 接回进程时重放从第一行输出起，适配器要在同一个位置（那个序号的事件之后）把这些消息再交一次：进程早已收到这些行，
+    /// 重放的 transport 按行数丢掉它们，但 stdin 行数与适配器的状态（认得出 CLI 对这些消息的报告）因此都与停机前一样。
+    /// 只有执行这条运行的副本写它（整列改写）。
+    /// </remarks>
+    public string? HandedInputs { get; set; }
 
     /// <summary>
     /// 这一轮有没有人在等（调用方在入队时给出，<c>CliRunRequestDto.Attended</c>）。启动档案的 <c>Attended</c> 可以改写它。

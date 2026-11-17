@@ -283,7 +283,26 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
         dto.ProviderDisplayName = provider?.DisplayName;
         dto.Protocol = provider?.Protocol.ToString();
         dto.LaunchHeader = provider?.LaunchHeader;
+        dto.Capabilities = ReadCapabilities(runtime.CapabilitiesJson);
         return dto;
+    }
+
+    private static CliAgentCapabilities? ReadCapabilities(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<CliAgentCapabilities>(json, TnziJsonDefaults.Options);
+        }
+        catch (JsonException)
+        {
+            // 观测数据：读不出来就当没报，下一次握手整份覆盖
+            return null;
+        }
     }
 
     private static string BuildHostInfo() => JsonSerializer.Serialize(new

@@ -124,16 +124,6 @@ public class AgentRuntime : IAgentRuntime
                     request, result, run,
                     sw.ElapsedMilliseconds, false,
                     context.EffectiveProvider ?? resolution.Provider);
-
-                // 标题取模型实际收到的用户文本（守卫改写之后、带内容块时取内容块）：标题会落库，也会交给 LLM
-                var titleText = UserTurn.EffectiveText(context);
-                if (context.IsNewThread
-                    && request.ThreadId.HasValue
-                    && !string.IsNullOrWhiteSpace(titleText)
-                    && AgentRunStatusResolver.ShouldGenerateThreadTitle(result.FinishReason))
-                {
-                    await _eventPublisher.HandleNewThreadTitleAsync(request, result, titleText);
-                }
             }
             catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested
                 && ResolveCancellation(run) is { Kind: RunCancellationKind.TimedOut } timedOut)
@@ -544,17 +534,6 @@ public class AgentRuntime : IAgentRuntime
                     request, run,
                     new InvalidOperationException("Streaming execution failed"),
                     durationMs, true);
-            }
-
-            // 与非流式同一口径：标题取模型实际收到的用户文本
-            var titleText = UserTurn.EffectiveText(context);
-            if (completedNormally
-                && context.IsNewThread
-                && request.ThreadId.HasValue
-                && !string.IsNullOrWhiteSpace(titleText)
-                && AgentRunStatusResolver.ShouldGenerateThreadTitle(lastFinishReason))
-            {
-                await _eventPublisher.HandleNewThreadTitleAsync(request, streamResult!, titleText);
             }
         }
         catch (Exception ex)

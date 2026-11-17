@@ -332,8 +332,8 @@ public class CheckTemplateSeederTests : IntegratedTestBase<TemplateStoreTestDbCo
         await SeedAllStaleAsync();
         _fault.ForTemplateName = victim;
 
-        // 抛出去就是回归本身：这一整轮会被外层启动任务吞成一条只指向 CheckTemplateSeeder 的错误
-        await SeedAsync();
+        // 清单走完才抛：中途抛出去就是回归本身，后面四份会停在旧正文上
+        await SeedExpectingFailureAsync();
 
         _fault.ForTemplateName = null;
         (await RowAsync(victim)).ContentTemplate.ShouldBe(StaleBody,
@@ -355,7 +355,7 @@ public class CheckTemplateSeederTests : IntegratedTestBase<TemplateStoreTestDbCo
         _fault.ForTemplateName = victim;
         _seederLog.Entries.Clear();
 
-        await SeedAsync();
+        await SeedExpectingFailureAsync();
 
         var failure = _seederLog.Entries.SingleOrDefault(e => e.Level == LogLevel.Error);
         failure.ShouldNotBeNull("a swallowed failure with no trace is worse than the crash it replaced");
@@ -380,7 +380,7 @@ public class CheckTemplateSeederTests : IntegratedTestBase<TemplateStoreTestDbCo
         _fault.ForTemplateName = victim;
         _fault.Once = true;
 
-        await SeedAsync();
+        await SeedExpectingFailureAsync();
 
         var row = await RowAsync(victim);
         row.ContentTemplate.ShouldBe(StaleBody,
@@ -389,13 +389,13 @@ public class CheckTemplateSeederTests : IntegratedTestBase<TemplateStoreTestDbCo
     }
 
     [Fact]
-    public async Task ATemplateThatFailedOnce_IsRefreshedOnTheNextStartup()
+    public async Task ATemplateThatFailedOnce_IsRefreshedWhenTheTaskRunsAgain()
     {
-        // 吞掉不等于放弃：下一次启动照常再试一遍（这也是「后果不重」的全部依据）
+        // 这一轮抛出，运行器在后台重跑这个任务（下一次启动同理）：第二轮把它补上
         var victim = BuiltInCheckTemplates.All[1].Name;
         await SeedAllStaleAsync();
         _fault.ForTemplateName = victim;
-        await SeedAsync();
+        await SeedExpectingFailureAsync();
 
         _fault.ForTemplateName = null;
         await SeedAsync();
@@ -427,6 +427,16 @@ public class CheckTemplateSeederTests : IntegratedTestBase<TemplateStoreTestDbCo
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter)
             => Entries.Add(new CapturedLog(logLevel, formatter(state, exception), exception));
+    }
+
+    /// <summary>
+    /// 跑一轮注入了故障的播种：清单走完之后整体抛出，运行器才知道要重试；
+    /// 异常里点名的是那一份失败本身。
+    /// </summary>
+    private async Task SeedExpectingFailureAsync()
+    {
+        var thrown = await Should.ThrowAsync<AggregateException>(SeedAsync());
+        thrown.InnerExceptions.ShouldHaveSingleItem().ShouldBeOfType<DbUpdateException>();
     }
 
     /// <summary>跑一次真实的启动期播种。</summary>

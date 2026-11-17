@@ -88,6 +88,24 @@ import type { AuthState, UserState, AppState } from "@tnzi/core/state";
 import { AuthStateManager, UserStateManager, AppStateManager } from "@tnzi/core/state";
 ```
 
+### Vite 辅助：`@tnzi/core/vite`
+
+```ts
+// vite.config.ts
+import { tnziSingletons } from '@tnzi/core/vite'
+
+export default defineConfig({
+  plugins: [vue(), tnziSingletons()],
+})
+```
+
+`tnziSingletons()` 让单实例依赖只解析到应用自己的一份：总是 `vue`；`vue-router`、`pinia`、`naive-ui` 在应用根目录（或其上层）装了时；
+`extra` 里列的无条件加上。`link:` 安装下，链接进来的 `dist/` 里的裸导入会解析到框架工作树自己的 `node_modules`，不去重就是两份 Vue。
+
+它放在本包，因为每个建在 `@tnzi/*` 上的应用都有 `@tnzi/core`，而本包不带组件；`@tnzi/ui/vite`、`@tnzi/ui-ai/vite` 是同一个插件的转导出，
+从应用已经依赖的那个包导入即可（只用 `@tnzi/ui-ai/controls` 的页面用 `@tnzi/ui-ai/vite`）。插件的返回类型 `TnziSingletonsPlugin` 不引用 vite 的类型，
+Vite 7 与 Vite 8 的项目都能直接放进 `plugins` 通过类型检查，本包也就不声明 `vite` peer。
+
 ## 服务覆盖
 
 每个后端模块一个子路径 `@tnzi/core/services/<name>`，各自带类型与 API 工厂（DTO schema 不内置，见上文「Schema 验证」）：
@@ -106,6 +124,7 @@ import { AuthStateManager, UserStateManager, AppStateManager } from "@tnzi/core/
 | `services/localization` | Tnzi.Localization |
 | `services/logging` | Tnzi.Logging |
 | `services/notification` | Tnzi.Notification |
+| `services/oidc` | Tnzi.Identity.OpenIdConnect |
 | `services/payment` | Tnzi.Payment |
 | `services/payroll` | Tnzi.Finance.Payroll |
 | `services/performance` | Tnzi.Performance |

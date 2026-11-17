@@ -79,7 +79,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import { NModal, NInput, NEmpty } from 'naive-ui'
-import { TOverlayTheme } from '@tnzi/ui'
+import TOverlayTheme from '../overlay/TOverlayTheme.vue'
 import { useAdminRouteStore, type AdminMenuItem } from '../../stores/useAdminRouteStore'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 

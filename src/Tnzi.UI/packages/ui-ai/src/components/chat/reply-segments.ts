@@ -38,7 +38,8 @@ export type ReplyPart =
  * one run, wherever they came from: the calls that lead (no position) and those placed
  * in the text, and calls at different positions with only blank lines between them.
  * The text after the last call is always the last part, even blank (it is where the
- * caret of a streaming answer sits); other blank text is dropped.
+ * caret of a streaming answer sits); other blank text is dropped. Sub-agents and background commands the agent
+ * started are steps of their run like any other call (counted in its line, opened from it).
  */
 export function replyParts(reply: SegmentedReply): ReplyPart[] {
   const parts: ReplyPart[] = []

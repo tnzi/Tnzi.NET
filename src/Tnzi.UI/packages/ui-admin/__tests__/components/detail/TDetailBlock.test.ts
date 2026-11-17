@@ -60,4 +60,15 @@ describe('TDetailBlock', () => {
     const w = mountBlock({ title: 'x' }, {})
     expect(w.classes()).toContain('t-detail-block')
   })
+
+  it('hintMode="popover" moves the hint behind a ⓘ beside the title', () => {
+    const w = mount(TDetailBlock, {
+      props: { title: 'Passkeys', hint: 'A long explanation that would otherwise become a paragraph.', hintMode: 'popover' },
+      global: { stubs: { TSvgIcon: Icon, THint: { name: 'THint', props: ['content'], template: '<i class="hint-icon" :data-content="content" />' } } },
+    })
+    expect(w.find('.t-detail-block__hint').exists()).toBe(false)
+    expect(w.find('.t-detail-block__title .hint-icon').attributes('data-content')).toBe('A long explanation that would otherwise become a paragraph.')
+    // No inline hint: the head keeps the spacing it has when there is none.
+    expect(w.find('.t-detail-block__head').classes()).toContain('t-detail-block__head--bare')
+  })
 })

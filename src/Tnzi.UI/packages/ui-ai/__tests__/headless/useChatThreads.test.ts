@@ -45,6 +45,7 @@ function api(overrides: Record<string, unknown> = {}) {
     chatApi: {
       getChatStreamUrl: () => '/api/ai/chat/stream',
       getActiveRuns: vi.fn(async () => ({ succeeded: true, data: [] })),
+      getQueue: vi.fn(async () => ({ succeeded: true, data: [] })),
       getRunStreamUrl: (runId: string, from = 0) => `/api/ai/chat/runs/${runId}/stream?fromSequence=${from}`,
       cancelRun: vi.fn(async () => ({ succeeded: true })),
     },

@@ -53,7 +53,6 @@ export function mergeThemeSettings(
       error: getColorPalette(colors.error),
     },
     mode: partial.mode ?? defaultThemeSettings.mode,
-    naiveOverrides: partial.naiveOverrides,
     presetName: partial.presetName ?? defaultThemeSettings.presetName,
   }
 }

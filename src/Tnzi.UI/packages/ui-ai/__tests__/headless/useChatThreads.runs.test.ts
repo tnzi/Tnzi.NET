@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { effectScope, ref } from 'vue';
+import { effectScope, ref, watch } from 'vue';
 
 /**
  * `useChatThreads` around runs that outlive the request (agents bound to an external CLI
@@ -246,6 +246,54 @@ describe('per-turn metadata', () => {
   });
 });
 
+describe('thread origin', () => {
+  it('goes with the turn that starts a conversation, shows on its row at once, and comes back from the server list', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    let created = false;
+    const getList = vi.fn(async () => ({
+      succeeded: true,
+      data: created
+        ? { items: [{ id: 't-new', title: 'Inbox', lastActivityTime: '2026-11-08T10:00:00Z', origin: 'Card', messageCount: 2, creationTime: 'x' }], totalCount: 1 }
+        : { items: [], totalCount: 0 },
+    }));
+    let release: (() => void) | undefined;
+    streamRunner = async (opts) => {
+      bodies.push(opts.body as Record<string, unknown>);
+      if (bodies.length === 1) {
+        await new Promise<void>((r) => (release = r));
+        created = true;
+        (opts.onDone as Cb<Record<string, unknown>>)({ threadId: 't-new' });
+      }
+      return { text: 'ok' };
+    };
+    const chat = useChatThreads(deps({ threadApi: { getList } }) as never);
+
+    const first = chat.send('summarise my inbox', [], { origin: 'Card' });
+    await vi.waitFor(() => expect(release).toBeDefined());
+    expect(bodies[0].origin).toBe('Card');
+    expect(chat.threads.value[0]).toMatchObject({ pending: true, origin: 'Card' });
+    release?.();
+    await first;
+    await vi.waitFor(() => expect(chat.activeThreadId.value).toBe('t-new'));
+    await vi.waitFor(() => expect(chat.threads.value.find((t) => t.id === 't-new')?.origin).toBe('Card'));
+
+    await chat.send('and the attachments?', [], { origin: 'Card' });
+    expect(bodies[1].threadId).toBe('t-new');
+    expect(bodies[1]).not.toHaveProperty('origin');
+  });
+
+  it('a turn without one sends none', async () => {
+    let body: Record<string, unknown> | undefined;
+    streamRunner = async (opts) => {
+      body = opts.body as Record<string, unknown>;
+      return { text: 'ok' };
+    };
+    const chat = useChatThreads(deps() as never);
+    await chat.send('hi');
+    expect(body).not.toHaveProperty('origin');
+  });
+});
+
 describe('history in pages', () => {
   it('opens a thread on its newest page and pages back before the oldest message', async () => {
     const getMessages = vi.fn()
@@ -483,5 +531,92 @@ describe('stored attachments', () => {
     chat.newChat();
     await vi.waitFor(() => expect(revoked).toEqual(['blob:1']));
     expect(await chat.resolveAttachmentUrl('att-1')).toBeNull();
+  });
+});
+
+describe('a new conversation takes its thread when the stream names it', () => {
+  it('is that thread from run_started on, in place of the optimistic row, and the stream goes on', async () => {
+    let created = false;
+    const d = deps({
+      threadApi: {
+        getList: vi.fn(async () => ({
+          succeeded: true,
+          data: created
+            ? { items: [{ id: 't-new', title: 'a brand new task', lastActivityTime: '2026-11-08T04:00:00Z' }], totalCount: 1 }
+            : { items: [], totalCount: 0 },
+        })),
+      },
+    });
+    // The list read when the thread is adopted already has it (the server created it before naming it).
+    const swapped: string[][] = [];
+    let emit: StreamOpts | undefined;
+    let release: (() => void) | undefined;
+    streamRunner = async (opts) => {
+      emit = opts;
+      (opts.onEvent as Cb<Record<string, unknown>>)({ eventType: 'run_started', runId: 'r-1', userMessageId: 'srv-u', threadId: 't-new' });
+      await new Promise<void>((r) => (release = r));
+      (opts.onDone as Cb<Record<string, unknown>>)({ eventType: 'done', threadId: 't-new', assistantMessageId: 'srv-a' });
+      return { text: 'answer' };
+    };
+    const chat = useChatThreads(d as never);
+    watch(chat.activeThreadId, () => swapped.push(chat.threads.value.map((t) => `${t.id}${t.pending ? '?' : ''}`)), { flush: 'sync' });
+    created = true;
+    const turn = chat.send('a brand new task');
+    await vi.waitFor(() => expect(chat.activeThreadId.value).toBe('t-new'));
+    // The optimistic row is swapped in the same step, not left pending until the list comes back.
+    expect(swapped).toEqual([['t-new']]);
+
+    // Mid-turn: the row is the server's, nothing was read back, the reply still streams.
+    expect(chat.isStreaming.value).toBe(true);
+    expect(chat.threads.value.map((t) => t.id)).toEqual(['t-new']);
+    expect(chat.threads.value[0].pending).toBeFalsy();
+    expect(chat.threads.value[0].title).toBe('a brand new task');
+    expect(d.threadApi.getMessages).not.toHaveBeenCalled();
+    (emit!.onDelta as Cb<string>)('ans');
+    expect(chat.messages.value[1].content).toBe('ans');
+
+    release?.();
+    await turn;
+    expect(chat.activeThreadId.value).toBe('t-new');
+    expect(chat.messages.value.map((m) => m.id)).toEqual(['srv-u', 'srv-a']);
+    expect(d.threadApi.getMessages).not.toHaveBeenCalled();
+  });
+
+  it('any event naming the thread will do (an agent that names no run)', async () => {
+    const d = deps();
+    let release: (() => void) | undefined;
+    streamRunner = async (opts) => {
+      (opts.onEvent as Cb<Record<string, unknown>>)({ eventType: 'agent_started', threadId: 't-new' });
+      await new Promise<void>((r) => (release = r));
+      return { text: '' };
+    };
+    const chat = useChatThreads(d as never);
+    const turn = chat.send('hello');
+    await vi.waitFor(() => expect(chat.activeThreadId.value).toBe('t-new'));
+    expect(chat.isStreaming.value).toBe(true);
+    release?.();
+    await turn;
+  });
+
+  it('a conversation left before the thread was named does not pull the person back to it', async () => {
+    const d = deps();
+    let name: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    streamRunner = async (opts) => {
+      await new Promise<void>((r) => (name = r));
+      (opts.onEvent as Cb<Record<string, unknown>>)({ eventType: 'agent_started', threadId: 't-new' });
+      await new Promise<void>((r) => (release = r));
+      return { text: '' };
+    };
+    const chat = useChatThreads(d as never);
+    const turn = chat.send('hello');
+    await vi.waitFor(() => expect(name).toBeDefined());
+    chat.newChat();
+    name?.();
+    await vi.waitFor(() => expect(release).toBeDefined());
+    expect(chat.activeThreadId.value).toBeUndefined();
+    release?.();
+    await turn;
+    expect(chat.activeThreadId.value).toBeUndefined();
   });
 });

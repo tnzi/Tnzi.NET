@@ -134,7 +134,9 @@ public class CliAgentBindingService : ApplicationService, ICliAgentBindingServic
 
         dto.CliRuntimeName = runtime?.Name;
         dto.ProviderKey = runtime?.ProviderKey;
-        dto.AcceptsAttachments = runtime?.ProviderKey is { } key && _providerRegistry?.Find(key) is { AcceptsAttachments: true };
+        dto.AcceptedAttachments = runtime?.ProviderKey is { } key && _providerRegistry?.Find(key) is { } provider
+            ? provider.Attachments
+            : CliAttachmentKinds.None;
         return dto;
     }
 }

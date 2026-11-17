@@ -114,15 +114,15 @@ afterEach(() => {
 
 describe('TChatApp brand wordmark', () => {
   const shell = (extra: Record<string, unknown> = {}) =>
-    mount(TChatApp, { sidebarStorageKey: null, autoApplyTheme: false, brandName: 'TuanZi', ...extra });
+    mount(TChatApp, { sidebarStorageKey: null, autoApplyTheme: false, brandName: 'Acme', ...extra });
 
   it('draws the wordmark in place of the name, which stays the accessible name', async () => {
     const el = await shell({ brandWordmark: WORDMARK });
     const name = el.querySelector('.t-chat-app__brand-name');
 
     expectDrawnWordmark(name);
-    expect(name?.querySelector('.sr-only')?.textContent).toBe('TuanZi');
-    expect(name?.textContent?.trim()).toBe('TuanZi');
+    expect(name?.querySelector('.sr-only')?.textContent).toBe('Acme');
+    expect(name?.textContent?.trim()).toBe('Acme');
     expect(visibleText(name!)).toBe('');
   });
 
@@ -131,9 +131,10 @@ describe('TChatApp brand wordmark', () => {
     const brand = el.querySelector('.t-chat-app__brand')!;
 
     expect(brand.querySelector('.t-chat-app__brand-mark svg')).not.toBeNull();
-    expect(el.querySelector('.t-chat-app__workspace-switcher')?.textContent?.trim()).toBe('TuanZi');
+    // The top bar does not repeat the brand while the sidebar shows it.
+    expect(el.querySelector('.t-chat-app__workspace-switcher')).toBeNull();
 
-    (brand.querySelector('.t-chat-app__brand-collapse') as HTMLButtonElement).click();
+    (brand.querySelector('.t-chat-app__brand-toggle') as HTMLButtonElement).click();
     await settle();
     expect(el.querySelector('.t-collapsible-sidebar--icon')).not.toBeNull();
     expect(el.querySelector('.t-chat-app__brand')).toBeNull();
@@ -143,14 +144,14 @@ describe('TChatApp brand wordmark', () => {
     const el = await shell();
     const name = el.querySelector('.t-chat-app__brand-name');
 
-    expect(name?.innerHTML).toBe('TuanZi');
+    expect(name?.innerHTML).toBe('Acme');
     expect(el.querySelector(`svg[viewBox="${WORDMARK_BOX}"]`)).toBeNull();
   });
 
   it('a `brand` slot still replaces the whole header', async () => {
     const el = await mount(
       TChatApp,
-      { sidebarStorageKey: null, autoApplyTheme: false, brandName: 'TuanZi', brandWordmark: WORDMARK },
+      { sidebarStorageKey: null, autoApplyTheme: false, brandName: 'Acme', brandWordmark: WORDMARK },
       { brand: () => h('div', { class: 'own-brand' }, 'Own') },
     );
 

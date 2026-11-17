@@ -1,10 +1,13 @@
 /**
  * @tnzi/ui/plugin
  *
- * Vue 3 plugin for Tnzi UI components (Naive UI).
+ * Vue 3 plugin for the library-neutral Tnzi UI layer: the theme context, the
+ * runtime adapter, i18n, the Pinia store runtime and global registration of
+ * this package's T* components.
  *
- * Registers all T* components globally, configures message/dialog adapters,
- * and sets up theme/locale support for Naive UI.
+ * It registers no message / dialog / notification / loading-bar adapter:
+ * those drive a component library and are registered by the package that
+ * renders with it (`createTnziUiAdmin` in `@tnzi/ui-admin`).
  *
  * i18n note: the message catalogue is `@tnzi/core/adapters/i18n` (namespaces
  * `common` / `auth` / `crud` / `table` / `form` / `upload` / `date`), provided
@@ -17,23 +20,10 @@ import type { Locale as CoreLocale } from '@tnzi/core/adapters/i18n';
 import type { HttpClient } from '@tnzi/core/http';
 import type { StorageAdapter } from '@tnzi/core/adapters';
 import { DEFAULT_LOCALE, provideI18n } from '@tnzi/core/adapters/i18n';
-import {
-  setActiveUiAdapter,
-  setActiveRuntimeAdapter,
-  setNotificationAdapter,
-  setLoadingBarAdapter,
-} from '@tnzi/core/adapters';
+import { setActiveRuntimeAdapter } from '@tnzi/core/adapters';
 import { initStoreRuntime } from './stores/factory';
-
-// Import adapters
-import { createUiAdapter } from './adapters/create-ui-adapter';
 import { createRuntimeAdapter, type VueRouterLike } from './adapters/create-runtime-adapter';
-import { createNotificationAdapter } from './adapters/notification';
-import { createLoadingBarAdapter } from './adapters/loading-bar';
-
 import { registerAllComponents } from './components/register';
-
-// Theme context (Phase 1.28)
 import { defaultThemeSettings, mergeThemeSettings } from './theme/settings';
 import { createThemeContext, THEME_CONTEXT_KEY } from './headless/theme/useTheme';
 import type { ThemeSettings } from './theme/types';
@@ -60,21 +50,6 @@ export interface TnziUiOptions {
   registerComponents?: boolean;
   /** Initial theme settings. Merged with defaults. */
   theme?: Partial<ThemeSettings>;
-  /**
-   * Whether to register fallback adapters (default: true).
-   *
-   * When true, sets up message, dialog, notification, and loading bar adapters
-   * using window.$message / window.$dialog / window.$notification / window.$loadingBar
-   * as the global handles. `@tnzi/ui-admin`'s `TAdminAppRoot` mounts the Naive UI
-   * providers AND registers these window handles automatically, so admin apps
-   * built on it need no extra wiring. Applications not using `TAdminAppRoot`
-   * must wrap the root component with NMessageProvider, NDialogProvider,
-   * NNotificationProvider, and NLoadingBarProvider, and expose the APIs to the
-   * window object from a setup component inside that provider stack.
-   *
-   * When false, adapters must be registered manually.
-   */
-  registerAdapters?: boolean;
 }
 
 // ============================================
@@ -90,7 +65,6 @@ export function createTnziUi(options: TnziUiOptions = {}): Plugin {
     storage,
     theme,
     registerComponents = true,
-    registerAdapters = true,
   } = options;
 
   return {
@@ -107,18 +81,8 @@ export function createTnziUi(options: TnziUiOptions = {}): Plugin {
         registerAllComponents(app);
       }
 
-      // 2. Register all adapters using window.$* global handles.
-      //    Naive UI requires NMessageProvider / NDialogProvider / NNotificationProvider /
-      //    NLoadingBarProvider in the component tree. @tnzi/ui-admin's TAdminAppRoot
-      //    mounts the providers and registers the window handles automatically;
-      //    apps not using it expose the API instances to window from their own
-      //    setup component inside the provider stack.
-      if (registerAdapters) {
-        setActiveUiAdapter(createUiAdapter());
-        setActiveRuntimeAdapter(createRuntimeAdapter({ router, storagePrefix }));
-        setNotificationAdapter(createNotificationAdapter());
-        setLoadingBarAdapter(createLoadingBarAdapter());
-      }
+      // 2. The runtime adapter (navigation + storage) that @tnzi/core uses
+      setActiveRuntimeAdapter(createRuntimeAdapter({ router, storagePrefix }));
 
       // 3. Point the Pinia stores at the given HTTP client (module-level runtime)
       if (httpClient) {

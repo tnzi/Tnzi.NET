@@ -30,6 +30,11 @@ public class UsagePolicyDto
     /// <summary>默认模型 id；null = 跟随上一层。</summary>
     public string? DefaultModel { get; set; }
 
+    /// <summary>
+    /// 按模型 id 设的可选强度；没列出的模型跟随上一层（null 与空字典相同）。
+    /// </summary>
+    public Dictionary<string, ChatModelEffortsDto>? ModelEfforts { get; set; }
+
     /// <summary>备注，只给管理员看。</summary>
     public string? Note { get; set; }
 
@@ -56,6 +61,12 @@ public class SaveUsagePolicyDto
     /// <summary>默认模型 id；null = 跟随上一层。必须在生效的允许列表里。</summary>
     [MaxLength(200)]
     public string? DefaultModel { get; set; }
+
+    /// <summary>
+    /// 按模型 id 设的可选强度（模型必须在模型清单里）；没列出的模型跟随上一层，null 与空字典相同。
+    /// 一项的强度给空列表 = 这个模型不提供强度选择。
+    /// </summary>
+    public Dictionary<string, ChatModelEffortsDto>? ModelEfforts { get; set; }
 
     /// <summary>备注，只给管理员看。</summary>
     [MaxLength(512)]

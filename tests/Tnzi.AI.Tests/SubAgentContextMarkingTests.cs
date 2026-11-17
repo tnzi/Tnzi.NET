@@ -350,7 +350,7 @@ public class SubAgentContextMarkingTests
                 accessor,
                 new ServiceCollection().AddSingleton(workflowService.Object).BuildServiceProvider(),
                 Mock.Of<IOptionsMonitor<AIOptions>>(),
-                new EventPublisher(null, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>()),
+                new EventPublisher(null, Mock.Of<ILogger<EventPublisher>>()),
                 Mock.Of<ILogger<AgentRuntime>>());
         }
 

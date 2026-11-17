@@ -15,10 +15,11 @@ import { defineComponent, h } from 'vue'
  */
 const messageApi = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(), loading: vi.fn(), create: vi.fn(), destroyAll: vi.fn() }
 
-vi.mock('@tnzi/ui', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tnzi/ui')>()),
+vi.mock('../../../src/headless/useSafeMessage', () => ({
   useSafeMessage: () => messageApi,
-  TModalShell: defineComponent({
+}))
+vi.mock('../../../src/components/overlay/TModalShell.vue', () => ({
+  default: defineComponent({
     name: 'TModalShell',
     props: ['show', 'title', 'width'],
     emits: ['update:show'],

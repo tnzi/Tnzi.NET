@@ -305,11 +305,11 @@ public class AIModuleRegistrationTests
     {
         var services = CreateServiceCollection();
 
-        // ThreadFirstReplyCompletedEvent handler
+        // ThreadTitleRequestedEvent handler
         services.Any(d => d.ServiceType.IsGenericType
             && d.ServiceType.GetGenericTypeDefinition().Name.Contains("IEventHandler")
-            && d.ServiceType.GetGenericArguments().Any(a => a == typeof(ThreadFirstReplyCompletedEvent)))
-            .ShouldBeTrue("ThreadFirstReplyCompletedEvent handler should be registered");
+            && d.ServiceType.GetGenericArguments().Any(a => a == typeof(ThreadTitleRequestedEvent)))
+            .ShouldBeTrue("ThreadTitleRequestedEvent handler should be registered");
     }
 
     #endregion

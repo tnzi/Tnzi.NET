@@ -2,7 +2,7 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import { TRelativeTime } from '@tnzi/ui'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 
 /**
  * Tenant search fields - align with backend `TenantQueryDto`:

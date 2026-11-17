@@ -175,4 +175,188 @@ describe('TChatApp aside', () => {
     await settle()
     expect(el.querySelector('.t-aside-panel')).toBeNull()
   })
+
+  describe('asideFullHeight', () => {
+    const FULL = 't-chat-app__main--aside-full-height'
+    const withAside = { aside: () => h('div', { class: 'probe' }) }
+    const isFull = (el: HTMLElement) => el.querySelector('.t-chat-app__main')!.classList.contains(FULL)
+
+    it('is off by default: the panel stays in the workspace under a plain main area', async () => {
+      const el = mount(() => h(TChatApp, { ...baseProps, activeThreadId: 't1', asideDefaultOpen: true }, withAside))
+      await settle()
+      expect(isFull(el)).toBe(false)
+      expect(el.querySelector('.t-chat-app__workspace > .t-aside-panel')).not.toBeNull()
+    })
+
+    it('lays the main area out beside the panel while it is available, open or closed', async () => {
+      const el = mount(() => h(TChatApp, { ...baseProps, activeThreadId: 't1', asideFullHeight: true }, withAside))
+      await settle()
+      expect(isFull(el)).toBe(true)
+      ;(el.querySelector('.t-chat-app__aside-toggle') as HTMLElement).click()
+      await settle()
+      expect(isFull(el)).toBe(true)
+      // The panel is not moved in the DOM, so the layout never remounts its content.
+      expect(el.querySelector('.t-chat-app__workspace > .t-aside-panel.t-chat-app__aside .probe')).not.toBeNull()
+      expect(el.querySelector('.t-chat-app__topbar .t-chat-app__aside-toggle')).not.toBeNull()
+    })
+
+    it('leaves the narrow layer alone', async () => {
+      const el = mount(() =>
+        h(TChatApp, { ...baseProps, activeThreadId: 't1', isMobile: true, asideDefaultOpen: true, asideFullHeight: true }, withAside),
+      )
+      await settle()
+      expect(isFull(el)).toBe(false)
+      expect(el.querySelector('.t-aside-panel--narrow')).not.toBeNull()
+    })
+
+    it('does not apply without aside content', async () => {
+      const el = mount(() => h(TChatApp, { ...baseProps, activeThreadId: 't1', asideFullHeight: true }))
+      await settle()
+      expect(isFull(el)).toBe(false)
+    })
+
+    it('does not apply on a product view or the landing page', async () => {
+      const view = ref('chat')
+      const msgs = ref<typeof messages>(messages)
+      const el = mount(() =>
+        h(
+          TChatApp,
+          { ...baseProps, messages: msgs.value, view: view.value, activeThreadId: 't1', asideFullHeight: true },
+          { ...withAside, view: () => h('div', { class: 'page' }) },
+        ),
+      )
+      await settle()
+      expect(isFull(el)).toBe(true)
+      view.value = 'agents'
+      await settle()
+      expect(el.querySelector('.page')).not.toBeNull()
+      expect(isFull(el)).toBe(false)
+      view.value = 'chat'
+      msgs.value = []
+      await settle()
+      expect(el.querySelector('.t-landing')).not.toBeNull()
+      expect(el.querySelector('.t-chat-app__thread')).toBeNull()
+      expect(isFull(el)).toBe(false)
+    })
+  })
+
+  describe('asideOnLanding', () => {
+    const landingProps = { ...baseProps, messages: [] as typeof messages }
+    type Shell = { openAside: (tab?: string) => void }
+
+    it('is off by default: no panel and no toggle on the landing page, openAside() shows nothing', async () => {
+      const shell = ref<Shell | null>(null)
+      const el = mount(() => h(TChatApp, { ...landingProps, ref: shell }, { aside: () => h('div', { class: 'probe' }) }))
+      await settle()
+      expect(el.querySelector('.t-landing')).not.toBeNull()
+      expect(el.querySelector('.t-chat-app__aside-toggle')).toBeNull()
+      shell.value!.openAside()
+      await settle()
+      expect(el.querySelector('.t-aside-panel')).toBeNull()
+    })
+
+    it('shows the panel beside the landing page, from openAside() and from the top bar toggle', async () => {
+      const shell = ref<Shell | null>(null)
+      const el = mount(() =>
+        h(TChatApp, { ...landingProps, asideOnLanding: true, ref: shell }, { aside: (p: { tab?: string }) => h('div', { class: 'probe' }, p.tab) }),
+      )
+      await settle()
+      const toggle = el.querySelector('.t-chat-app__aside-toggle') as HTMLButtonElement
+      expect(toggle).not.toBeNull()
+      expect(el.querySelector('.t-aside-panel')).toBeNull()
+
+      shell.value!.openAside('files')
+      await settle()
+      // Same frame as in a conversation: a resizable column beside the landing content, in the workspace
+      expect(el.querySelector('.t-chat-app__workspace > .t-landing + .t-aside-panel.t-chat-app__aside .probe')?.textContent).toBe('files')
+      expect(el.querySelector('.t-aside-panel [role="separator"]')).not.toBeNull()
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+
+      toggle.click()
+      await settle()
+      expect(el.querySelector('.t-aside-panel')).toBeNull()
+    })
+
+    it('keeps the panel open and mounted when the first message turns the landing page into a conversation', async () => {
+      const msgs = ref<typeof messages>([])
+      const thread = ref<string | null>(null)
+      let slotMounts = 0
+      const Probe = { setup: () => { slotMounts += 1; return () => h('div', { class: 'probe' }) } }
+      const shell = ref<Shell | null>(null)
+      const el = mount(() =>
+        h(
+          TChatApp,
+          { ...baseProps, messages: msgs.value, activeThreadId: thread.value, asideOnLanding: true, ref: shell },
+          { aside: () => h(Probe) },
+        ),
+      )
+      await settle()
+      shell.value!.openAside()
+      await settle()
+      const panel = el.querySelector('.t-aside-panel')
+      const probe = el.querySelector('.probe')
+      expect(panel).not.toBeNull()
+
+      // The first message is shown before the conversation has an id, then the id arrives
+      msgs.value = messages
+      await settle()
+      expect(el.querySelector('.t-landing')).toBeNull()
+      expect(el.querySelector('.t-chat-app__thread')).not.toBeNull()
+      expect(el.querySelector('.t-aside-panel')).toBe(panel)
+      thread.value = 't-new'
+      await settle()
+
+      expect(el.querySelector('.t-aside-panel')).toBe(panel)
+      expect(el.querySelector('.probe')).toBe(probe)
+      expect(slotMounts).toBe(1)
+      // The new conversation took over the landing page's state, so it is remembered as open
+      expect(JSON.parse(localStorage.getItem('aside-test')!)['t-new']).toMatchObject({ open: true })
+    })
+
+    it('stores the width the landing page was resized to with the conversation it becomes', async () => {
+      const msgs = ref<typeof messages>([])
+      const thread = ref<string | null>(null)
+      const el = mount(() =>
+        h(
+          TChatApp,
+          { ...baseProps, messages: msgs.value, activeThreadId: thread.value, asideOnLanding: true, asideDefaultOpen: true },
+          { aside: () => h('div', { class: 'probe' }) },
+        ),
+      )
+      await settle()
+      const handle = el.querySelector('.t-aside-panel [role="separator"]') as HTMLElement
+      handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', shiftKey: true, bubbles: true }))
+      await settle()
+      msgs.value = messages
+      thread.value = 't-new'
+      await settle()
+      expect(JSON.parse(localStorage.getItem('aside-test')!)['t-new']).toMatchObject({ width: 420 + 64 })
+    })
+
+    it('lays the landing page out beside a full-height panel and is a full-size layer on a phone', async () => {
+      const wide = mount(() =>
+        h(TChatApp, { ...landingProps, asideOnLanding: true, asideFullHeight: true, asideDefaultOpen: true }, { aside: () => h('div', { class: 'probe' }) }),
+      )
+      await settle()
+      expect(wide.querySelector('.t-chat-app__main')!.classList.contains('t-chat-app__main--aside-full-height')).toBe(true)
+      expect(wide.querySelector('.t-landing.t-chat-app__landing')).not.toBeNull()
+      app?.unmount()
+      host?.remove()
+
+      const phone = mount(() =>
+        h(TChatApp, { ...landingProps, asideOnLanding: true, isMobile: true, asideDefaultOpen: true }, { aside: () => h('div', { class: 'probe' }) }),
+      )
+      await settle()
+      expect(phone.querySelector('.t-aside-panel--narrow .probe')).not.toBeNull()
+    })
+
+    it('does not put the artifact pane on the landing page', async () => {
+      const el = mount(() =>
+        h(TChatApp, { ...landingProps, asideOnLanding: true, artifact: { id: 'a', title: 'A', type: 'code', content: 'x' } as never }),
+      )
+      await settle()
+      expect(el.querySelector('.t-landing')).not.toBeNull()
+      expect(el.querySelector('.t-chat-app__artifact-slot')).toBeNull()
+    })
+  })
 })

@@ -120,6 +120,43 @@ public class CliRunWatchdogTests
         watchdog.CheckAndTrip().ShouldBeTrue();
         watchdog.Failure.ShouldBe(CliRunFailureReason.HardTimeout);
     }
+
+    /// <summary>
+    /// 一轮结束、CLI 在等后台任务开下一轮：没有输出是应该的，空闲看门狗不判死（等多久由适配器的上限管）；
+    /// 下一轮的第一条事件一到，空闲计时照常。
+    /// </summary>
+    [Fact]
+    public void WaitingForTheNextTurn_IsNotIdle_UntilTheNextTurnStarts()
+    {
+        using var watchdog = new CliRunWatchdog(
+            idle: TimeSpan.FromMilliseconds(-1),
+            tool: TimeSpan.FromMinutes(30),
+            hard: null,
+            CancellationToken.None);
+
+        watchdog.Observe(new CliAgentEvent { Type = CliAgentEventType.TurnCompleted, Turn = new CliTurnBoundary() });
+        watchdog.CheckAndTrip().ShouldBeFalse();
+
+        watchdog.Observe(new CliAgentEvent { Type = CliAgentEventType.Status, Status = "running" });
+        watchdog.CheckAndTrip().ShouldBeTrue();
+        watchdog.Failure.ShouldBe(CliRunFailureReason.IdleTimeout);
+    }
+
+    /// <summary>等下一轮时硬超时照常：一个卡住的后台任务占不住进程超过它。</summary>
+    [Fact]
+    public void WaitingForTheNextTurn_StillEndsAtTheHardTimeout()
+    {
+        using var watchdog = new CliRunWatchdog(
+            idle: TimeSpan.FromMinutes(10),
+            tool: TimeSpan.FromMinutes(30),
+            hard: TimeSpan.FromMilliseconds(-1),
+            CancellationToken.None);
+
+        watchdog.Observe(new CliAgentEvent { Type = CliAgentEventType.TurnCompleted, Turn = new CliTurnBoundary() });
+
+        watchdog.CheckAndTrip().ShouldBeTrue();
+        watchdog.Failure.ShouldBe(CliRunFailureReason.HardTimeout);
+    }
 }
 
 /// <summary>

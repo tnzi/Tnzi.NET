@@ -26,7 +26,7 @@
  * un-setting something would be impossible without a hard reload.
  */
 import { buildCssVars, defaultThemeSettings } from '@tnzi/ui/theme';
-import type { ThemeContext } from '@tnzi/ui';
+import type { ThemeContext } from '@tnzi/ui/headless';
 import { applyAiTheme, resetAiTheme, type AiThemeTokens } from './tokens';
 
 /** Snapshot format version. Bump only on a breaking shape change. */
@@ -144,7 +144,7 @@ const CONTEXT_BASE_PRIMARY = new WeakMap<ThemeContext, string>();
  * every change to its settings, a light/dark switch included, so an inline
  * write beside it was undone by the next mode switch. Going through
  * `setColor` also moves what an inline write never reached: the palette, the
- * `-rgb` triplets and the naive-ui overrides the controls are painted with.
+ * `-rgb` triplets the accent tints derive from.
  */
 function applyBrandThroughContext(context: ThemeContext, primary: string | undefined): void {
   const current = context.settings.value.colors.primary;

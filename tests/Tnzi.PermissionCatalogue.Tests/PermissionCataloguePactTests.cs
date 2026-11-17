@@ -25,6 +25,7 @@ using Tnzi.Hangfire.Permissions;
 using Tnzi.HealthChecks.Permissions;
 using Tnzi.Identity.Permissions;
 using Tnzi.Identity.Organization.Permissions;
+using Tnzi.Identity.OpenIdConnect.Permissions;
 using Tnzi.Localization.Permissions;
 using Tnzi.Notification.Permissions;
 using Tnzi.Notification.Push.Permissions;
@@ -69,6 +70,7 @@ public class PermissionCataloguePactTests
         {
             ["Identity"] = new IdentityPermissions(),
             ["Identity.Organization"] = new IdentityOrganizationPermissions(),
+            ["Identity.OpenIdConnect"] = new IdentityOpenIdConnectPermissions(),
             ["Authorization"] = new AuthorizationPermissions(),
             ["System"] = new SystemPermissions(),
             ["AspNetCore"] = new AspNetCorePermissions(),
@@ -186,7 +188,9 @@ public class PermissionCataloguePactTests
         // 改电话号码的岗位不该顺带拥有「让谁的登录少一道验证」。读仍走 user.view。
         // 2026-10-26：计费账户 2 码（payment.account.view / payment.account.manage，复用 payment 组）。
         // 只在 Payment:BillingAccount:Scope = Installation / Tenant 下由服务层检查：几位管理者共同管一个客户账户。
-        codes.Count.ShouldBe(313);
+        // 2026-10-28：OpenID Connect 提供方 6 码（identity.oidcClient 四件套 + identity.oidcGrant view/delete，
+        // 复用 identity 组）。授权没有 create / update：授权由用户在登录或同意时产生，管理员没有代人同意的场景。
+        codes.Count.ShouldBe(319);
         context.Groups.Count.ShouldBe(13);
     }
 
@@ -383,7 +387,9 @@ public class PermissionCataloguePactTests
         // 只能藏菜单而 API 照样通（把装饰当权限展示）。
         // 2026-09-12：工具组权限 3 码（ai.tools.task / a2a / sandbox）Technical，99 → 102 ——
         // 「谁能让模型起子 Agent / 打远端 agent / 在沙箱里跑 bash」是运维面的能力授权。
-        technical.Count.ShouldBe(102);
+        // 2026-10-28：OpenID Connect 提供方 6 码全部 Technical，102 → 108 —— 登记客户端 = 让一个外部应用
+        // 凭平台账号登录，撤销授权 = 让用户在那个应用里掉线，是信任边界的配置。
+        technical.Count.ShouldBe(108);
     }
 
     [Theory]

@@ -95,7 +95,7 @@ const router = useRouter()
 const authStore = useAdminAuthStore()
 const t = makePageTranslator('account.userCenter')
 const config = useAdminUserCenterConfig()
-const { can } = usePermissionGuard()
+const { can, canAnyRole } = usePermissionGuard()
 const moduleAvail = useModuleAvailability()
 
 /**
@@ -146,12 +146,13 @@ function groupLabel(groupKey: string): string {
 }
 
 /** Merge built-ins with the consumer config: hide / regroup / reorder /
- *  override built-ins, then append permission+module-gated custom sections,
+ *  override built-ins, then append permission+role+module-gated custom sections,
  *  finally drop hidden groups and sort. (Pure logic in `resolveSections.ts`.) */
 const resolvedSections = computed(() =>
   resolveUserCenterSections(BUILTINS, config, {
     t,
     can,
+    canAnyRole,
     hasModule: (m) => moduleAvail.has(m),
     groupLabel,
   }),

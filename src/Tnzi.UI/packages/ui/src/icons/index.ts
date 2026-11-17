@@ -15,68 +15,29 @@
  * @example
  * ```ts
  * import { bundleTnziIcons } from '@tnzi/ui/icons'
- * import { icons as lineMd } from '@iconify-json/line-md'
  * import { icons as mdi } from '@iconify-json/mdi'
  *
- * bundleTnziIcons([lineMd, mdi])
+ * bundleTnziIcons([mdi])
  * ```
  */
 import { _api, addCollection, type IconifyJSON } from '@iconify/vue'
 import { getIcons } from '@iconify/utils'
 
-/** Every Iconify name `@tnzi/ui` and its @tnzi dependencies can render (52 names, 2 collections). */
+/** Every Iconify name `@tnzi/ui` and its @tnzi dependencies can render (14 names, 1 collection). */
 export const tnziIconNames: readonly string[] = [
-  'line-md:menu-fold-left',
-  'line-md:menu-fold-right',
-  'mdi:alert-circle-outline',
   'mdi:android',
   'mdi:apple',
   'mdi:apple-ios',
-  'mdi:arrow-down-bold',
-  'mdi:arrow-up-bold',
-  'mdi:check-circle-outline',
-  'mdi:close',
-  'mdi:close-circle-outline',
-  'mdi:code-tags',
-  'mdi:database',
   'mdi:devices',
-  'mdi:drag',
   'mdi:facebook',
-  'mdi:file-document-outline',
-  'mdi:file-excel-box',
-  'mdi:file-outline',
-  'mdi:file-pdf-box',
-  'mdi:file-word-box',
-  'mdi:folder-cog-outline',
-  'mdi:folder-outline',
-  'mdi:folder-zip-outline',
-  'mdi:fullscreen',
-  'mdi:fullscreen-exit',
   'mdi:github',
   'mdi:google',
-  'mdi:help-circle-outline',
-  'mdi:image-broken-variant',
   'mdi:inbox-outline',
-  'mdi:information-outline',
-  'mdi:laptop',
-  'mdi:lightbulb-outline',
   'mdi:linux',
   'mdi:login-variant',
   'mdi:microsoft',
   'mdi:microsoft-windows',
-  'mdi:minus',
-  'mdi:package-variant-closed',
-  'mdi:pin',
-  'mdi:pin-outline',
-  'mdi:plus',
-  'mdi:puzzle-outline',
-  'mdi:refresh',
-  'mdi:theme-light-dark',
-  'mdi:translate',
-  'mdi:tune',
   'mdi:twitter',
-  'mdi:weather-night',
-  'mdi:weather-sunny',
   'mdi:wechat',
 ]
 
@@ -94,7 +55,6 @@ const bareNames = (prefix: string): readonly string[] =>
  * {@link tnziIconNames} when you want the qualified form.
  */
 export const tnziIconsByPrefix: Readonly<Record<string, readonly string[]>> = {
-  'line-md': bareNames('line-md'),
   'mdi': bareNames('mdi'),
 }
 

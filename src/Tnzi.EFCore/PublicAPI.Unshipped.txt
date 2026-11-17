@@ -114,6 +114,7 @@ static Tnzi.EFCore.Internal.QueryFilterHelper.ApplyMultiTenantFilter(Tnzi.EFCore
 static Tnzi.EFCore.Internal.QueryFilterHelper.ApplySoftDeleteFilter(Tnzi.EFCore.Internal.IQueryFilterContext! filterContext, Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, System.Type! entityType) -> void
 static Tnzi.EFCore.Internal.QueryFilterHelper.ConfigureQueryFilters(Microsoft.EntityFrameworkCore.DbContext! dbContext, Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, bool multiTenancyEnabled) -> void
 static Tnzi.EFCore.Internal.TnziDbContextHelper.ConfigureQueryFilters(Microsoft.EntityFrameworkCore.DbContext! dbContext, Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, bool multiTenancyEnabled) -> void
+static Tnzi.EFCore.Internal.TnziDbContextHelper.OnConfiguring(Microsoft.EntityFrameworkCore.DbContextOptionsBuilder! optionsBuilder) -> void
 Tnzi.EFCore.MultiTenancyOptionsBuilderExtensions
 static Tnzi.EFCore.MultiTenancyOptionsBuilderExtensions.UseTnziMultiTenancy(this Microsoft.EntityFrameworkCore.DbContextOptionsBuilder! optionsBuilder, bool enabled) -> Microsoft.EntityFrameworkCore.DbContextOptionsBuilder!
 static Tnzi.EFCore.MultiTenancyOptionsBuilderExtensions.UseTnziMultiTenancy<TDbContext>(this Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TDbContext!>! optionsBuilder, bool enabled) -> Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TDbContext!>!
@@ -219,3 +220,4 @@ Tnzi.EFCore.Encryption.IFieldEncryptor.CiphertextOverheadChars.get -> int
 Tnzi.EFCore.Encryption.IFieldRewrapper
 Tnzi.EFCore.Encryption.IFieldRewrapper.NeedsRewrap(string! ciphertext) -> bool
 Tnzi.EFCore.Encryption.IFieldRewrapper.Rewrap(string! ciphertext, string! purpose) -> string!
+override Tnzi.EFCore.TnziDbContext<TDbContext>.OnConfiguring(Microsoft.EntityFrameworkCore.DbContextOptionsBuilder! optionsBuilder) -> void

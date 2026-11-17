@@ -17,11 +17,12 @@
  * channel.
  */
 import { computed, reactive, ref } from 'vue'
-import { NForm, NFormItem, NInput, NButton, NSpace, type FormRules } from 'naive-ui'
-import { TSvgIcon, TCaptcha } from '@tnzi/ui'
+import { NForm, NFormItem, NInput, NButton, type FormRules } from 'naive-ui'
+import { TSvgIcon } from '@tnzi/ui'
+import TCaptcha from '../../../components/forms/TCaptcha.vue'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
+import { useNaiveLoginAccountField } from '../../../headless/useNaiveFormRules'
 import { useCaptcha } from '@tnzi/ui'
-import { useLoginAccountField } from '@tnzi/ui'
 import { detectAccountType } from '../../../headless/account-type'
 import { useLoginContext } from '@tnzi/ui'
 import { isScriptCaptchaProvider } from '@tnzi/core/services/captcha'
@@ -31,7 +32,7 @@ defineOptions({ name: 'CodeLogin' })
 const { translate, toggleLoginModule, callbacks, ui, helpers, features, resolveUrl } = useLoginContext()
 const { formRef, validate } = useNaiveForm()
 const { label: codeBtnLabel, isCounting, loading: sending, getCaptcha } = useCaptcha({ translate })
-const { rule: accountRule, label: accountLabel, placeholder: accountPlaceholder } = useLoginAccountField(
+const { rule: accountRule, label: accountLabel, placeholder: accountPlaceholder } = useNaiveLoginAccountField(
   translate,
   () => features.codeChannels,
 )
@@ -161,7 +162,7 @@ async function handleSubmit(): Promise<void> {
         </NButton>
       </div>
     </NFormItem>
-    <NSpace vertical :size="18" class="w-full">
+    <div class="flex flex-col gap-18px w-full">
       <NButton type="primary" size="large" :round="ui.pill" block :loading="submitting" @click="handleSubmit">
         <template #icon>
           <TSvgIcon icon="mdi:login-variant" :size="18" />
@@ -175,6 +176,6 @@ async function handleSubmit(): Promise<void> {
         {{ translate('admin.login.back', 'Back') }}
       </NButton>
       <p v-if="submitError" class="m-0 text-13px text-error text-center" role="alert">{{ submitError }}</p>
-    </NSpace>
+    </div>
   </NForm>
 </template>

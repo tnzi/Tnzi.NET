@@ -69,16 +69,16 @@ const answer = (patch: Partial<ChatMessage> = {}): ChatMessage => ({
 
 describe('TThreadMessage byline', () => {
   it('shows the agent byline by default', async () => {
-    const el = mount(TThreadMessage, () => ({ message: answer(), agentName: 'TuanZi' }));
+    const el = mount(TThreadMessage, () => ({ message: answer(), agentName: 'Acme' }));
     await settle();
-    expect(el.querySelector('.t-thread-message__role')?.textContent).toContain('TuanZi');
+    expect(el.querySelector('.t-thread-message__role')?.textContent).toContain('Acme');
   });
 
   it('starts the answer with its text when the byline is off', async () => {
-    const el = mount(TThreadMessage, () => ({ message: answer(), agentName: 'TuanZi', showAgentByline: false }));
+    const el = mount(TThreadMessage, () => ({ message: answer(), agentName: 'Acme', showAgentByline: false }));
     await settle();
     expect(el.querySelector('.t-thread-message__role')).toBeNull();
-    expect(el.textContent).not.toContain('TuanZi');
+    expect(el.textContent).not.toContain('Acme');
     expect(el.querySelector('.t-thread-message')?.firstElementChild?.classList.contains('t-thread-message__body')).toBe(true);
   });
 
@@ -316,7 +316,7 @@ describe('TChatApp opening a thread', () => {
     const titles: Record<string, string> = { 'pass-1': 'Cleaner pass chat' };
     const { el, current } = shell(
       { active: 'A', messages: transcriptOfA },
-      { brandName: 'TuanZi', threadTitleOf: (id: string) => titles[id] },
+      { brandName: 'Acme', threadTitleOf: (id: string) => titles[id] },
     );
     await settle();
 
@@ -330,12 +330,12 @@ describe('TChatApp opening a thread', () => {
     expect(el.querySelector('.t-chat-app__workspace-switcher')?.textContent?.trim()).toBe('Quarterly numbers');
   });
 
-  it('falls back to the brand name for a conversation nobody can name', async () => {
-    const { el, current } = shell({ active: 'A', messages: transcriptOfA }, { brandName: 'TuanZi' });
+  it('leaves the bar empty for a conversation nobody can name (the sidebar shows the brand)', async () => {
+    const { el, current } = shell({ active: 'A', messages: transcriptOfA }, { brandName: 'Acme' });
     await settle();
     current.value = { active: 'A', opening: 'pass-1', messages: transcriptOfA };
     await settle();
-    expect(el.querySelector('.t-chat-app__workspace-switcher')?.textContent?.trim()).toBe('TuanZi');
+    expect(el.querySelector('.t-chat-app__workspace-switcher')).toBeNull();
   });
 });
 

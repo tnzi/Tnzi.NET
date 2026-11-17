@@ -30,6 +30,8 @@ import TMessageResponse from './TMessageResponse.vue'
 import TMessageAttachments from './TMessageAttachments.vue'
 import TReasoningStage from '../reasoning/TReasoningStage.vue'
 import TToolRun from '../reasoning/TToolRun.vue'
+import { replyToolCalls } from '../../headless/cli-tasks'
+import { provideMessageToolCalls } from '../reasoning/sub-agent-view'
 import { computed, nextTick, ref, useSlots } from 'vue'
 import { useAiI18n } from '../../i18n/index'
 import { formatCompactNumber } from '../../utils/format'
@@ -37,6 +39,7 @@ import TUsageLimitNotice from './TUsageLimitNotice.vue'
 import { USAGE_LIMIT_REACHED_ERROR_CODE } from '../../headless/usage-limits'
 import { isImeComposing } from '@tnzi/core/utils'
 import { useAutoGrowTextarea } from '../../headless/useAutoGrowTextarea'
+import { useReasoningActivity } from '../../headless/useReasoningActivity'
 import type { ChatMessage } from '../../headless/useChat'
 import { replyParts, segmentReply, type ReplyPart, type SegmentedReply } from './reply-segments'
 
@@ -87,6 +90,12 @@ const props = withDefaults(
      * jumped when a reply started and again when it ended.
      */
     editDisabled?: boolean
+    /**
+     * A record to read, not a conversation to act in: no Retry on a failed answer (its failure
+     * line still says that and why it failed), no action row (copy, regenerate, ratings, the
+     * `actions` slot) and no edit of a user message, whatever `showActions` and `enableEdit` say.
+     */
+    readonly?: boolean
   }>(),
   {
     agentLabel: '',
@@ -99,6 +108,7 @@ const props = withDefaults(
     showUsage: false,
     enableEdit: false,
     editDisabled: false,
+    readonly: false,
   },
 )
 
@@ -118,6 +128,17 @@ const displayAgentName = computed(
 
 const isStreaming = computed(() => props.message.isStreaming ?? false)
 
+/* The run only waits on background tasks (status 'waiting'): its answer is done and the
+   conversation is free, so this says quietly what still runs (the tasks the server
+   reported, by what they do), with no working mark and no actions. */
+const waiting = computed(() => props.message.status === 'waiting')
+const waitingTasks = computed(() =>
+  (props.message.backgroundTasks ?? []).map((task) => task.description || task.id).join(', '),
+)
+
+/* The thinking block runs while thinking is what arrives, not for the whole turn. */
+const { isReasoning } = useReasoningActivity(() => props.message)
+
 /* The byline's mark: the streaming variant while the answer is being written,
    when there is one. */
 const markIcon = computed(() =>
@@ -130,10 +151,14 @@ const ratedPositive = computed(() => props.message.feedbackRating === true)
 const ratedNegative = computed(() => props.message.feedbackRating === false)
 
 /* The answer and its tool cards in reading order: a card that says where in the
-   text it happened (external CLI agents) sits there; one that does not leads. */
+   text it happened (external CLI agents) sits there; one that does not leads.
+   Calls a sub-agent made are not the reply's: they are in the sub-agent's own view. */
+/* A sub-agent's own calls are found among the message's (its step, opened in place, shows them). */
+provideMessageToolCalls(computed(() => props.message.toolCalls ?? []))
+
 const reply = computed<SegmentedReply>(() =>
   props.showToolCalls
-    ? segmentReply(props.message.content, props.message.toolCalls)
+    ? segmentReply(props.message.content, replyToolCalls(props.message.toolCalls))
     : { lead: [], segments: [{ text: props.message.content, toolCalls: [] }] },
 )
 
@@ -156,7 +181,8 @@ const activeRunIndex = computed(() => {
 const showFinalResponse = computed(
   () =>
     (props.message.isStreaming ?? false)
-    || (!props.message.content && props.message.status !== 'error' && props.message.status !== 'usage_limit'),
+    || (!props.message.content && props.message.status !== 'error' && props.message.status !== 'usage_limit'
+        && props.message.status !== 'compacted'),
 )
 
 /* With the byline off nothing else says "still writing" before the first words
@@ -232,7 +258,7 @@ function onEditKeydown(event: KeyboardEvent): void {
 <template>
   <div
     class="t-thread-message"
-    :class="`t-thread-message--${message.role}`"
+    :class="[`t-thread-message--${message.role}`, { 't-thread-message--waiting': waiting }]"
     :aria-busy="message.role !== 'user' && message.isStreaming ? 'true' : undefined"
   >
     <template v-if="message.role === 'user'">
@@ -269,7 +295,7 @@ function onEditKeydown(event: KeyboardEvent): void {
           {{ message.content }}
         </div>
         <div
-          v-if="enableEdit"
+          v-if="enableEdit && !readonly"
           class="t-thread-message__user-actions"
           :class="{ 'is-disabled': editDisabled }"
         >
@@ -306,7 +332,7 @@ function onEditKeydown(event: KeyboardEvent): void {
 
       <TReasoningStage
         v-if="message.reasoning"
-        :status="message.isStreaming ? 'running' : 'done'"
+        :status="isReasoning ? 'running' : 'done'"
       >
         {{ message.reasoning }}
       </TReasoningStage>
@@ -366,10 +392,16 @@ function onEditKeydown(event: KeyboardEvent): void {
         role="status"
         :aria-label="t.chat.generating"
       />
+      <div v-if="waiting" class="t-thread-message__waiting" role="status">
+        <Icon icon="lucide:activity" class="t-thread-message__waiting-icon" aria-hidden="true" />
+        <span>{{ t.chat.waitingForBackgroundTasks }}</span>
+        <span v-if="waitingTasks" class="t-thread-message__waiting-tasks">{{ waitingTasks }}</span>
+      </div>
       <div v-if="message.status === 'error'" class="t-thread-message__error" role="alert">
         <Icon icon="lucide:circle-alert" class="t-thread-message__error-icon" />
         <span>{{ message.error || t.chat.errorGeneric }}</span>
         <button
+          v-if="!readonly"
           type="button"
           class="t-thread-message__error-retry"
           @click="emit('regenerate', message.id)"
@@ -389,6 +421,10 @@ function onEditKeydown(event: KeyboardEvent): void {
         <span class="t-thread-message__stopped-mark" aria-hidden="true" />
         {{ t.chat.generationStopped }}
       </div>
+      <!-- A /compact turn has no answer of its own: one quiet line says what happened, with no copy, rating or regenerate. -->
+      <div v-else-if="message.status === 'compacted'" class="t-thread-message__stopped" role="status">
+        {{ t.chat.conversationCompacted }}
+      </div>
 
       <div v-if="showUsage && message.usage && !message.isStreaming" class="t-thread-message__usage">
         <span>{{ t.token.input }} {{ formatCompactNumber(message.usage.inputTokens) }}</span>
@@ -397,7 +433,7 @@ function onEditKeydown(event: KeyboardEvent): void {
       </div>
 
       <div
-        v-if="showActions && !message.isStreaming"
+        v-if="showActions && !readonly && !message.isStreaming && !waiting && message.status !== 'compacted'"
         class="t-thread-message__actions"
       >
         <slot name="actions" :message="message" :copied="copied">
@@ -488,8 +524,8 @@ function onEditKeydown(event: KeyboardEvent): void {
     box-shadow var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease);
 }
 .t-thread-message__editor-input:focus {
-  border-color: var(--tnzi-ai-accent);
-  box-shadow: 0 0 0 3px var(--tnzi-ai-accent-soft);
+  border-color: var(--tnzi-ai-focus-border);
+  box-shadow: var(--tnzi-ai-focus-ring);
 }
 .t-thread-message__editor-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .t-thread-message__editor-btn {
@@ -648,6 +684,24 @@ function onEditKeydown(event: KeyboardEvent): void {
 .t-thread-message__error-retry:hover {
   background: color-mix(in srgb, var(--tnzi-ai-danger) 10%, transparent);
 }
+.t-thread-message__waiting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: 12.5px;
+  color: var(--tnzi-ai-text-secondary);
+}
+.t-thread-message__waiting-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+.t-thread-message__waiting-tasks {
+  color: var(--tnzi-ai-text-tertiary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .t-thread-message__stopped {
   display: flex;
   align-items: center;
@@ -714,7 +768,7 @@ function onEditKeydown(event: KeyboardEvent): void {
   color: var(--tnzi-ai-text);
 }
 .t-thread-message__action:focus-visible {
-  outline: 2px solid var(--tnzi-ai-accent);
+  outline: var(--tnzi-ai-focus-outline);
   outline-offset: 1px;
 }
 /* A pressed rating is said by its colour alone: no box at rest, as for the rest. */

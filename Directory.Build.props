@@ -42,9 +42,9 @@
   </PropertyGroup>
 
   <!--
-    SixLabors.ImageSharp 3.1.12 的五条已披露漏洞（2026-10）。修复版带构建期授权校验，与
+    SixLabors.ImageSharp 3.1.12 的六条已披露漏洞（2026-10）。修复版带构建期授权校验，与
     src/Tnzi.Imaging/Tnzi.Imaging.csproj 里写明的免授权约束冲突，所以不升级，改为逐条说明它在本仓
-    为什么不可达或已被缓解。只压这五条，不整体关 NU1902/NU1903：以后新披露的任何一条照常报出来。
+    为什么不可达或已被缓解。只压这六条，不整体关 NU1902/NU1903：以后新披露的任何一条照常报出来。
 
     这些理由由 tests/Tnzi.Imaging.Tests/ImageSharpAdvisoryGateTests 执行：src/ 里一旦出现让某条变得可达的调用，
     那里就变红。取得 Six Labors 商业授权、升到修复版之后，连同这一组一起删掉。
@@ -56,6 +56,10 @@
     <!-- BigTIFF IFD 条目数让解码器空转：可达（缩略图、图像编辑、QR 读取都按内容嗅探格式），已缓解。
          ImageDecodeGuard 与 QrCodeReader 在把字节交给 ImageSharp 之前按文件头拒绝 BigTIFF。 -->
     <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-wmxv-xphr-5c9g" />
+    <!-- CCITT 解压器越界写（分块 TIFF 的块缓冲区按块宽分配、解压器按图宽写；同一次修复还补了条带上 MH / T4 的超长游程）：
+         可达（同上，按内容嗅探），已缓解。ImageDecodeGuard 与 QrCodeReader 在交给 ImageSharp 之前逐页读 IFD，
+         拒绝 Modified Huffman / CCITT Group 3 压缩的页与分块的 Group 4 页；条带 Group 4 照常放行。 -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-v76p-62qx-wwq2" />
     <!-- HistogramEqualization 处理器：src/ 里零调用。 -->
     <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-j3p4-wp97-rph4" />
     <!-- TIFF CCITT T4（Group 3）编码器越界写：src/ 从不编码 TIFF，输出只有 JPEG / PNG / WebP。 -->

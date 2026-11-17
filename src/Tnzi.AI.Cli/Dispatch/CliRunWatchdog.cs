@@ -27,6 +27,7 @@ public sealed class CliRunWatchdog : IDisposable
     private DateTime? _pendingToolSince;
     private int _pendingToolCount;
     private int _awaitingApproval;
+    private bool _awaitingFollowUp;
     private CliRunFailureReason? _failure;
 
     /// <summary>初始化看门狗并开始计时。</summary>
@@ -65,6 +66,10 @@ public sealed class CliRunWatchdog : IDisposable
         lock (_gate)
         {
             _lastEventAt = DateTime.UtcNow;
+
+            // 一轮结束而 CLI 在等后台任务开下一轮：之间没有输出是应该的，等多久由适配器的上限管（硬超时照常）。
+            // 下一条事件就是下一轮开始了
+            _awaitingFollowUp = evt.Type == CliAgentEventType.TurnCompleted;
 
             switch (evt.Type)
             {
@@ -138,8 +143,8 @@ public sealed class CliRunWatchdog : IDisposable
                 return Trip(CliRunFailureReason.HardTimeout);
             }
 
-            // 在等使用方批准：CLI 没有输出是应该的
-            if (_awaitingApproval > 0)
+            // 在等使用方批准、在等后台任务开下一轮：CLI 没有输出是应该的
+            if (_awaitingApproval > 0 || _awaitingFollowUp)
             {
                 return false;
             }

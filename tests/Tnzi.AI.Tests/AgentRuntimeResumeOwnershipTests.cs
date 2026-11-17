@@ -110,11 +110,11 @@ public class AgentRuntimeResumeOwnershipTests
 
         var service = new AgentThreadService(threadRepo.Object, messageRepo.Object, Mock.Of<IRepository<Agent, Guid>>(), provider);
 
-        var (resolved, _) = await service.GetOrCreateThreadAsync(threadId, null);
+        var (resolved, _) = await service.GetOrCreateThreadAsync(threadId, null, null);
         resolved.ShouldBe(threadId);
 
         accessor.CurrentRequest = null;
-        var ex = await Should.ThrowAsync<BusinessException>(() => service.GetOrCreateThreadAsync(threadId, null));
+        var ex = await Should.ThrowAsync<BusinessException>(() => service.GetOrCreateThreadAsync(threadId, null, null));
         ex.HttpStatusCode.ShouldBe(404);
     }
 }

@@ -91,12 +91,12 @@ public class TnziAiClient : ITnziAiClient
         }
     }
 
-    public async Task<Guid> CreateThreadAsync(string? title = null, CancellationToken ct = default)
+    public async Task<Guid> CreateThreadAsync(string? title = null, string? origin = null, CancellationToken ct = default)
     {
         if (_threadService == null)
             throw new InvalidOperationException("IAgentThreadService is not available. Thread creation requires the AI thread service.");
 
-        var result = await _threadService.CreateAsync(new CreateAgentThreadDto { Title = title });
+        var result = await _threadService.CreateAsync(new CreateAgentThreadDto { Title = title, Origin = origin });
         if (!result.Succeeded || result.Data == null)
             throw new InvalidOperationException($"Failed to create thread: {result.Message}");
 
@@ -124,6 +124,8 @@ public class TnziAiClient : ITnziAiClient
             OperationType = operationType,
             UserMessage = message,
             ThreadId = threadId,
+            ThreadOrigin = options?.ThreadOrigin,
+            ThreadListing = options?.ThreadListing ?? ThreadListing.Listed,
             AgentId = options?.AgentId,
             Provider = options?.Provider,
             Model = options?.Model,

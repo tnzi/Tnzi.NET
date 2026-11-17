@@ -411,10 +411,13 @@ public partial class WorkflowService
     {
         try
         {
-            await _usageLogService.LogUsageAsync(
-                operationType, WorkflowUsageProvider, workflowName,
-                usage.InputTokens, usage.OutputTokens, (long)elapsed.TotalMilliseconds,
-                isSuccess, errorMessage, ct: CancellationToken.None);
+            await _usageLogService.LogUsageAsync(new UsageLogEntry
+            {
+                OperationType = operationType, Provider = WorkflowUsageProvider, Model = workflowName,
+                InputTokens = usage.InputTokens, OutputTokens = usage.OutputTokens,
+                DurationMs = (long)elapsed.TotalMilliseconds, IsSuccess = isSuccess, ErrorMessage = errorMessage,
+                UserId = userId
+            }, CancellationToken.None);
         }
         catch (Exception ex)
         {

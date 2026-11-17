@@ -83,6 +83,7 @@
     <ProjectReference Include="..\..\src\Tnzi.Finance.Offers\Tnzi.Finance.Offers.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Authorization.DataAuth\Tnzi.Authorization.DataAuth.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Identity.Organization\Tnzi.Identity.Organization.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Identity.OpenIdConnect\Tnzi.Identity.OpenIdConnect.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Payment.Billing\Tnzi.Payment.Billing.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Payment.Subscriptions\Tnzi.Payment.Subscriptions.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Payment.Promotions\Tnzi.Payment.Promotions.csproj" />

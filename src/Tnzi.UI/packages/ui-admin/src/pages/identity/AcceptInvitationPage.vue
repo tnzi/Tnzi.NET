@@ -117,7 +117,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NForm, NFormItem, NInput, NSpin, type FormRules } from 'naive-ui'
-import { TSvgIcon, useFormRules } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
 import { formatDateTime } from '@tnzi/core/utils'
 import type { InvitationPreviewDto } from '@tnzi/core/services/identity'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
@@ -126,6 +126,7 @@ import { useAdminRuntime } from '../../plugin/runtime'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { resetAllFileUrlResolvers } from '../../services/file-url-resolver'
 import { useNaiveForm } from '../../headless/useNaiveForm'
+import { useNaiveFormRules } from '../../headless/useNaiveFormRules'
 import { humanise, makePageTranslator, translatePageKey } from '../_shared/translate'
 
 defineOptions({ name: 'TnziAdminAcceptInvitationPage' })
@@ -137,7 +138,7 @@ const runtime = useAdminRuntime()
 const t = makePageTranslator('identity.acceptInvitation')
 // The shared password rules speak `admin.login.*`; resolve those absolutely, and
 // keep the rule's own fallback when the dictionary has no entry.
-const { rules: r } = useFormRules((key: string, fallback?: string) => {
+const { rules: r } = useNaiveFormRules((key: string, fallback?: string) => {
   const hit = translatePageKey('', key)
   return hit && hit !== humanise(key) ? hit : (fallback ?? key)
 })

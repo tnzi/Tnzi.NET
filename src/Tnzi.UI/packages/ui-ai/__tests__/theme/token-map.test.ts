@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { TOKEN_TO_VAR } from '../../src/theme/tokens';
 
 const stylesheet = readFileSync(
-  fileURLToPath(new URL('../../src/styles/index.css', import.meta.url)),
+  fileURLToPath(new URL('../../src/styles/tokens.css', import.meta.url)),
   'utf8',
 );
 

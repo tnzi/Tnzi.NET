@@ -55,6 +55,7 @@ export default defineConfig({
         "services/audit/index": "src/services/audit/index.ts",
         "services/template/index": "src/services/template/index.ts",
         "services/signing/index": "src/services/signing/index.ts",
+        "services/oidc/index": "src/services/oidc/index.ts",
         "services/logging/index": "src/services/logging/index.ts",
         "services/diagnostics/index": "src/services/diagnostics/index.ts",
         "services/performance/index": "src/services/performance/index.ts",

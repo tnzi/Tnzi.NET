@@ -30,7 +30,7 @@ import {
   type LoginFeatures,
   type LoginThirdPartyProvider,
   type Translate,
-} from '@tnzi/ui';
+} from '@tnzi/ui/headless';
 import TAuthPage from './TAuthPage.vue';
 
 const props = withDefaults(
@@ -51,6 +51,8 @@ const props = withDefaults(
     homePath?: string;
     /** Query key carrying the post-login destination. Default `redirect`. */
     redirectQuery?: string;
+    /** Account and password together on the first screen (see `TAuthPage`). Default off. */
+    singleScreen?: boolean;
   }>(),
   {
     brandName: '',
@@ -64,6 +66,7 @@ const props = withDefaults(
     translate: undefined,
     homePath: '/',
     redirectQuery: 'redirect',
+    singleScreen: false,
   },
 );
 
@@ -130,6 +133,7 @@ function onOauth(provider: LoginThirdPartyProvider): void {
     :privacy-href="privacyHref"
     :footnote="footnote"
     :session-end-reason="sessionEndReason"
+    :single-screen="singleScreen"
     :resolve-url="(url: string) => runtime.http.resolveUrl(url)"
     @authenticated="onAuthenticated"
     @oauth="onOauth"

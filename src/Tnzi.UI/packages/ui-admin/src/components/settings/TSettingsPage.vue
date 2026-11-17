@@ -63,8 +63,8 @@ import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { useDetail, type DetailSection } from '../../headless/useDetail'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { useModuleAvailability } from '../../headless/useModuleAvailability'
-import { useSafeMessage } from '@tnzi/ui'
-import { resolveBackendLabel, translatePageKey } from '../../i18n/translate'
+import { useSafeMessage } from '../../headless/useSafeMessage'
+import { maybeTranslateKey, resolveBackendLabel, translatePageKey } from '../../i18n/translate'
 
 // 懒加载：避免 components barrel 经 eager import 拖入整个 TCrudPage/bridge 链
 const Parameters = defineAsyncComponent(() => import('../../pages/system/Parameters.vue'))
@@ -74,7 +74,7 @@ const ADVANCED_KEY = 'advanced:parameters'
 const bridge = createSystemBridge({ client: useAdminClient() })
 const config = useAdminSettingsConfig()
 const message = useSafeMessage()
-const { can } = usePermissionGuard()
+const { can, canAnyRole } = usePermissionGuard()
 const { has: hasModule } = useModuleAvailability()
 const appStore = useAdminAppStore()
 const authStore = useAdminAuthStore()
@@ -100,6 +100,13 @@ const canViewParameters = computed(
   () => !config?.hideAdvanced && !hideBuiltInConfig.value && can('system.parameter.view'),
 )
 const t = (key: string) => translatePageKey('', key)
+/**
+ * A nav label or group as the reader sees it: an i18n key (`admin.*`) through
+ * the dictionary, a literal verbatim. The same rule TDetailLayout applies to
+ * `sections`, so the search index and the nav cannot disagree; it reads the
+ * active locale, so the index follows a language switch.
+ */
+const navText = (value: string) => maybeTranslateKey(t, value, value)
 
 const groups = ref<SettingsCenterGroupDto[]>([])
 const loading = ref(true)
@@ -120,13 +127,15 @@ const visibleGroups = computed(() => {
   return list
 })
 
-// Consumer custom sections: gated by both permission (usePermissionGuard) and
-// module availability (hidden when the backend hasn't loaded the named module),
-// mirroring the User Center section contract. Both fail-open when the signal /
-// store isn't loaded (super-admin, probe in flight, old backend).
+// Consumer custom sections: gated by permission and roles (usePermissionGuard,
+// roles any-of like a route's `meta.roles`) and by module availability (hidden
+// when the backend hasn't loaded the named module), mirroring the User Center
+// section contract. All fail-open when the signal / store isn't loaded
+// (super-admin, probe in flight, old backend).
 const customSections = computed<AdminSettingsSection[]>(() =>
   [...(config?.sections ?? [])]
     .filter((s) => !s.permission || can(s.permission))
+    .filter((s) => canAnyRole(s.roles ?? []))
     .filter((s) => !s.module || hasModule(s.module))
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
 )
@@ -166,16 +175,19 @@ const sections = computed<DetailSection[]>(() => [
 const searchQuery = ref('')
 
 // key → lowercase searchable text (group label + module + every field label for
-// schema groups; label + group for custom sections; the label for Advanced).
+// schema groups; label + group for custom sections; the label for Advanced),
+// always the text on screen: a custom section's label and group are usually
+// i18n keys, and indexing the key made a search for the words the reader sees
+// miss every custom section while "admin" matched all of them.
 const searchIndex = computed<Record<string, string>>(() => {
   const idx: Record<string, string> = {}
   for (const g of visibleGroups.value) {
-    const parts = [resolveBackendLabel(g.i18nKey, g.displayName), g.moduleName]
+    const parts = [resolveBackendLabel(g.i18nKey, g.displayName), navText(g.moduleName)]
     for (const f of g.fields) parts.push(resolveBackendLabel(f.i18nKey, f.label))
     idx[g.key] = parts.join(' ').toLowerCase()
   }
   for (const s of customSections.value) {
-    idx[`custom:${s.key}`] = `${s.label} ${s.group ?? ''}`.toLowerCase()
+    idx[`custom:${s.key}`] = `${navText(s.label)} ${navText(s.group ?? 'App')}`.toLowerCase()
   }
   if (canViewParameters.value) {
     idx[ADVANCED_KEY] = t('admin.modules.system.settings.advancedParameters').toLowerCase()

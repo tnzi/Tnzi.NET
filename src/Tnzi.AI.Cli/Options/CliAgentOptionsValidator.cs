@@ -53,6 +53,9 @@ public class CliAgentOptionsValidator : OptionsValidatorBase<CliAgentOptions>
         if (options.TerminateGrace < TimeSpan.Zero)
             errors.Add("AI:Cli:TerminateGrace cannot be negative.");
 
+        if (options.BackgroundTaskWait < TimeSpan.Zero)
+            errors.Add("AI:Cli:BackgroundTaskWait cannot be negative; use zero to end a run when its first turn ends.");
+
         ValidateWorkspacesRoot(options, CliWorkspaceLayout.DefaultWorkspacesRoot, errors);
         ValidateCustomProviders(options, errors);
         ValidateProviderAuthAndIsolation(options, errors);

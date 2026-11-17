@@ -273,7 +273,7 @@ function onConfirmKeydown(event: KeyboardEvent): void {
 .t-thread-title__text:disabled { cursor: default; }
 .t-thread-title__text:hover:not(:disabled),
 .t-thread-title__text:focus-visible { background: var(--tnzi-ai-hover); }
-.t-thread-title__text:focus-visible { outline: 2px solid var(--tnzi-ai-accent); outline-offset: -2px; }
+.t-thread-title__text:focus-visible { outline: var(--tnzi-ai-focus-outline); outline-offset: -2px; }
 .t-thread-title__input {
   flex: 0 1 auto;
   /* A few characters at the least, so an empty or one-letter title still
@@ -290,8 +290,8 @@ function onConfirmKeydown(event: KeyboardEvent): void {
     box-shadow var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
 }
 .t-thread-title__input:focus {
-  border-color: var(--tnzi-ai-accent);
-  box-shadow: 0 0 0 3px var(--tnzi-ai-accent-soft);
+  border-color: var(--tnzi-ai-focus-border);
+  box-shadow: var(--tnzi-ai-focus-ring);
 }
 .t-thread-title__chevron {
   flex-shrink: 0;

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import TKpiRow from '../../../src/components/data/TKpiRow.vue'
 import TKpiCard from '../../../src/components/data/TKpiCard.vue'
 
@@ -67,5 +69,51 @@ describe('TKpiRow', () => {
     })
     expect(w.classes()).toContain('orders-page__stats')
     expect(w.classes()).toContain('t-kpi-row')
+  })
+
+  describe('tiles in one row are the same height', () => {
+    // jsdom has no layout, so the height chain is held by its two halves: the
+    // structure (every grid item is a cell, the card body is the flex column
+    // the footer sits in) and the CSS rules that make the stretch happen.
+    const read = (name: string) =>
+      readFileSync(join(__dirname, '..', '..', '..', 'src', 'components', 'data', name), 'utf-8')
+    const styleOf = (source: string) => source.slice(source.indexOf('<style'))
+    const rule = (css: string, selector: string) => {
+      const start = css.indexOf(`${selector} {`)
+      expect(start, `rule ${selector}`).toBeGreaterThanOrEqual(0)
+      return css.slice(start, css.indexOf('}', start)).replace(/\s+/g, ' ')
+    }
+
+    it('marks every grid item as a cell, with or without a footer on the card', () => {
+      const w = mount(TKpiRow, {
+        slots: {
+          default: () => [
+            h(TKpiCard, { label: 'A', value: 1, animated: false }),
+            h(TKpiCard, { label: 'B', value: 2, animated: false }, { footer: () => 'one invite pending' }),
+            h(TKpiCard, { label: 'C', value: 3, animated: false }, { extra: () => 'tag' }),
+          ],
+        },
+      })
+      const items = w.findAllComponents({ name: 'GridItem' })
+      expect(items).toHaveLength(3)
+      for (const item of items) expect(item.classes()).toContain('t-kpi-row__cell')
+      expect(w.findAll('.t-kpi-row__cell > .t-stat-card')).toHaveLength(3)
+      expect(w.findAll('.t-stat-card > .t-stat-card__body')).toHaveLength(3)
+      expect(w.find('.t-stat-card__body > .t-stat-card__footer').exists()).toBe(true)
+    })
+
+    it('stretches the cell child to the cell, which the grid stretches to the row', () => {
+      const css = styleOf(read('TKpiRow.vue'))
+      // Global, not scoped: the child is the page's vnode, out of this component's scope.
+      expect(css.startsWith('<style>')).toBe(true)
+      expect(rule(css, '.t-kpi-row__cell')).toMatch(/display: flex;.*flex-direction: column;/)
+      expect(rule(css, '.t-kpi-row__cell > *')).toContain('flex: 1 1 auto;')
+    })
+
+    it('keeps the card content at the top and the footer on the bottom edge', () => {
+      const css = styleOf(read('TKpiCard.vue'))
+      expect(rule(css, '.t-stat-card :deep(.t-stat-card__body)')).toMatch(/display: flex;.*flex-direction: column;/)
+      expect(rule(css, '.t-stat-card__footer')).toContain('margin-top: auto;')
+    })
   })
 })

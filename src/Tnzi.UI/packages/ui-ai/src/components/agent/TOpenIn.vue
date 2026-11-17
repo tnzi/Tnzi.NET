@@ -1,16 +1,25 @@
 <script setup lang="ts">
 /**
  * TOpenIn - Open in external platform dropdown
+ *
+ * A `TDropdownMenu` of chat products; picking one opens it in a new tab with
+ * `query` filled in (`noopener,noreferrer`) and emits `select` with the
+ * platform's id and the URL it opened.
  */
 
-import { NDropdown, NButton } from 'naive-ui';
-import { h } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '../../i18n/index';
+import TButton from '../controls/TButton.vue';
+import TDropdownMenu from '../overlay/TDropdownMenu.vue';
+import TMenuItem from '../overlay/TMenuItem.vue';
 const t = useAiI18n();
 
 const props = defineProps<{
   query: string;
+}>();
+
+const emit = defineEmits<{
+  select: [platformId: string, url: string];
 }>();
 
 interface ExternalPlatform {
@@ -29,26 +38,45 @@ const platforms: ExternalPlatform[] = [
   { id: 'v0', name: 'v0', icon: 'simple-icons:vercel', createUrl: (q) => `https://v0.dev/chat?q=${encodeURIComponent(q)}` },
 ];
 
-const options = platforms.map((p) => ({
-  key: p.id,
-  label: p.name,
-  icon: () => h(Icon, { icon: p.icon, class: 'size-4' }),
-}));
-
-function handleSelect(key: string): void {
-  const platform = platforms.find((p) => p.id === key);
-  if (platform) {
-    window.open(platform.createUrl(props.query), '_blank', 'noopener,noreferrer');
-  }
+function openPlatform(platform: ExternalPlatform): void {
+  const url = platform.createUrl(props.query);
+  window.open(url, '_blank', 'noopener,noreferrer');
+  emit('select', platform.id, url);
 }
 </script>
 
 <template>
-  <NDropdown :options="options" trigger="click" @select="handleSelect">
-    <NButton secondary size="small">
-      <template #icon><Icon icon="lucide:message-circle" class="size-4" /></template>
-      {{ t.openIn.label }}
-      <Icon icon="lucide:chevron-down" class="size-3 ml-1" />
-    </NButton>
-  </NDropdown>
+  <TDropdownMenu align="left" :min-width="200">
+    <template #trigger="{ toggle, attrs }">
+      <TButton icon="lucide:message-circle" v-bind="attrs" @click="toggle">
+        <span class="t-open-in__label">
+          {{ t.openIn.label }}
+          <Icon icon="lucide:chevron-down" class="t-open-in__chevron" aria-hidden="true" />
+        </span>
+      </TButton>
+    </template>
+    <template #default="{ close }">
+      <TMenuItem
+        v-for="platform in platforms"
+        :key="platform.id"
+        :icon="platform.icon"
+        :data-platform="platform.id"
+        @click="openPlatform(platform); close()"
+      >
+        {{ platform.name }}
+      </TMenuItem>
+    </template>
+  </TDropdownMenu>
 </template>
+
+<style scoped>
+.t-open-in__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.t-open-in__chevron {
+  font-size: 12px;
+  color: var(--tnzi-ai-text-secondary);
+}
+</style>

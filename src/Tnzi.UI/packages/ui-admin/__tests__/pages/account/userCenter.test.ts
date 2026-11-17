@@ -30,6 +30,7 @@ const BUILTINS: UserCenterBuiltInDef[] = [
 const deps = {
   t: (k: string) => k,
   can: () => true,
+  canAnyRole: () => true,
   hasModule: () => true,
   groupLabel: (g: string) => `G:${g}`,
 }
@@ -107,6 +108,24 @@ describe('resolveUserCenterSections', () => {
       { can: (p) => p !== 'x.view' },
     )
     expect(out.map((s) => s.key)).not.toContain('custom:admin-only')
+  })
+
+  it('excludes a custom section when none of its roles is held', () => {
+    const asked: (readonly string[])[] = []
+    const out = resolve(
+      {
+        sections: [
+          { key: 'root-only', label: 'X', roles: ['SuperAdmin'], component: C('x') },
+          { key: 'open', label: 'Y', component: C('y') },
+        ],
+      },
+      { canAnyRole: (roles) => { asked.push(roles); return false } },
+    )
+    const keys = out.map((s) => s.key)
+    expect(keys).not.toContain('custom:root-only')
+    // A section without roles never asks the role gate.
+    expect(keys).toContain('custom:open')
+    expect(asked).toEqual([['SuperAdmin']])
   })
 
   it('excludes a custom section when its module is unavailable', () => {

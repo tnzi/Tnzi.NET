@@ -1,7 +1,7 @@
 /**
  * @tnzi/ui/components/register
  *
- * Global component registration for Tnzi UI (Naive UI).
+ * Global registration of the Tnzi UI `T*` components.
  *
  * The registration list is derived exhaustively from the components barrel
  * (`./index`, the single source of truth), so every exported `T*` component is

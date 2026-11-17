@@ -333,4 +333,47 @@ public class AiUtilityServiceTests
             }
         }
     }
+
+    [Fact]
+    public async Task ExecuteForResponseAsync_ReportsFinishReasonUsageProviderAndModel()
+    {
+        _mockChatClient
+            .Setup(x => x.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant, "  Kyoto Trip "))
+            {
+                FinishReason = ChatFinishReason.Length,
+                ModelId = "mini-2026",
+                Usage = new UsageDetails { InputTokenCount = 120, OutputTokenCount = 8, CachedInputTokenCount = 20 }
+            });
+        var aiOptions = new Mock<IOptionsMonitor<AIOptions>>();
+        aiOptions.Setup(x => x.CurrentValue).Returns(new AIOptions { DefaultProvider = "Main" });
+
+        var service = new AiUtilityService(_mockFactory.Object, _mockOptions.Object, aiOptions: aiOptions.Object);
+        var response = await service.ExecuteForResponseAsync("system", "user");
+
+        response.ShouldNotBeNull();
+        response.Text.ShouldBe("Kyoto Trip");
+        response.FinishReason.ShouldBe(AiUtilityFinishReason.Length, "a cut answer must be told apart from a finished one");
+        response.Provider.ShouldBe("Main");
+        response.Model.ShouldBe("mini-2026");
+        response.InputTokens.ShouldBe(120);
+        response.OutputTokens.ShouldBe(8);
+        response.CachedInputTokens.ShouldBe(20);
+    }
+
+    [Fact]
+    public async Task ExecuteForResponseAsync_ToolCallInTheAnswer_IsReportedAsToolCalls_EvenWhenTheProviderSaysStop()
+    {
+        var message = new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("c1", "search")]);
+        _mockChatClient
+            .Setup(x => x.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ChatResponse(message) { FinishReason = ChatFinishReason.Stop });
+
+        var service = new AiUtilityService(_mockFactory.Object, _mockOptions.Object);
+
+        var response = await service.ExecuteForResponseAsync("system", "user");
+
+        response!.FinishReason.ShouldBe(AiUtilityFinishReason.ToolCalls);
+        (await service.ExecuteAsync("system", "user")).ShouldBeNull("ExecuteAsync still answers null for an answer without text");
+    }
 }

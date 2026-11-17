@@ -2,6 +2,7 @@ import type { App } from 'vue'
 import type { Pinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import type { HttpClient } from '@tnzi/core/http'
+import type { ThemeMode } from '@tnzi/core/types'
 import {
   THEME_CONTEXT_KEY,
   createThemeContext,
@@ -10,6 +11,15 @@ import {
 } from '@tnzi/ui'
 import '../styles/index.css'
 import { TNZI_ADMIN_CLIENT_KEY } from './client'
+import { ADMIN_NAIVE_OVERRIDES_KEY, type NaiveOverridesSource } from '../theme/naive-bridge'
+import {
+  setActiveUiAdapter,
+  setLoadingBarAdapter,
+  setNotificationAdapter,
+} from '@tnzi/core/adapters'
+import { createUiAdapter } from '../adapters/create-ui-adapter'
+import { createNotificationAdapter } from '../adapters/notification'
+import { createLoadingBarAdapter } from '../adapters/loading-bar'
 import { installDirectives } from '../directives'
 import {
   provideAdminLoginConfig,
@@ -78,6 +88,32 @@ export interface TnziUiAdminOptions {
    * **ignored** - the consumer's theme wins. Pass to `createTnziUi` instead.
    */
   themeOverride?: Partial<ThemeColors>
+  /**
+   * Colour mode of the theme context this plugin installs (ignored, like
+   * `themeOverride`, when the app installed `createTnziUi()` itself).
+   * Default `'auto'`: until someone picks a mode (the header button, the login
+   * page's switch, the theme drawer) or the global theme sets one, the admin
+   * follows the operating system. A choice is kept in the browser and wins
+   * from then on.
+   */
+  defaultMode?: ThemeMode
+  /**
+   * Raw Naive UI theme overrides, merged section by section over the ones the
+   * shell generates from the theme context's palette (a consumer key wins, the
+   * generated keys it does not name stay). An object, a `Ref`, or a function
+   * of `{ isDark, settings }` that the shell calls again when the mode or the
+   * settings change: `({ isDark }) => (isDark ? DARK : LIGHT)` gives naive one
+   * set for each mode. `COMPACT_NAIVE_OVERRIDES` is the compact density.
+   */
+  naiveOverrides?: NaiveOverridesSource
+  /**
+   * Register the Naive UI message / dialog / notification / loading-bar
+   * adapters with `@tnzi/core` (default: true). They call the
+   * `window.$message` / `$dialog` / `$notification` / `$loadingBar` handles
+   * that `TAdminAppRoot` publishes from inside its provider stack. Set false
+   * only to register adapters of your own.
+   */
+  registerAdapters?: boolean
   /**
    * Phase I.7+ - configuration for the built-in `/login/:module(…)?` route.
    * Pass `brand` + `callbacks.pwdLogin` to get a working login page out of
@@ -194,6 +230,16 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
   // Billing - provided only when enabled, so the shell mounts nothing otherwise.
   provideAdminBillingConfig(app, options.billing)
 
+  if (options.naiveOverrides) {
+    app.provide(ADMIN_NAIVE_OVERRIDES_KEY, options.naiveOverrides)
+  }
+
+  if (options.registerAdapters !== false) {
+    setActiveUiAdapter(createUiAdapter())
+    setNotificationAdapter(createNotificationAdapter())
+    setLoadingBarAdapter(createLoadingBarAdapter())
+  }
+
   // Install global directives (v-permission, etc).
   installDirectives(app)
 
@@ -219,7 +265,7 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
       ...DEFAULT_ADMIN_COLORS,
       ...(options.themeOverride ?? {}),
     }
-    const defaultThemeCtx = createThemeContext(mergeThemeSettings({ colors }))
+    const defaultThemeCtx = createThemeContext(mergeThemeSettings({ colors, mode: options.defaultMode ?? 'auto' }))
     app.provide(THEME_CONTEXT_KEY, defaultThemeCtx)
   }
 

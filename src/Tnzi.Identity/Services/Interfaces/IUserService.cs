@@ -134,11 +134,14 @@ public interface IUserService
     Task<Result> ConfirmContactAsync(Guid userId, bool? confirmEmail, bool? confirmPhoneNumber);
 
     /// <summary>
-    /// 根据手机号查找用户（仅返回已验证手机号的用户）
+    /// 按已验证的手机号解析账号：查无 / 恰好一个 / 不止一个。
     /// </summary>
+    /// <remarks>
+    /// 手机号不唯一，在一些部署里还是共用的。结果为 <see cref="PhoneNumberMatch.Ambiguous"/> 时
+    /// 不带账号，调用方必须拒绝，不能替用户挑一个。判定规则见 <see cref="PhoneNumberAccountLookup"/>。
+    /// </remarks>
     /// <param name="phoneNumber">手机号</param>
-    /// <returns>用户实体或 null</returns>
-    Task<User?> FindByPhoneNumberAsync(string phoneNumber);
+    Task<PhoneNumberAccountLookup> ResolveByPhoneNumberAsync(string phoneNumber);
 
     /// <summary>
     /// 用户自助停用账户（自行禁用，可由管理员恢复）

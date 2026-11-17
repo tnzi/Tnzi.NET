@@ -66,6 +66,46 @@ public static class ChatTurnMetadata
         return Result<Dictionary<string, JsonElement>>.Success(copy);
     }
 
+    /// <summary>
+    /// 校验以 JSON 对象文本给出的元数据（查询参数里的那种，例如 <c>GET chat/models?metadata=</c>）：读不懂、不是对象、超出上限都答 400
+    /// <c>AI_INVALID_TURN_METADATA</c>；空文本是没有元数据（空字典）。
+    /// </summary>
+    public static Result<Dictionary<string, JsonElement>> ValidateJson(string? json, ChatMetadataOptions limits)
+    {
+        Check.NotNull(limits);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return Validate(null, limits);
+        }
+
+        if (Encoding.UTF8.GetByteCount(json) > limits.MaxBytes * 2)
+        {
+            return Invalid($"Metadata is longer than the {limits.MaxBytes} byte limit allows.");
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return Invalid("Metadata must be a JSON object.");
+            }
+
+            var entries = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                entries[property.Name] = property.Value;
+            }
+
+            // Validate clones the values out of the document before it is disposed
+            return Validate(entries, limits);
+        }
+        catch (JsonException)
+        {
+            return Invalid("Metadata is not valid JSON.");
+        }
+    }
+
     /// <summary>存档形式（JSON 对象）；没有元数据时为 null。</summary>
     public static string? Serialize(IReadOnlyDictionary<string, JsonElement>? metadata)
         => metadata is { Count: > 0 } ? JsonSerializer.Serialize(metadata, TnziJsonDefaults.Options) : null;

@@ -32,6 +32,19 @@ public class AgentRunRequest
     /// <summary>对话线程 ID（为空则新建，中间件可回写）</summary>
     public Guid? ThreadId { get; set; }
 
+    /// <summary>
+    /// 这一轮新建线程时写进线程的来源（<see cref="AgentThread.Origin"/>）；续接已有线程时不用。
+    /// 进程内调用方直接设置（应用自己的值，只校验形状）；<c>ChatService</c> 放进来的是 <see cref="IThreadOriginPolicy"/> 给出的值（放行的页面声明，或服务端自己定的）。
+    /// </summary>
+    public string? ThreadOrigin { get; init; }
+
+    /// <summary>
+    /// 这一轮新建线程时它在不在主人的列表里（<see cref="AgentThread.Listing"/>）；续接已有线程时不用。
+    /// 无人值守的运行（定时任务、Webhook）给 <see cref="ThreadListing.UntilUserMessage"/>：线程先不进列表，主人自己在里面说话时才进。
+    /// ★ 只能由进程内调用方设置，<b>绝不映射任何 HTTP 请求体</b>：聊天入口建的线程总是 <see cref="ThreadListing.Listed"/>。
+    /// </summary>
+    public ThreadListing ThreadListing { get; init; }
+
     /// <summary>附加工具组</summary>
     public List<string>? ToolGroups { get; init; }
 
@@ -132,6 +145,12 @@ public class AgentRunRequest
     /// <summary>Per-request reasoning effort override (None = no reasoning)</summary>
     public ReasoningEffort? ReasoningEffort { get; init; }
 
+    /// <summary>
+    /// 这一轮的推理强度（运行时原生值，已按模型的可选档位校验过，见 <c>ChatRequestDto.Effort</c>）；null = 用 Agent 自己的设置。
+    /// 外部 CLI 运行时以它覆盖绑定上的 <c>ThinkingLevel</c>；内建路径读的是 <see cref="ReasoningEffort"/>（聊天入口按名字换算好）。
+    /// </summary>
+    public string? Effort { get; init; }
+
     /// <summary>文件附件列表（由 FileUploadMiddleware 处理）</summary>
     public List<FileAttachment>? Attachments { get; init; }
 
@@ -146,6 +165,12 @@ public class AgentRunRequest
     /// 把客户端的键并进去，客户端就能冒充框架写的值。只由 <c>ChatService</c> 设置。
     /// </remarks>
     public IReadOnlyDictionary<string, JsonElement>? TurnMetadata { get; init; }
+
+    /// <summary>
+    /// 主人发出这条消息的时间，早于现在时才有（<c>ChatRequestDto.SentAt</c>：排队消息按排下的时间）；null = 现在。
+    /// 写用户消息时据此推线程的「主人最近发消息的时间」。只由 <c>ChatService</c> 设置。
+    /// </summary>
+    public DateTime? SentAt { get; init; }
 
     /// <summary>是否启用计划模式（启用 Todo 追踪）</summary>
     public bool PlanMode { get; init; }

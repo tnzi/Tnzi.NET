@@ -24,6 +24,8 @@ export interface CliTimelineTextRow {
   kind: 'text' | 'thinking';
   key: string;
   content: string;
+  /** The sub-agent that wrote it (the `callId` of its dispatch); null for the main agent. */
+  parentCallId: string | null;
 }
 
 /** One tool invocation, with its result folded in once it arrives. */
@@ -37,6 +39,8 @@ export interface CliTimelineToolRow {
   /** Null while the call is still in flight. */
   output: string | null;
   settled: boolean;
+  /** The sub-agent that made the call (the `callId` of its dispatch); null for the main agent. */
+  parentCallId: string | null;
 }
 
 /** A status transition, error, or log line. */
@@ -110,11 +114,13 @@ export function groupCliEvents(
       case 'Text':
       case 'Thinking': {
         const kind = event.type === 'Text' ? 'text' : 'thinking';
+        const parentCallId = event.parentCallId ?? null;
         const last = rows[rows.length - 1];
-        if (last && last.kind === kind) {
+        // A sub-agent's words are not joined to the main agent's (or another sub-agent's)
+        if (last && last.kind === kind && last.parentCallId === parentCallId) {
           last.content += event.content ?? '';
         } else {
-          rows.push({ kind, key: `${kind}-${index}`, content: event.content ?? '' });
+          rows.push({ kind, key: `${kind}-${index}`, content: event.content ?? '', parentCallId });
         }
         break;
       }
@@ -128,6 +134,7 @@ export function groupCliEvents(
           input: readInput(event),
           output: null,
           settled: false,
+          parentCallId: event.parentCallId ?? null,
         };
         rows.push(row);
         if (event.callId) toolsByCallId.set(event.callId, row);
@@ -151,6 +158,7 @@ export function groupCliEvents(
             input: null,
             output: event.output ?? event.content ?? '',
             settled: true,
+            parentCallId: event.parentCallId ?? null,
           });
         }
         break;
@@ -185,6 +193,8 @@ export function groupCliEvents(
         }
         break;
 
+      // A task's lifecycle (`Task`: a sub-agent, a background command) is drawn by the chat's run line and panels,
+      // not by this flat timeline; a sub-agent's calls and words are rows here with their `parentCallId`.
       default:
         // Unknown event types are dropped rather than rendered raw. The backend
         // already downgrades anything it does not recognise to `Log`, so a value

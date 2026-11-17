@@ -51,6 +51,17 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
 
     public bool IsMultiTenancyEnabled => _multiTenancyEnabled;
 
+    /// <remarks>
+    /// 经 <see cref="TnziDbContextHelper.OnConfiguring"/> 挂上与 TnziDbContext 相同的命令拦截器（PostgreSQL 下把 U+0000 换成 U+FFFD）。
+    /// 本类不经 TnziDbContext，不在这里调就整个漏掉：应用的主上下文多半继承本类，带 NUL 的一次写入以 SQLSTATE 22021 失败。
+    /// 覆写本方法的派生类要调 <c>base.OnConfiguring</c>。
+    /// </remarks>
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        TnziDbContextHelper.OnConfiguring(optionsBuilder);
+    }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);

@@ -44,6 +44,7 @@
     <ProjectReference Include="..\..\src\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Identity\Tnzi.Identity.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Identity.Organization\Tnzi.Identity.Organization.csproj" />
+    <ProjectReference Include="..\..\src\Tnzi.Identity.OpenIdConnect\Tnzi.Identity.OpenIdConnect.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.System\Tnzi.System.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Hangfire\Tnzi.Hangfire.csproj" />
     <ProjectReference Include="..\..\src\Tnzi.Localization\Tnzi.Localization.csproj" />

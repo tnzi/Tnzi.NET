@@ -85,7 +85,8 @@
  * code via IBackgroundJobManager.CreateRecurring; the admin surface is
  * list / trigger / view / delete only.
  */
-import { TRelativeTime, TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 import TItemPage from '../../components/crud/TItemPage.vue'
 import TItemCard, { type ItemCardTag } from '../../components/data/TItemCard.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'

@@ -1,5 +1,5 @@
 import { useAdminAuthStore } from '../stores/useAdminAuthStore'
-import { settingsSectionEntryPermissions } from '../plugin/settings-config'
+import { settingsSectionEntryRules } from '../plugin/settings-config'
 
 /**
  * Permission guard composable - thin wrapper over `useAdminAuthStore`'s
@@ -32,20 +32,35 @@ export function usePermissionGuard() {
   }
 
   /**
+   * Whether the user holds any of these roles (case-insensitive), the role gate
+   * of a route's `meta.roles` and of a Settings Center / User Center section's
+   * `roles`. An empty list asks for nothing and passes. Same super-user bypass
+   * and fail-open as the permission helpers.
+   */
+  function canAnyRole(roles: readonly string[]): boolean {
+    if (auth.bypassesPermissionChecks || auth.userInfo === null) return true
+    const wanted = roles.filter((r) => typeof r === 'string' && r !== '')
+    return wanted.length === 0 || auth.hasAnyRole(wanted)
+  }
+
+  /**
    * Reachability for the Settings Center, which spans many modules and has no
    * single gating code: the user may enter if they hold ANY per-group settings
    * view code (`{group}.settings.{slug}.view`) OR `system.parameter.view` (the
-   * Advanced parameters/dictionaries section) OR the permission of a custom
-   * section the app registered (`defineAdminApp({ settings: { sections } })`,
-   * e.g. the billing sections' `payment.account.view`). Backend `SettingsCenterService`
+   * Advanced parameters/dictionaries section) OR passes the gate of a custom
+   * section the app registered with a `permission` and / or `roles`
+   * (`defineAdminApp({ settings: { sections } })`, e.g. the billing sections'
+   * `payment.account.view`). Backend `SettingsCenterService`
    * still filters the returned groups per-code, so this only governs whether the
    * entry/route is shown (super-user / not-yet-loaded fail-open, as everywhere).
    */
   function canAnySettings(): boolean {
     if (auth.bypassesPermissionChecks || auth.userInfo === null) return true
     const held = auth.userInfo.permissions ?? []
-    const sectionCodes = settingsSectionEntryPermissions()
-    return held.some((p) => p === 'system.parameter.view' || SETTINGS_VIEW_CODE.test(p) || sectionCodes.has(p))
+    if (held.some((p) => p === 'system.parameter.view' || SETTINGS_VIEW_CODE.test(p))) return true
+    return settingsSectionEntryRules().some(
+      (rule) => (rule.permission ? auth.hasPermission(rule.permission) : true) && canAnyRole(rule.roles),
+    )
   }
 
   /**
@@ -65,11 +80,11 @@ export function usePermissionGuard() {
       (required ? auth.hasPermission(required) : true) &&
       (requiredAny.length > 0 ? auth.hasAnyPermission(requiredAny) : true) &&
       (meta.anySettingsPermission === true ? canAnySettings() : true) &&
-      (requiredRoles.length > 0 ? auth.hasAnyRole(requiredRoles) : true)
+      canAnyRole(requiredRoles)
     )
   }
 
-  return { can, canAny, canAll, canAnySettings, canReachRoute }
+  return { can, canAny, canAll, canAnyRole, canAnySettings, canReachRoute }
 }
 
 function stringList(value: unknown): string[] {

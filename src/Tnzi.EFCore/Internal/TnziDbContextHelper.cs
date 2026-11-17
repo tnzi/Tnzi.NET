@@ -14,6 +14,20 @@ namespace Tnzi.EFCore.Internal;
 public static class TnziDbContextHelper
 {
     /// <summary>
+    /// 统一配置上下文选项（供 TnziDbContext 与 IdentityDbContext 的 OnConfiguring 共用）：挂上
+    /// <see cref="Interceptors.PostgreSqlNulCharacterInterceptor"/>，PostgreSQL 的文本列存不了 U+0000，一个 NUL 就让整次写入失败。
+    /// </summary>
+    /// <remarks>
+    /// 两个基类平行（IdentityDbContext 继承 ASP.NET Core Identity 的上下文，不经 TnziDbContext），
+    /// 只挂在其中一个上，应用的主上下文（多半继承 IdentityDbContext）就整个漏掉。框架里每个 DbContext 都必须从这两个基类之一派生
+    /// （架构门禁守着），新的基类要在自己的 OnConfiguring 里调这里。
+    /// </remarks>
+    public static void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        optionsBuilder.AddInterceptors(Interceptors.PostgreSqlNulCharacterInterceptor.Instance);
+    }
+
+    /// <summary>
     /// 初始化模型（配置实体注册和批量配置）
     /// </summary>
     public static void OnModelCreating(DbContext dbContext, ModelBuilder modelBuilder, Action<ModelBuilder>? additionalConfigurations = null)

@@ -43,6 +43,8 @@ public class UsageLogConfiguration : EntityTypeConfigurationBase<UsageLog, Guid>
         builder.HasIndex(e => e.AgentId);
         builder.HasIndex(e => e.ThreadId);
         builder.HasIndex(e => e.CreationTime);
+        // 按用户查一段时间的用量（个人用量页、按用户汇总）
+        builder.HasIndex(e => new { e.UserId, e.CreationTime });
         builder.HasIndex(e => new { e.Provider, e.Model });
     }
 }

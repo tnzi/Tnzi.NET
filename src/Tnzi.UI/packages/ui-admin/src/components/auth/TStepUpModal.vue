@@ -18,7 +18,8 @@
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NButton, NInputOtp, NSpin } from 'naive-ui'
-import { TModalShell, TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
+import TModalShell from '../overlay/TModalShell.vue'
 import { DEFAULT_OTP_CODE_LENGTH, type StepUpMethod, type StepUpPromptController } from '@tnzi/core/services/identity'
 import { humanise, translatePageKey } from '../../i18n/translate'
 

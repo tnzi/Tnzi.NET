@@ -61,7 +61,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { NAlert, NButton } from 'naive-ui'
-import { TModalShell } from '@tnzi/ui'
+import TModalShell from '../../components/overlay/TModalShell.vue'
 import { formatCurrency } from '@tnzi/core'
 import type { SubscriptionPlanDto } from '@tnzi/core/services/payment'
 import TStripePaymentForm, { type StripeConfirmResult } from './TStripePaymentForm.vue'

@@ -29,6 +29,7 @@ namespace Tnzi.Hosting;
 [OptionalDependsOn(typeof(FinanceOffersModule))]
 [OptionalDependsOn(typeof(AuthorizationDataAuthModule))]
 [OptionalDependsOn(typeof(IdentityOrganizationModule))]
+[OptionalDependsOn(typeof(IdentityOpenIdConnectModule))]
 [OptionalDependsOn(typeof(PaymentBillingModule))]
 [OptionalDependsOn(typeof(PaymentSubscriptionsModule))]
 [OptionalDependsOn(typeof(PaymentPromotionsModule))]

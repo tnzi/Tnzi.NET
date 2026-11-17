@@ -235,10 +235,10 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, reactive, ref, watch, type Component } from 'vue'
 import { NButton, NDatePicker, NForm, NFormItem, NInput, NSelect } from 'naive-ui'
-import { TImageUpload } from '@tnzi/ui'
+import TImageUpload from '../../../components/forms/TImageUpload.vue'
 import { resolveOtpCodeLength, type UserDto, type UpdateUserDto } from '@tnzi/core/services/identity'
 import TUserCenterSection from './TUserCenterSection.vue'
-import { TModalShell } from '@tnzi/ui'
+import TModalShell from '../../../components/overlay/TModalShell.vue'
 import { vModule } from '../../../directives/vModule'
 import { useUserCenterContext } from '../user-center-context'
 import {

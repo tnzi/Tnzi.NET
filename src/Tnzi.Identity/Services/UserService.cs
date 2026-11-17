@@ -1573,14 +1573,8 @@ public class UserService : ApplicationService, IUserService
         return Ok();
     }
 
-    public async Task<User?> FindByPhoneNumberAsync(string phoneNumber)
-    {
-        if (string.IsNullOrEmpty(phoneNumber))
-            return null;
-
-        return await _userManager.Users
-            .FirstOrDefaultAsync(u => u.PhoneNumber == phoneNumber && u.PhoneNumberConfirmed);
-    }
+    public Task<PhoneNumberAccountLookup> ResolveByPhoneNumberAsync(string phoneNumber)
+        => _userManager.ResolveByPhoneNumberAsync(phoneNumber, requireConfirmed: true);
 
     /// <summary>
     /// 未加载组织包时，凡是要求「把这个用户放进某个组织」的写入路径统一给出的回答。

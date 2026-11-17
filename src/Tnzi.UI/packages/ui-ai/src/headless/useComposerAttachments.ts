@@ -7,9 +7,9 @@ import { ref, shallowRef, onScopeDispose, type Ref } from 'vue'
  * in one place instead of being duplicated per composer.
  *
  * Every way a file reaches the composer goes through `addFiles`: the file
- * picker, a drop, a pasted image, and a host handing files over
- * (`TThreadComposer.addAttachments`). So all of them meet the same checks and
- * the same rejection report.
+ * picker, a drop, a paste (a screenshot, or files copied in Explorer / Finder),
+ * and a host handing files over (`TThreadComposer.addAttachments`). So all of
+ * them meet the same checks and the same rejection report.
  */
 /** Why a file was refused. `too-large`: over `maxFileSize`. `unsupported-type`:
  *  not matched by the composer's `accept` list. */
@@ -73,6 +73,7 @@ export interface UseComposerAttachmentsReturn {
   clearRejected: () => void
   getPreviewUrl: (file: File) => string
   isImageFile: (file: File) => boolean
+  /** Attach the files on the clipboard (see `clipboardFiles`); text pastes as usual. */
   onPaste: (e: ClipboardEvent) => void
   onDrop: (e: DragEvent) => void
   onDragOver: (e: DragEvent) => void
@@ -101,6 +102,42 @@ export function isAcceptedFile(file: File, accept: string | null | undefined): b
     if (token.endsWith('/*')) return type.startsWith(token.slice(0, -1))
     return type === token
   })
+}
+
+/**
+ * The files a paste carries. Chromium and WebView2 list copied files (Explorer,
+ * Finder) and a pasted screenshot in `clipboardData.files`; the same files are
+ * also `items` of kind `file`, as new `File` objects, so taking both would
+ * attach each twice. `files` is read first and `items` only when it is empty
+ * (older engines that expose a screenshot as an item alone).
+ */
+export function clipboardFiles(data: DataTransfer | null | undefined): File[] {
+  if (!data) return []
+  const listed = Array.from(data.files ?? [])
+  if (listed.length > 0) return listed
+  const fromItems: File[] = []
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind !== 'file') continue
+    const f = item.getAsFile()
+    if (f) fromItems.push(f)
+  }
+  return fromItems
+}
+
+/**
+ * Whether the clipboard's text is only the names (or paths) of the pasted
+ * files, as a file manager puts it there next to the files. Such text must not
+ * land in the box as well. Any other text (a spreadsheet range copied with a
+ * picture of itself, a web page with an image) is the user's text and pastes
+ * as before.
+ */
+function isOnlyFileNames(text: string, files: readonly File[]): boolean {
+  const names = new Set(files.map((f) => f.name))
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim().replace(/^"(.*)"$/, '$1'))
+    .filter(Boolean)
+  return lines.every((line) => names.has(line.split(/[\\/]/).pop() ?? line))
 }
 
 export function useComposerAttachments(
@@ -171,16 +208,14 @@ export function useComposerAttachments(
 
   function onPaste(e: ClipboardEvent): void {
     if (!isEnabled()) return
-    const items = e.clipboardData?.items
-    if (!items) return
-    const imgs: File[] = []
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        const f = item.getAsFile()
-        if (f) imgs.push(f)
-      }
-    }
-    if (imgs.length > 0) addFiles(imgs)
+    const pasted = clipboardFiles(e.clipboardData)
+    if (pasted.length === 0) return
+    // Every pasted file meets the same checks as a picked one (accept, size),
+    // and the refused ones are reported the same way.
+    addFiles(pasted)
+    // The files were taken: their names are not pasted as text as well.
+    // Other text on the clipboard is still the user's and pastes as usual.
+    if (isOnlyFileNames(e.clipboardData?.getData?.('text/plain') ?? '', pasted)) e.preventDefault()
   }
 
   function onDrop(e: DragEvent): void {

@@ -123,6 +123,8 @@ public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOpt
             !Regex.IsMatch(mailSender.FromEmail, EmailShape, RegexOptions.IgnoreCase))
             errors.Add($"{prefix}.FromEmail must be a valid email address.");
 
+        ValidateProxy(mailSender.Proxy, $"{prefix}.Proxy", errors);
+
         // 如果启用了 SSL，验证用户名和密码
         if (mailSender.EnableSsl)
         {
@@ -132,6 +134,18 @@ public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOpt
             if (string.IsNullOrWhiteSpace(mailSender.Password))
                 errors.Add($"{prefix}.Password is required when EnableSsl is true.");
         }
+    }
+
+    /// <summary>
+    /// 验证一条邮件连接显式写的代理地址。留空合法（按环境变量或直连）；写了却解析不了，
+    /// 运行时每一封信都会失败，所以在启动时拒绝。错误信息里的凭据打码。
+    /// </summary>
+    private static void ValidateProxy(string? proxy, string path, List<string> errors)
+    {
+        if (string.IsNullOrWhiteSpace(proxy) || MailProxySelector.TryParseProxy(proxy, out _))
+            return;
+
+        errors.Add($"{path} '{MailProxySelector.Redact(proxy)}' is not a valid proxy address; expected {MailProxySelector.DescribeSupportedForm()}.");
     }
 
     /// <summary>
@@ -298,6 +312,8 @@ public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOpt
 
         if (string.IsNullOrWhiteSpace(confirmation.Folder))
             errors.Add($"{prefix}.Confirmation.Folder cannot be blank; the usual value is 'INBOX'.");
+
+        ValidateProxy(confirmation.Proxy, $"{prefix}.Confirmation.Proxy", errors);
 
         // 网关的回执本来就要几分钟才回，秒级轮询只是白白敲人家的 IMAP（还可能被限流）。
         if (confirmation.PollIntervalSeconds < 30)

@@ -4,8 +4,8 @@ import { formatCurrency } from '@tnzi/core'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import type { StatusType } from '@tnzi/ui'
-import { TRelativeTime } from '@tnzi/ui'
+import type { StatusType } from '../../components/display/TStatusBadge.vue'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 import { billingAccountColumn } from './billing-account-config'
 
 /**

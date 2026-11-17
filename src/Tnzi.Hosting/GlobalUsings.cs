@@ -43,6 +43,7 @@ global using Tnzi.Payment.PayPal;
 global using Tnzi.Payment.Stripe;
 global using Tnzi.Authorization.DataAuth;
 global using Tnzi.Identity.Organization;
+global using Tnzi.Identity.OpenIdConnect;
 global using Tnzi.Payment.Billing;
 global using Tnzi.Payment.Promotions;
 global using Tnzi.Payment.Subscriptions;

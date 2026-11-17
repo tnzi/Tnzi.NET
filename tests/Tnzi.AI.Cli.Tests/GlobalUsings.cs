@@ -6,6 +6,8 @@ global using System.Text.Json.Nodes;
 global using System.Threading.Channels;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.DependencyInjection.Extensions;
+global using Microsoft.EntityFrameworkCore.Infrastructure;
 global using Microsoft.Extensions.Configuration;
 global using Microsoft.Extensions.Hosting;
 global using Microsoft.Extensions.Logging;

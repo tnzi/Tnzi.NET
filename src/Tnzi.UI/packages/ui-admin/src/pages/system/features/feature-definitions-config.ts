@@ -3,7 +3,7 @@ import { h } from 'vue'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem, FormSchemaSection } from '../../_shared/form-schema'
 import TStatusBadge from '../../../components/display/TStatusBadge.vue'
-import { TSourceBadge } from '@tnzi/ui'
+import TSourceBadge from '../../../components/display/TSourceBadge.vue'
 import type { FeatureDefinitionDto } from '../../../services/bridges/feature-bridge'
 
 /**

@@ -39,7 +39,11 @@ public abstract class IntegratedTestBase<TDbContext> : IDisposable
 
         services.AddDbContext<TDbContext>(options =>
         {
-            options.UseSqlite(_connection);
+            if (!ConfigureDatabase(options))
+            {
+                options.UseSqlite(_connection);
+            }
+
             options.EnableSensitiveDataLogging();
             ConfigureDbContextOptions(options);
         });
@@ -62,7 +66,16 @@ public abstract class IntegratedTestBase<TDbContext> : IDisposable
     }
 
     /// <summary>
-    /// 在子类中覆写以补充 DbContext 选项（在 SQLite 连接与敏感数据日志之后调用）。
+    /// 在子类中覆写以换掉默认的 SQLite 内存库（例如让同一组用例跑在真实 PostgreSQL 上）：配置好提供程序后返回 <c>true</c>。
+    /// </summary>
+    /// <remarks>
+    /// 在基类构造期间调用，子类此时只有字段 / 属性初始值可用（它们先于基类构造函数执行）。
+    /// 库由 <c>EnsureCreated</c> 建出；用完删掉它是子类的事（覆写 <see cref="Dispose"/>，在调基类之前 <c>EnsureDeleted</c>）。
+    /// </remarks>
+    protected virtual bool ConfigureDatabase(DbContextOptionsBuilder options) => false;
+
+    /// <summary>
+    /// 在子类中覆写以补充 DbContext 选项（在数据库提供程序与敏感数据日志之后调用）。
     /// </summary>
     /// <remarks>
     /// ★ 多租户消费方必须在这里调 <c>options.UseTnziMultiTenancy(true)</c>：框架的多租户开关只经

@@ -5,7 +5,7 @@ namespace Tnzi.Imaging.Services;
 
 /// <summary>
 /// 解码闸门：先读图片头拿到尺寸，超过像素上限就拒绝，绝不先解码再判断；
-/// BigTIFF 在交给 ImageSharp 之前就按文件头拒绝。
+/// BigTIFF 与会让解码器越界写的 CCITT TIFF 在交给 ImageSharp 之前就拒绝。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -35,6 +35,12 @@ namespace Tnzi.Imaging.Services;
 /// （声明 50 亿个条目）光是 <c>Image.Identify</c> 就让一个线程空转二十多秒，条目数填得更大就是无限期。修复版带构建期授权校验（见 <c>Tnzi.Imaging.csproj</c>），
 /// 所以在这里按前四个字节拦下，不让 ImageSharp 看到它。ImageSharp 按内容而不是扩展名嗅探格式，
 /// 因此判定同样只看内容。经典 TIFF（魔数 42，扫描件与传真件的实际形态）不受影响。
+/// </para>
+/// <para>
+/// ★ <b>会让 ImageSharp 越界写的 CCITT TIFF 一律拒绝</b>（GHSA-v76p-62qx-wwq2）：任何一页用 CCITT Group 3（T4）
+/// 或 Modified Huffman 压缩，或者分块存储且用 CCITT Group 4 压缩。3.1 的传真解压器用不检查边界的位写入器写像素，
+/// 这几种形态下写出的长度由文件决定，是可由上传触发的堆越界写。条带存储的 Group 4（扫描件与传真件最常见的形态）照常放行。
+/// 判定逐页读 IFD（<see cref="TiffFaxCompressionProbe"/>），同样只看内容。
 /// </para>
 /// <para>
 /// 拒绝时抛的是 ImageSharp 自己的 <see cref="UnknownImageFormatException"/>，与它对任何认不出的字节的回答相同：
@@ -147,6 +153,7 @@ public static class ImageDecodeGuard
 
             var start = seekable.Position;
             await ThrowIfBigTiffAsync(seekable, cancellationToken);
+            await ThrowIfUnsafeFaxTiffAsync(seekable, cancellationToken);
             var info = await Image.IdentifyAsync(IdentifyOptions(firstFrameOnly), seekable, cancellationToken);
             seekable.Position = start;
 
@@ -179,6 +186,7 @@ public static class ImageDecodeGuard
 
         var start = stream.Position;
         ThrowIfBigTiff(stream);
+        ThrowIfUnsafeFaxTiff(stream);
         var info = Image.Identify(IdentifyOptions(firstFrameOnly: false), stream);
         stream.Position = start;
 
@@ -236,6 +244,34 @@ public static class ImageDecodeGuard
         seekable.Position = start;
 
         ThrowIfBigTiff(header.AsSpan(0, read));
+    }
+
+    /// <summary>
+    /// 经典 TIFF 里有 ImageSharp 3.1 会越界写的 CCITT 页时抛 <see cref="UnknownImageFormatException"/>
+    /// （GHSA-v76p-62qx-wwq2，判据见 <see cref="TiffFaxCompressionProbe"/>）。判完把流的位置放回原处。
+    /// </summary>
+    internal static void ThrowIfUnsafeFaxTiff(Stream seekable)
+    {
+        // useAsync: false 时探测全程同步读，返回的 ValueTask 已经完成
+        var probe = TiffFaxCompressionProbe.FindRejectionAsync(seekable, useAsync: false, CancellationToken.None);
+        if (!probe.IsCompleted)
+        {
+            throw new InvalidOperationException("The synchronous TIFF probe did not complete synchronously.");
+        }
+
+        ThrowIfRejected(probe.Result);
+    }
+
+    /// <inheritdoc cref="ThrowIfUnsafeFaxTiff(Stream)"/>
+    internal static async Task ThrowIfUnsafeFaxTiffAsync(Stream seekable, CancellationToken cancellationToken)
+        => ThrowIfRejected(await TiffFaxCompressionProbe.FindRejectionAsync(seekable, useAsync: true, cancellationToken));
+
+    private static void ThrowIfRejected(string? rejection)
+    {
+        if (rejection is not null)
+        {
+            throw new UnknownImageFormatException(rejection);
+        }
     }
 
     /// <summary>

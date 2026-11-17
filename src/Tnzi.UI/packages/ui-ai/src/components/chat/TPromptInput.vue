@@ -12,9 +12,10 @@
  * so a widget whose transport cannot carry files never shows a chip.
  */
 
-import { NButton } from 'naive-ui';
 import { ref, computed, watch } from 'vue';
 import { Icon } from '@iconify/vue';
+import TIconButton from '../controls/TIconButton.vue';
+import { vTooltip } from '../../headless/tooltip';
 import { useAiI18n, formatAiMessage } from '../../i18n/index';
 import { formatFileSize, isImeComposing } from '@tnzi/core/utils';
 import { useComposerAttachments } from '../../headless/useComposerAttachments';
@@ -91,6 +92,9 @@ const canSend = computed(() => {
 
 const placeholderText = computed(() => props.placeholder ?? t.value.chat.placeholder);
 
+// The one button at the end is Stop while an answer streams, Send otherwise.
+const submitLabel = computed(() => (props.loading ? t.value.chat.stop : t.value.composer.send));
+
 function updateValue(event: Event): void {
   const target = event.target as HTMLTextAreaElement;
   emit('update:modelValue', target.value);
@@ -148,8 +152,8 @@ watch(textareaRef, (el) => {
 
 <template>
   <div
-    class="relative rounded-xl border border-tnzi-border bg-tnzi-container transition-colors"
-    :class="{ 'border-primary/50 ring-1 ring-primary/20': isDragOver }"
+    class="t-prompt-input relative rounded-xl border border-tnzi-border bg-tnzi-container transition-colors"
+    :class="{ 't-prompt-input--drag-over': isDragOver }"
     @drop="handleDrop"
     @dragover="handleDragOver"
     @dragleave="handleDragLeave"
@@ -158,9 +162,7 @@ watch(textareaRef, (el) => {
     <div v-if="rejectedMessage" class="t-prompt-input__reject" role="status">
       <Icon icon="lucide:triangle-alert" class="t-prompt-input__reject-icon" />
       <span class="t-prompt-input__reject-text">{{ rejectedMessage }}</span>
-      <NButton quaternary size="tiny" :aria-label="t.composer.dismiss" @click="clearRejected">
-        <template #icon><Icon icon="lucide:x" /></template>
-      </NButton>
+      <TIconButton icon="lucide:x" size="xs" :label="t.composer.dismiss" @click="clearRejected" />
     </div>
 
     <!-- File previews -->
@@ -190,9 +192,7 @@ watch(textareaRef, (el) => {
         <span class="text-[10px] text-tnzi-muted">{{ formatFileSize(file.size) }}</span>
 
         <!-- Remove button -->
-        <NButton quaternary size="tiny" @click="removeFile(index)">
-          <template #icon><Icon icon="lucide:x" /></template>
-        </NButton>
+        <TIconButton icon="lucide:x" size="xs" :label="t.composer.removeAttachment" @click="removeFile(index)" />
       </div>
     </div>
 
@@ -200,16 +200,13 @@ watch(textareaRef, (el) => {
     <div class="flex items-end gap-2 p-2">
       <!-- Prefix slot -->
       <slot name="prefix">
-        <NButton
+        <TIconButton
           v-if="enableAttachments"
-          quaternary
-          size="small"
-          class="mb-0.5 shrink-0"
-          :aria-label="t.composer.attach"
+          icon="lucide:paperclip"
+          class="t-prompt-input__attach"
+          :label="t.composer.attach"
           @click="openFileDialog"
-        >
-          <template #icon><Icon icon="lucide:paperclip" /></template>
-        </NButton>
+        />
       </slot>
 
       <!-- Textarea -->
@@ -231,18 +228,20 @@ watch(textareaRef, (el) => {
 
       <!-- Actions -->
       <slot name="actions">
-        <NButton
-          size="small"
-          class="mb-0.5 shrink-0"
-          :type="loading ? 'error' : canSend ? 'primary' : 'default'"
+        <!-- Drawn as TThreadComposer's primary button: quiet while there is
+             nothing to send, the accent once there is, the text colour as Stop. -->
+        <button
+          v-tooltip="submitLabel"
+          type="button"
+          class="t-prompt-input__send"
+          :class="{ 'is-ready': !loading && canSend, 'is-stop': loading }"
+          :data-action="loading ? 'stop' : 'send'"
+          :aria-label="submitLabel"
           :disabled="!loading && !canSend"
           @click="handleSubmit"
         >
-          <template #icon>
-            <Icon v-if="loading" icon="lucide:square" />
-            <Icon v-else icon="lucide:arrow-up" />
-          </template>
-        </NButton>
+          <Icon :icon="loading ? 'lucide:square' : 'lucide:arrow-up'" aria-hidden="true" />
+        </button>
       </slot>
     </div>
 
@@ -259,6 +258,55 @@ watch(textareaRef, (el) => {
 </template>
 
 <style scoped>
+/* The package's one focus style for a field (`--tnzi-ai-focus-*`). */
+.t-prompt-input:focus-within {
+  border-color: var(--tnzi-ai-focus-border);
+  box-shadow: var(--tnzi-ai-focus-ring);
+}
+.t-prompt-input--drag-over {
+  border-color: var(--tnzi-ai-accent-text);
+  background: var(--tnzi-ai-accent-soft);
+}
+.t-prompt-input__attach {
+  margin-bottom: 3px;
+}
+.t-prompt-input__send {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  margin-bottom: 3px;
+  border: none;
+  border-radius: 999px;
+  background: var(--tnzi-ai-hover);
+  color: var(--tnzi-ai-text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  cursor: pointer;
+  transition:
+    background var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing),
+    color var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
+}
+.t-prompt-input__send.is-ready {
+  background: var(--tnzi-ai-accent);
+  color: var(--tnzi-ai-on-accent);
+}
+.t-prompt-input__send.is-stop {
+  background: var(--tnzi-ai-text);
+  color: var(--tnzi-ai-surface);
+  font-size: 12px;
+}
+.t-prompt-input__send.is-stop:hover {
+  opacity: 0.85;
+}
+.t-prompt-input__send:disabled {
+  cursor: not-allowed;
+}
+.t-prompt-input__send:focus-visible {
+  outline: var(--tnzi-ai-focus-outline);
+  outline-offset: 2px;
+}
 .t-prompt-input__reject {
   display: flex;
   align-items: center;

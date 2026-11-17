@@ -1,7 +1,9 @@
 /**
  * @tnzi/ui
  *
- * Tnzi UI components based on Naive UI.
+ * The library-neutral Tnzi UI layer: theme context and tokens, the login
+ * stack, overlay/focus primitives and the components that render without a
+ * component library.
  *
  * @packageDocumentation
  */
@@ -25,14 +27,11 @@ export * from './theme/index';
 // Adapters
 export * from './adapters/index';
 
-// Stores
-export * from './stores/index';
+// Stores are not exported here: they need Pinia, an optional peer. Import
+// them from `@tnzi/ui/stores`.
 
 // Resolvers
 export * from './resolvers/index';
 
-// Utils (naive-helpers, device-icon)
+// Utils (device-icon, avatar, placeholders)
 export * from './utils/index';
-
-// Naive UI locale bridge (message catalogue lives in @tnzi/core/adapters/i18n)
-export { getNaiveLocale, type NaiveLocaleBundle } from './locales';

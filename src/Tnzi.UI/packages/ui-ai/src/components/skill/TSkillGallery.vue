@@ -1,9 +1,12 @@
 <script setup lang="ts">
 /**
  * TSkillGallery - Skill store browsing with category filter and search
+ *
+ * The search matches name and description; a category chip narrows the
+ * result further, and pressing the selected chip again clears it. The cards
+ * scroll inside the gallery (500px at most).
  */
 
-import { NInput, NScrollbar } from 'naive-ui';
 import { ref, computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '../../i18n/index';
@@ -37,28 +40,38 @@ const filtered = computed(() => {
 </script>
 
 <template>
-  <div class="space-y-3">
-    <div class="relative">
-      <Icon icon="lucide:search" class="t-skill-gallery__search-icon" />
-      <NInput v-model:value="searchQuery" :placeholder="t.skill.search" size="small" />
+  <div class="t-skill-gallery">
+    <div class="t-skill-gallery__search">
+      <Icon icon="lucide:search" class="t-skill-gallery__search-icon" aria-hidden="true" />
+      <input
+        v-model="searchQuery"
+        type="text"
+        class="t-input t-skill-gallery__search-input"
+        :placeholder="t.skill.search"
+        :aria-label="t.skill.search"
+      />
     </div>
-    <div v-if="categories?.length" class="flex flex-wrap gap-1">
-      <span
-        class="t-skill-gallery__cat-badge"
-        :class="{ 't-skill-gallery__cat-badge--active': selectedCategory === null }"
+    <div v-if="categories?.length" class="t-skill-gallery__cats" role="group" :aria-label="t.skill.category">
+      <button
+        type="button"
+        class="t-skill-gallery__cat"
+        :class="{ 't-skill-gallery__cat--active': selectedCategory === null }"
+        :aria-pressed="selectedCategory === null"
         @click="selectedCategory = null"
-      >All</span>
-      <span
+      >{{ t.common.all }}</button>
+      <button
         v-for="cat in categories"
         :key="cat"
-        class="t-skill-gallery__cat-badge"
-        :class="{ 't-skill-gallery__cat-badge--active': selectedCategory === cat }"
+        type="button"
+        class="t-skill-gallery__cat"
+        :class="{ 't-skill-gallery__cat--active': selectedCategory === cat }"
+        :aria-pressed="selectedCategory === cat"
         @click="selectedCategory = selectedCategory === cat ? null : cat"
-      >{{ cat }}</span>
+      >{{ cat }}</button>
     </div>
-    <NScrollbar style="max-height: 500px">
-      <div v-if="filtered.length === 0" class="py-8 text-center text-sm t-skill-gallery__empty">{{ t.skill.noResults }}</div>
-      <div v-else class="grid grid-cols-2 gap-2 pr-1">
+    <div class="t-ai-scroll t-skill-gallery__list">
+      <div v-if="filtered.length === 0" class="t-skill-gallery__empty">{{ t.skill.noResults }}</div>
+      <div v-else class="t-skill-gallery__grid">
         <TSkillCard
           v-for="skill in filtered"
           :key="skill.id"
@@ -68,35 +81,78 @@ const filtered = computed(() => {
           @click="emit('skill-click', $event)"
         />
       </div>
-    </NScrollbar>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.t-skill-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.t-skill-gallery__search { position: relative; }
 .t-skill-gallery__search-icon {
   position: absolute;
-  left: 8px;
+  left: 10px;
   top: 50%;
   transform: translateY(-50%);
   width: 14px;
   height: 14px;
-  color: var(--tnzi-base-text-muted);
+  color: var(--tnzi-ai-text-tertiary);
   pointer-events: none;
-  z-index: 1;
 }
-.t-skill-gallery__empty { color: var(--tnzi-base-text-muted); }
-.t-skill-gallery__cat-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  border: 1px solid var(--tnzi-border);
+.t-skill-gallery__search-input { padding-left: 30px; }
+.t-skill-gallery__cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.t-skill-gallery__cat {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--tnzi-ai-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--tnzi-ai-text-secondary);
+  font: inherit;
+  font-size: 12px;
   cursor: pointer;
-  color: var(--tnzi-base-text-muted);
-  transition: background-color 0.15s, color 0.15s;
+  transition: background-color var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing),
+              color var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
 }
-.t-skill-gallery__cat-badge--active {
-  background-color: var(--tnzi-primary);
-  border-color: var(--tnzi-primary);
+.t-skill-gallery__cat:hover { background: var(--tnzi-ai-hover); }
+.t-skill-gallery__cat:focus-visible {
+  outline: var(--tnzi-ai-focus-outline);
+  outline-offset: 2px;
+}
+.t-skill-gallery__cat--active,
+.t-skill-gallery__cat--active:hover {
+  border-color: var(--tnzi-ai-accent);
+  background: var(--tnzi-ai-accent);
   color: var(--tnzi-ai-on-accent);
+}
+.t-skill-gallery__list {
+  position: relative;
+  max-height: 500px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.t-skill-gallery__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding-right: 4px;
+}
+/* One column where two cards side by side would cut both names short. */
+@media (max-width: 640px) {
+  .t-skill-gallery__grid { grid-template-columns: minmax(0, 1fr); }
+}
+.t-skill-gallery__empty {
+  padding: 32px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--tnzi-ai-text-secondary);
 }
 </style>

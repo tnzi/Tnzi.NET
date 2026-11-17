@@ -19,9 +19,10 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Icon } from '@iconify/vue'
 import { isImeComposing } from '@tnzi/core/utils'
-import type { AdminAuthRuntime } from '@tnzi/ui'
+import type { AdminAuthRuntime } from '@tnzi/ui/headless'
 import { stashWelcomeMessage } from '../headless/welcome-message'
 import { useAiI18n } from '../i18n/index'
+import { DEFAULT_SEND_ICON } from '../components/chat/composer-types'
 
 const props = withDefaults(
   defineProps<{
@@ -39,6 +40,8 @@ const props = withDefaults(
     subline?: string
     /** Composer placeholder. Defaults to the locale's. */
     placeholder?: string
+    /** Iconify name of the send button. Default `lucide:arrow-up`. */
+    sendIcon?: string
     /** Under the composer: what sending does. Defaults to the locale's; '' for none. */
     hint?: string
     /** Route name of the sign-in page. */
@@ -55,6 +58,7 @@ const props = withDefaults(
     greeting: '',
     subline: '',
     placeholder: '',
+    sendIcon: DEFAULT_SEND_ICON,
     hint: undefined,
     loginName: 'login',
     homePath: '/',
@@ -125,7 +129,7 @@ onMounted(() => {
           :disabled="!canSend"
           :aria-label="t.composer.send"
         >
-          <Icon icon="lucide:arrow-up" />
+          <Icon :icon="sendIcon || DEFAULT_SEND_ICON" />
         </button>
       </form>
       <p v-if="hint !== ''" class="t-guest-welcome__hint">{{ hint ?? t.welcome.hint }}</p>
@@ -142,11 +146,13 @@ onMounted(() => {
   background: var(--tnzi-ai-bg);
   color: var(--tnzi-ai-text);
 }
+/* Keeps clear of the window's own controls over the top right corner
+   (`--tnzi-ai-window-inset-right`, a frameless desktop window). */
 .t-guest-welcome__bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
+  padding: 12px calc(20px + var(--tnzi-ai-window-inset-right, 0px)) 12px 20px;
 }
 .t-guest-welcome__brand {
   display: inline-flex;
@@ -209,7 +215,7 @@ onMounted(() => {
   background: var(--tnzi-ai-surface);
   box-shadow: var(--tnzi-ai-composer-shadow, none);
 }
-.t-guest-welcome__composer:focus-within { border-color: var(--tnzi-ai-border-strong); }
+.t-guest-welcome__composer:focus-within { border-color: var(--tnzi-ai-focus-border); box-shadow: var(--tnzi-ai-focus-ring); }
 .t-guest-welcome__input {
   display: block;
   width: 100%;

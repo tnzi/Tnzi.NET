@@ -24,6 +24,8 @@
     </PackageReference>
     <PackageReference Include="Moq" Version="4.21.0" />
     <PackageReference Include="Shouldly" Version="4.3.0" />
+    <!-- 执行器写库的几条用例在真实 PostgreSQL 上再跑一遍（TNZI_TEST_POSTGRES 给出服务器时） -->
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
   </ItemGroup>
 
   <ItemGroup>
@@ -32,6 +34,11 @@
     <!-- 只给回写通道的真机冒烟测试用：它在进程内起一个真实的 MCP server，让真实 CLI 连上来。
          两个模块彼此不引用，这是它们唯一同时出现的地方 -->
     <ProjectReference Include="..\..\src\Tnzi.AI.Mcp\Tnzi.AI.Mcp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 录下来的真实 stream-json 交换（claude 2.1.316，路径已换成占位），适配器测试按段回放 -->
+    <None Update="Adapters\Recordings\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

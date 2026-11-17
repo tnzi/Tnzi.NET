@@ -6,9 +6,9 @@
  * and prompt input into a complete chat interface.
  */
 
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import type { ChatMessage } from '../../headless/useChat';
-import { useAutoScroll } from '../../headless/useAutoScroll';
+import { useAutoScroll, type ChatScrollMode } from '../../headless/useAutoScroll';
 import type { FeedbackValue } from './TMessageFeedback.vue';
 import type { SuggestionItem } from './TSuggestions.vue';
 import TMessageList from './TMessageList.vue';
@@ -25,8 +25,15 @@ const props = withDefaults(defineProps<{
   placeholder?: string;
   /** Paperclip + drag/drop + paste in the prompt input. Default true. */
   enableAttachments?: boolean;
+  /**
+   * How the list scrolls when a message is sent: `'chat'` (default) keeps the
+   * end of the previous answer above the sent message and follows the answer
+   * until that message reaches the top; `'follow'` follows the newest output.
+   */
+  scrollMode?: ChatScrollMode;
 }>(), {
   isStreaming: false,
+  scrollMode: 'chat',
   inputText: '',
   suggestions: () => [],
   enableAttachments: true,
@@ -44,7 +51,30 @@ const emit = defineEmits<{
 
 const isEmpty = computed(() => props.messages.length === 0);
 
-const { containerRef, isAtBottom, scrollToBottom } = useAutoScroll();
+const { containerRef, isAtBottom, scrollToBottom, followTurn } = useAutoScroll();
+
+const lastUserMessageId = computed(() => {
+  for (let i = props.messages.length - 1; i >= 0; i -= 1) {
+    if (props.messages[i]!.role === 'user') return props.messages[i]!.id;
+  }
+  return undefined;
+});
+
+function messageElement(id: string): HTMLElement | null {
+  return containerRef.value?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`) ?? null;
+}
+
+/* A new user message at the end (at most one turn arriving at once) is a
+   send: bring it into view the way `scrollMode` says. */
+watch(
+  [lastUserMessageId, () => props.messages.length],
+  ([lastUser, count], [previousUser, previousCount]) => {
+    if (!lastUser || lastUser === previousUser || count - (previousCount ?? 0) > 2) return;
+    if (props.scrollMode === 'follow') scrollToBottom('auto');
+    else followTurn(() => messageElement(lastUser));
+  },
+  { flush: 'post' },
+);
 
 function handleSuggestionSelect(text: string): void {
   emit('update:inputText', text);

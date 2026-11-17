@@ -152,8 +152,8 @@ describe('TActionMenu', () => {
 
 describe('TThreadList', () => {
   const threads: ThreadItem[] = [
-    { id: 'a', title: 'Alpha', updatedAt: new Date().toISOString() },
-    { id: 'b', title: 'Beta', updatedAt: new Date(Date.now() - 86_400_000).toISOString(), archived: true },
+    { id: 'a', title: 'Alpha', userMessageAt: new Date().toISOString() },
+    { id: 'b', title: 'Beta', userMessageAt: new Date(Date.now() - 86_400_000).toISOString(), archived: true },
   ];
 
   function mountList(props: Record<string, unknown> = {}) {
@@ -210,11 +210,11 @@ describe('TThreadList', () => {
     const { el, 'onUpdate:preferences': onPreferences } = mountList();
     (el.querySelector('[aria-label="Filter and group"]') as HTMLButtonElement).click();
     await settle();
-    expect(menuLabels()).toEqual(['StatusActive', 'Last activityAll', 'Group byNone', 'Sort byLast activity']);
+    expect(menuLabels()).toEqual(['StatusActive', 'Last messageAll', 'Group byNone', 'Sort byLast message']);
 
     (menu()!.querySelector('[data-menu-item="sort"]') as HTMLButtonElement).click();
     await settle();
-    expect(menuLabels()).toEqual(['Sort by', 'Name', 'Date created', 'Last activity']);
+    expect(menuLabels()).toEqual(['Sort by', 'Name', 'Date created', 'Last message']);
     (menu()!.querySelector('[data-menu-item="sort:name"]') as HTMLButtonElement).click();
     await settle();
     expect(onPreferences).toHaveBeenCalledWith({ sort: 'name' });
@@ -224,6 +224,27 @@ describe('TThreadList', () => {
     const preferences: RecentsPreferences = { ...DEFAULT_RECENTS_PREFERENCES, status: 'all', groupBy: 'date' };
     const { el } = mountList({ preferences });
     expect(Array.from(el.querySelectorAll('.t-thread-list__group')).map((g) => g.textContent)).toEqual(['Today', 'Yesterday']);
+  });
+
+  it('grouped by date, the conversations awaiting the user and the running ones sit above the dates under headings of their own', () => {
+    const preferences: RecentsPreferences = { ...DEFAULT_RECENTS_PREFERENCES, status: 'all', groupBy: 'date' };
+    const { el } = mountList({
+      preferences,
+      threads: [
+        { id: 'w', title: 'Waiting', awaitingOwner: true, running: true, userMessageAt: new Date(Date.now() - 40 * 86_400_000).toISOString() },
+        { id: 'r', title: 'Working on it', running: true, userMessageAt: new Date(Date.now() - 3 * 86_400_000).toISOString() },
+        ...threads,
+      ],
+    });
+    expect(Array.from(el.querySelectorAll('.t-thread-list__group')).map((g) => g.textContent)).toEqual([
+      'Needs you',
+      'Working',
+      'Today',
+      'Yesterday',
+    ]);
+    const waiting = el.querySelectorAll('.t-thread-list__row')[0]!;
+    expect(waiting.querySelector('[data-thread-status]')?.getAttribute('data-thread-status')).toBe('awaiting');
+    expect(waiting.querySelector('.t-thread-list__select')?.textContent).toContain('Needs you');
   });
 
   it('a row menu renames in place, archives, unarchives, and deletes after an inline confirmation', async () => {
@@ -320,11 +341,11 @@ function fakeController(initial: ThreadItem[] = []) {
 
 describe('TRecentsPage', () => {
   const rows: ThreadItem[] = [
-    { id: 'a', title: 'Alpha', updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString() },
-    { id: 'b', title: 'Beta', updatedAt: new Date(Date.now() - 4 * 86_400_000).toISOString() },
+    { id: 'a', title: 'Alpha', userMessageAt: new Date(Date.now() - 5 * 3_600_000).toISOString(), updatedAt: new Date().toISOString() },
+    { id: 'b', title: 'Beta', userMessageAt: new Date(Date.now() - 4 * 86_400_000).toISOString() },
   ];
 
-  it('loads on open and lists titles with when they were last active', async () => {
+  it('loads on open and lists titles with when the user last wrote in them', async () => {
     const controller = fakeController(rows);
     const el = mount(() => h(TRecentsPage, { controller }));
     await settle();
@@ -385,7 +406,7 @@ describe('TRecentsPage', () => {
 });
 
 describe('TRecentsPage search and rows', () => {
-  const rows: ThreadItem[] = [{ id: 'a', title: 'Alpha', updatedAt: new Date(Date.now() - 5 * 3_600_000).toISOString() }];
+  const rows: ThreadItem[] = [{ id: 'a', title: 'Alpha', userMessageAt: new Date(Date.now() - 5 * 3_600_000).toISOString() }];
 
   it('the search opens in the tabs row, searches as typed, and its x clears it back into the button', async () => {
     vi.useFakeTimers();
@@ -436,7 +457,10 @@ describe('TRecentsPage search and rows', () => {
     const el = mount(() => h(TRecentsPage, { controller: fakeController(rows) }));
     await settle();
     const open = el.querySelector('.t-recents-page__open') as HTMLElement;
-    expect(Array.from(open.children).map((c) => c.className)).toEqual(['t-recents-page__title', 't-recents-page__time']);
+    // The name holds the title (and, when the product maps an origin, its label for screen readers);
+    // the origin icon itself is at the row's end, outside the button.
+    expect(Array.from(open.children).map((c) => c.className)).toEqual(['t-recents-page__name', 't-recents-page__time']);
+    expect(Array.from(open.children[0].children).map((c) => c.className)).toEqual(['t-recents-page__title']);
     expect(open.textContent).toContain('5 hours ago');
   });
 });

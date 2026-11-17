@@ -11,6 +11,7 @@ import {
 } from 'naive-ui'
 import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
 import TAdminWindowHandles from './TAdminWindowHandles'
+import { useNaiveThemeOverrides } from '../../theme/naive-bridge'
 import { useAdminLocale } from '../../headless/useAdminLocale'
 
 interface Props {
@@ -22,7 +23,7 @@ interface Props {
   theme?: typeof darkTheme | null
   /**
    * Override the auto-resolved theme tokens. When omitted, the component
-   * forwards `useTheme().naiveOverrides` so admin palette tokens
+   * forwards `useNaiveThemeOverrides(themeContext)` so admin palette tokens
    * (primary / info / success / ...) get applied to all naive-ui
    * components rendered inside.
    */
@@ -55,11 +56,10 @@ const resolvedTheme = computed(() => {
   return ctx.isDark.value ? darkTheme : null
 })
 
-const resolvedOverrides = computed<GlobalThemeOverrides>(() => {
-  if (props.themeOverrides) return props.themeOverrides
-  if (!ctx) return {}
-  return ctx.naiveOverrides.value
-})
+const contextOverrides = useNaiveThemeOverrides(ctx)
+const resolvedOverrides = computed<GlobalThemeOverrides>(
+  () => props.themeOverrides ?? contextOverrides.value,
+)
 
 // Use a functional component for the inner content so the fallback path
 // resolves `RouterView` at runtime. The naïve approach

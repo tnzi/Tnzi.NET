@@ -33,6 +33,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Tnzi.AspNetCore.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="Resources\WelcomePage.html" />
   </ItemGroup>
 

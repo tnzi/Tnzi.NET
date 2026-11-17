@@ -27,7 +27,7 @@
  * the tray and the two config providers import.
  */
 import { shallowRef, triggerRef } from 'vue'
-import type { NaiveLocaleBundle } from '@tnzi/ui'
+import type { NaiveLocaleBundle } from './naive-locale'
 import {
   resetLocaleMessagesForTest,
   setLocaleLoader,

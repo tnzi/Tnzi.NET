@@ -29,6 +29,23 @@ public class ChatRunAndAttachmentEndpointTests
     }
 
     [Fact]
+    public async Task PendingPermissions_AreAskedForAsTheSignedInUser_ByThreadOrByRun()
+    {
+        var chat = new Mock<IChatService>();
+        var threadId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        var waiting = new ChatPermissionRequestDto { RunId = runId, RequestId = Guid.NewGuid(), Kind = CliInteractionKinds.Plan };
+        chat.Setup(s => s.GetPendingPermissionsAsync(threadId, _userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<List<ChatPermissionRequestDto>>.Success([waiting]));
+        chat.Setup(s => s.GetRunPendingPermissionsAsync(runId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<List<ChatPermissionRequestDto>>.Success([waiting]));
+        var controller = WithUser(new DefaultChatController(chat.Object));
+
+        (await controller.GetPendingPermissions(threadId)).Data!.ShouldHaveSingleItem().Kind.ShouldBe(CliInteractionKinds.Plan);
+        (await controller.GetRunPendingPermissions(runId)).Data!.ShouldHaveSingleItem().RunId.ShouldBe(runId);
+    }
+
+    [Fact]
     public async Task CancelRun_CancelsOnTheServer()
     {
         var chat = new Mock<IChatService>();
@@ -72,6 +89,23 @@ public class ChatRunAndAttachmentEndpointTests
         file.ContentType.ShouldBe("image/png");
         file.FileDownloadName.ShouldBe("a.png");
         file.FileContents.ShouldBe(new byte[] { 1, 2 });
+        controller.Response.Headers["X-Content-Type-Options"].ToString().ShouldBe("nosniff");
+    }
+
+    [Fact]
+    public async Task AFileAttachment_IsServedAsADownload_InASandbox_WhateverTypeTheClientDeclared()
+    {
+        var threadId = Guid.NewGuid();
+        var attachmentId = Guid.NewGuid();
+        var attachments = new Mock<IAgentAttachmentService>();
+        attachments.Setup(a => a.GetContentAsync(threadId, attachmentId, _userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<AttachmentContentDto>.Success(new AttachmentContentDto { MediaType = "text/html", FileName = null, Content = [1] }));
+        var controller = WithUser(new DefaultThreadController(Mock.Of<IAgentThreadService>(), Mock.Of<IMessageFeedbackService>(), attachmentService: attachments.Object));
+
+        var file = (await controller.GetAttachment(threadId, attachmentId)).ShouldBeOfType<FileContentResult>();
+
+        file.FileDownloadName.ShouldBe("attachment", "a download name makes it Content-Disposition: attachment, never rendered inline");
+        controller.Response.Headers["Content-Security-Policy"].ToString().ShouldBe("sandbox");
         controller.Response.Headers["X-Content-Type-Options"].ToString().ShouldBe("nosniff");
     }
 

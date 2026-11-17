@@ -13,8 +13,11 @@
  */
 import { computed } from 'vue'
 import type { ToolCallInfo } from '../../headless/useChat'
+import { isBackgroundCommand, isSubAgentCall } from '../../headless/cli-tasks'
 import { useChatRenderContext } from '../chat/chat-render-context'
 import TToolCallCard from './TToolCallCard.vue'
+import TSubAgentStep from './TSubAgentStep.vue'
+import TBackgroundCommandStep from './TBackgroundCommandStep.vue'
 import { resolveToolEntry } from './built-in-tool-renderers'
 
 const props = withDefaults(
@@ -26,9 +29,13 @@ const props = withDefaults(
 )
 
 const context = useChatRenderContext()
-const renderer = computed(
-  () => resolveToolEntry(props.toolCall.name, context.value.toolRenderers).component ?? TToolCallCard,
-)
+/* A sub-agent is a row that opens its own view, and a command in the background a row in its own state, whatever the
+   tool that started them is called. */
+const renderer = computed(() => {
+  if (isSubAgentCall(props.toolCall)) return TSubAgentStep
+  if (isBackgroundCommand(props.toolCall)) return TBackgroundCommandStep
+  return resolveToolEntry(props.toolCall.name, context.value.toolRenderers).component ?? TToolCallCard
+})
 </script>
 
 <template>

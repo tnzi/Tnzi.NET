@@ -1,4 +1,4 @@
-import { ref, computed, watch, onScopeDispose, type Ref, type ComputedRef } from 'vue'
+import { ref, computed, watch, readonly, onScopeDispose, type Ref, type ComputedRef } from 'vue'
 
 export type SidebarMode = 'expanded' | 'icon' | 'hidden'
 
@@ -11,8 +11,28 @@ export interface UseSidebarStateOptions {
 export interface UseSidebarStateReturn {
   mode: Ref<SidebarMode>
   isMobile: ComputedRef<boolean>
+  /** The user's choice: applied, remembered for this desktop session and persisted. */
   setMode: (mode: SidebarMode) => void
   cycle: () => void
+  /**
+   * Whether the current `icon` mode was set by `applyAutoMode` rather than by
+   * the user. Any `setMode` clears it.
+   */
+  autoCollapsed: Readonly<Ref<boolean>>
+  /**
+   * How many times the user has chosen a mode (`setMode` / `cycle`). Changes
+   * the state makes itself (the mobile breakpoint, `applyAutoMode`) leave it
+   * alone, so a watcher can tell the user's choices from the rest.
+   */
+  choices: Readonly<Ref<number>>
+  /**
+   * A change the shell makes by itself (`useSidebarAutoFit`): `icon` folds an
+   * expanded sidebar into the rail and marks it `autoCollapsed`; `expanded`
+   * unfolds it again, only if it was folded that way. Never persisted and never
+   * remembered as the desktop mode, so a narrow window does not become the
+   * user's "collapsed". Ignored below the mobile breakpoint.
+   */
+  applyAutoMode: (mode: 'icon' | 'expanded') => void
   /**
    * Detach the resize listener and stop the breakpoint watcher. Called
    * automatically when the owning effect scope (component or `effectScope()`)
@@ -77,7 +97,12 @@ export function useSidebarState(options: UseSidebarStateOptions = {}): UseSideba
   const mode = ref<SidebarMode>(isMobile.value ? 'hidden' : desktopMode)
   const rememberedDesktopMode = ref<SidebarMode>(desktopMode === 'hidden' ? 'expanded' : desktopMode)
 
+  const autoCollapsed = ref(false)
+  const choices = ref(0)
+
   function setMode(next: SidebarMode): void {
+    autoCollapsed.value = false
+    choices.value += 1
     if (isMobile.value) {
       mode.value = next === 'hidden' ? 'hidden' : 'expanded'
       return
@@ -85,6 +110,17 @@ export function useSidebarState(options: UseSidebarStateOptions = {}): UseSideba
     mode.value = next
     rememberedDesktopMode.value = next
     writePersisted(storageKey, next)
+  }
+
+  function applyAutoMode(next: 'icon' | 'expanded'): void {
+    if (isMobile.value) return
+    if (next === 'icon' && mode.value === 'expanded') {
+      mode.value = 'icon'
+      autoCollapsed.value = true
+    } else if (next === 'expanded' && mode.value === 'icon' && autoCollapsed.value) {
+      mode.value = 'expanded'
+      autoCollapsed.value = false
+    }
   }
 
   function cycle(): void {
@@ -102,8 +138,12 @@ export function useSidebarState(options: UseSidebarStateOptions = {}): UseSideba
   const stopBreakpointWatch = watch(isMobile, (nowMobile) => {
     if (nowMobile && !lastIsMobile) {
       if (mode.value !== 'hidden') {
-        rememberedDesktopMode.value = mode.value
+        /* A rail the shell folded by itself is not the user's mode: back on a
+           wide screen the sidebar returns expanded, and folds again only if
+           there is still too little room for it. */
+        rememberedDesktopMode.value = autoCollapsed.value ? 'expanded' : mode.value
       }
+      autoCollapsed.value = false
       mode.value = 'hidden'
     } else if (!nowMobile && lastIsMobile) {
       mode.value = rememberedDesktopMode.value
@@ -145,5 +185,5 @@ export function useSidebarState(options: UseSidebarStateOptions = {}): UseSideba
   // every scope-less call.
   onScopeDispose(dispose, true)
 
-  return { mode, isMobile, setMode, cycle, dispose }
+  return { mode, isMobile, setMode, cycle, autoCollapsed: readonly(autoCollapsed), choices: readonly(choices), applyAutoMode, dispose }
 }

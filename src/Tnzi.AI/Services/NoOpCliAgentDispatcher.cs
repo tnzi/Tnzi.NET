@@ -47,4 +47,15 @@ public class NoOpCliAgentDispatcher : ICliAgentDispatcher, INoOpService
     /// <inheritdoc />
     public Task<Result<int>> CancelThreadRunsAsSystemAsync(Guid threadId, string? reason = null, CancellationToken cancellationToken = default)
         => Task.FromResult(Result.Failure<int>(Message, 501, ErrorCodes.CliModuleNotLoaded));
+
+    /// <inheritdoc />
+    /// <remarks>没有外部执行就没有外部运行：答空列表，而不是「说不出来」。</remarks>
+    public Task<IReadOnlyList<Guid>?> GetActiveThreadRunIdsAsSystemAsync(Guid threadId, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<Guid>?>([]);
+
+    /// <inheritdoc />
+    /// <remarks>没有外部执行就没有外部运行：每个 id 都是不存在的运行。</remarks>
+    public Task<IReadOnlyDictionary<Guid, CliRunStatus>?> GetStatusesAsSystemAsync(
+        IReadOnlyCollection<Guid> runIds, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyDictionary<Guid, CliRunStatus>?>(new Dictionary<Guid, CliRunStatus>());
 }

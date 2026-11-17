@@ -1,6 +1,6 @@
 import { defineComponent, h, ref, computed, onMounted, watch, type PropType } from 'vue'
 import { NSelect } from 'naive-ui'
-import { useSafeMessage } from '@tnzi/ui'
+import { useSafeMessage } from '../../headless/useSafeMessage'
 import { useDebounced } from '@tnzi/core/headless'
 
 export interface SelectorOption {

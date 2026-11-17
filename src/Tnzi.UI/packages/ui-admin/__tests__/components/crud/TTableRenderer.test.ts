@@ -250,6 +250,38 @@ describe('TTableRenderer', () => {
       expect(wrapper.find('.t-crud-empty-cta').exists()).toBe(false)
     })
 
+    it("shows the page's own empty text and hint on a first-load empty list, keeping the CTA", () => {
+      const wrapper = mount(TTableRenderer, {
+        props: { state: makeCreatableEmptyState(), emptyText: 'No apps yet', emptyHint: 'Apps registered here sign people in.' },
+        global: { stubs },
+      })
+      expect(wrapper.find('.t-list-empty__text').text()).toBe('No apps yet')
+      expect(wrapper.find('.t-list-empty__hint').text()).toBe('Apps registered here sign people in.')
+      expect(wrapper.find('.t-crud-empty-cta').exists()).toBe(true)
+    })
+
+    it("keeps the generic line for a search miss: the page's empty text describes an empty page", () => {
+      const state = makeCreatableEmptyState()
+      state.query.value = { ...state.query.value, searchText: 'zzz' }
+      const wrapper = mount(TTableRenderer, {
+        props: { state, emptyText: 'No apps yet', emptyHint: 'Apps registered here sign people in.', translate: (k: string) => k },
+        global: { stubs },
+      })
+      expect(wrapper.text()).toContain('admin.crud.empty')
+      expect(wrapper.text()).not.toContain('No apps yet')
+      expect(wrapper.find('.t-list-empty__hint').exists()).toBe(false)
+    })
+
+    it('lets the #empty slot replace the whole empty state', () => {
+      const wrapper = mount(TTableRenderer, {
+        props: { state: makeCreatableEmptyState() },
+        slots: { empty: '<p class="mine">Nothing here yet</p>' },
+        global: { stubs },
+      })
+      expect(wrapper.find('.mine').exists()).toBe(true)
+      expect(wrapper.find('.t-crud-empty-cta').exists()).toBe(false)
+    })
+
     it('also offers the CTA in the mobile stacked card list', async () => {
       setViewport(375)
       const state = makeCreatableEmptyState()

@@ -49,6 +49,8 @@ public class UsageLogDto
 {
     /// <summary>Log ID</summary>
     public Guid Id { get; set; }
+    /// <summary>User the usage is metered to (null = not any user's)</summary>
+    public Guid? UserId { get; set; }
     /// <summary>Agent ID</summary>
     public Guid? AgentId { get; set; }
     /// <summary>Thread ID</summary>
@@ -100,6 +102,8 @@ public class UsageLogQueryDto : PagedQueryDto
     public bool? IsSuccess { get; set; }
     /// <summary>Agent ID filter</summary>
     public Guid? AgentId { get; set; }
+    /// <summary>User filter: rows metered to this user</summary>
+    public Guid? UserId { get; set; }
 }
 
 /// <summary>

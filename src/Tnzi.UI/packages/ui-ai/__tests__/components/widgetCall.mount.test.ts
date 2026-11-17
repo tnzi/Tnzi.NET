@@ -84,7 +84,7 @@ describe('a widget call', () => {
     const frame = el.querySelector('iframe.t-widget-frame__iframe') as HTMLIFrameElement;
     expect(frame).not.toBeNull();
     expect(frame.getAttribute('src')).toBe(RUNNER);
-    expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-forms');
     expect(frame.getAttribute('title')).toBe('Usage left');
     expect(el.querySelector('.t-widget__title')?.textContent).toBe('Usage left');
     expect(el.querySelector('.t-tool-run__kept .t-widget')).not.toBeNull();
@@ -125,12 +125,15 @@ describe('a widget call', () => {
     const el = await mount([widget()]);
     (el.querySelector(`.t-widget__action[aria-label="${en.widget.expand}"]`) as HTMLButtonElement).click();
     await nextTick();
-    const dialog = document.body.querySelector('.t-widget-overlay [role="dialog"]');
-    expect(dialog?.getAttribute('aria-label')).toBe('Usage left');
-    expect(dialog?.querySelector('iframe')?.getAttribute('sandbox')).toBe('allow-scripts');
-    (dialog?.querySelector(`[aria-label="${en.widget.close}"]`) as HTMLButtonElement).click();
+    // The larger view is the package's TDialog, named by its title.
+    const dialog = document.body.querySelector('.t-dialog-host [role="dialog"]');
+    const titleId = dialog?.getAttribute('aria-labelledby');
+    expect(titleId && document.getElementById(titleId)?.textContent).toBe('Usage left');
+    expect(dialog?.querySelector('.t-dialog__body--flush iframe')?.getAttribute('sandbox')).toBe('allow-scripts allow-forms');
+    (dialog?.querySelector(`.t-dialog__close[aria-label="${en.common.close}"]`) as HTMLButtonElement).click();
     await nextTick();
-    expect(document.body.querySelector('.t-widget-overlay')).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.body.querySelector('.t-dialog-host')).toBeNull();
   });
 });
 

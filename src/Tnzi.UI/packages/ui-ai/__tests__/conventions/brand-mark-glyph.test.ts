@@ -33,7 +33,7 @@ describe('brand mark glyph size', () => {
   });
 
   it('the token is declared with its default', () => {
-    const sheet = readFileSync(resolve(pkgRoot, 'src/styles/index.css'), 'utf8');
+    const sheet = readFileSync(resolve(pkgRoot, 'src/styles/tokens.css'), 'utf8');
     expect(sheet).toMatch(/--tnzi-ai-brand-mark-glyph-size:\s*18px/);
   });
 });

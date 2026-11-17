@@ -4,16 +4,20 @@
  *
  * Renders image thumbnails and file cards for message attachments: ones still in memory
  * (just sent, carrying their data) and stored ones (an `attachmentId`, read through the
- * render context's resolver).
+ * render context's resolver). Its images are one set in the full-size viewer.
  */
 
 import type { MessageAttachment } from '../../headless/useChat';
 import TAttachmentImage from './TAttachmentImage.vue';
 import TFileCard from './TFileCard.vue';
+import { provideImageGroup } from './image-group';
 
 defineProps<{
   attachments: MessageAttachment[];
 }>();
+
+/* The message's images are one set in the full-size viewer. */
+provideImageGroup();
 
 function isImage(attachment: MessageAttachment): boolean {
   if (attachment.type === 'image') return true;
@@ -38,7 +42,7 @@ function getImageSrc(attachment: MessageAttachment): string | null {
         v-if="isImage(attachment)"
         :attachment-id="attachment.attachmentId"
         :src="getImageSrc(attachment)"
-        :alt="attachment.fileName ?? 'Image'"
+        :alt="attachment.fileName"
       />
       <TFileCard
         v-else

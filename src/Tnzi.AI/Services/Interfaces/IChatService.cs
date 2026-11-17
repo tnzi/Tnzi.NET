@@ -34,6 +34,24 @@ public interface IChatService
         => Task.FromResult(Result.Failure("Run not found.", 404, ErrorCodes.ChatRunNotFound));
 
     /// <summary>
+    /// 停下线程里的单个任务（外部 agent 派出的子 agent、在后台跑的命令），不停这一轮。线程不存在或不是 <paramref name="userId"/> 的时 404，
+    /// 没有正在跑的运行时 409，这个 CLI 做不到时 501（那时只能停整轮）。
+    /// </summary>
+    Task<Result> StopTaskAsync(Guid threadId, Guid userId, string taskId, CancellationToken ct = default)
+        => Task.FromResult(Result.Failure("No run is going on in this conversation.", 409, ErrorCodes.ChatNoActiveRun));
+
+    /// <summary>
+    /// 线程里还在等回答的请求（权限、问题、计划），最早的在前：刷新之后界面据此找回还在等的卡片。
+    /// 线程不存在或不是 <paramref name="userId"/> 的时 404。
+    /// </summary>
+    Task<Result<List<ChatPermissionRequestDto>>> GetPendingPermissionsAsync(Guid threadId, Guid userId, CancellationToken ct = default)
+        => Task.FromResult(Result<List<ChatPermissionRequestDto>>.Success([]));
+
+    /// <summary>一次运行里还在等回答的请求，最早的在前；调用者看不见这次运行时 404。</summary>
+    Task<Result<List<ChatPermissionRequestDto>>> GetRunPendingPermissionsAsync(Guid runId, CancellationToken ct = default)
+        => Task.FromResult(Result.Failure<List<ChatPermissionRequestDto>>("Run not found.", 404, ErrorCodes.ChatRunNotFound));
+
+    /// <summary>
     /// 回答一次运行的一个权限请求（流上的 <c>permission_request</c> 事件）：只有发起这一轮的人（或持 <c>ai.cliRun.execute</c> 的人）能答，
     /// 其余 404；选项不在请求给的那些里 400；请求已有结局 409。
     /// </summary>

@@ -20,7 +20,7 @@
  * stylesheet defaults - it is not "undo my edits".
  */
 import { computed, inject, ref, watch } from 'vue';
-import { THEME_CONTEXT_KEY } from '@tnzi/ui';
+import { THEME_CONTEXT_KEY } from '@tnzi/ui/headless';
 import TSettingRow from './TSettingRow.vue';
 import TSettingGroup from './TSettingGroup.vue';
 import type { AiThemeSnapshot } from '../../theme/snapshot';
@@ -271,7 +271,8 @@ const canManage = computed(() => props.theme.canManage.value);
 }
 
 .t-appearance-admin__text:focus {
-  border-color: var(--tnzi-ai-accent);
+  border-color: var(--tnzi-ai-focus-border);
+  box-shadow: var(--tnzi-ai-focus-ring);
 }
 
 .t-appearance-admin__actions {

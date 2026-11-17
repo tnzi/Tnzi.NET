@@ -3,4 +3,4 @@
  * mobile can reuse the same safety wrapper; admin call-sites keep their
  * existing import path through this barrel.
  */
-export { useSafeMessage } from '@tnzi/ui'
+export { useSafeMessage } from '../../headless/useSafeMessage'

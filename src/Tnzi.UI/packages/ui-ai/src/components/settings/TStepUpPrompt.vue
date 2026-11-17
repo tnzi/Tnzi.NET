@@ -15,8 +15,9 @@
  * is replayed once. Cancel leaves the challenge as the page's visible error.
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { NButton, NInput } from 'naive-ui'
 import { DEFAULT_OTP_CODE_LENGTH, type StepUpMethod, type StepUpPromptController } from '@tnzi/core/services/identity'
+import { isImeComposing } from '@tnzi/core/utils'
+import TButton from '../controls/TButton.vue'
 import { useAiI18n, formatAiMessage } from '../../i18n'
 
 const props = defineProps<{
@@ -69,9 +70,18 @@ const canResend = computed(() => props.prompt.method === 'sms' || props.prompt.m
 const inCodeFlow = computed(() => props.prompt.method !== null)
 const verifying = computed(() => inCodeFlow.value && props.prompt.stage === 'busy')
 
+const canSubmit = computed(() => Boolean(code.value.trim()) && !props.prompt.busy)
+
 async function submit(): Promise<void> {
   await props.prompt.submitCode(code.value)
   if (props.prompt.error) code.value = ''
+}
+
+/* Enter submits the code, except the Enter that commits an input method's
+   composition (Safari sends it after `compositionend`). */
+function onCodeEnter(event: KeyboardEvent): void {
+  if (isImeComposing(event) || !canSubmit.value) return
+  void submit()
 }
 </script>
 
@@ -82,16 +92,15 @@ async function submit(): Promise<void> {
 
     <!-- Stage: choose a method -->
     <div v-if="!inCodeFlow" class="t-step-up__methods">
-      <NButton
+      <TButton
         v-for="method in prompt.methods"
         :key="method"
-        size="small"
         :loading="prompt.stage === 'busy'"
         :disabled="prompt.busy"
         @click="prompt.choose(method)"
       >
         {{ methodLabel[method] }}
-      </NButton>
+      </TButton>
       <p v-if="prompt.stage === 'choose' && !prompt.canVerify" class="t-settings-field__hint">
         {{ t.settings.stepUpNoMethods }}
       </p>
@@ -100,42 +109,45 @@ async function submit(): Promise<void> {
     <!-- Stage: enter the code -->
     <div v-else class="t-step-up__code">
       <p class="t-settings-field__hint">{{ codeHint }}</p>
-      <NInput
-        v-model:value="code"
-        class="t-settings-field__control"
-        size="small"
+      <input
+        v-model="code"
+        class="t-input t-input--md t-input--code t-step-up__input"
+        type="text"
+        inputmode="numeric"
+        autocomplete="one-time-code"
+        spellcheck="false"
         :maxlength="codeLength"
         :disabled="prompt.busy"
-        :status="prompt.error ? 'error' : undefined"
+        :aria-invalid="prompt.error ? 'true' : undefined"
         :placeholder="t.settings.stepUpCodePlaceholder"
-        @keyup.enter="submit"
+        :aria-label="t.settings.stepUpCodePlaceholder"
+        @keydown.enter="onCodeEnter"
       />
       <div class="t-step-up__links">
-        <NButton text size="small" :disabled="prompt.busy" @click="prompt.back()">
+        <TButton variant="link" :disabled="prompt.busy" @click="prompt.back()">
           {{ t.settings.stepUpBack }}
-        </NButton>
-        <NButton v-if="canResend" text size="small" :disabled="prompt.busy" @click="prompt.resendCode()">
+        </TButton>
+        <TButton v-if="canResend" variant="link" :disabled="prompt.busy" @click="prompt.resendCode()">
           {{ t.settings.stepUpResend }}
-        </NButton>
+        </TButton>
       </div>
     </div>
 
     <p v-if="prompt.error" class="t-settings-field__error" role="alert">{{ prompt.error }}</p>
 
     <div class="t-settings-field__actions">
-      <NButton size="small" :disabled="prompt.stage === 'busy'" @click="prompt.cancel()">
+      <TButton :disabled="prompt.stage === 'busy'" @click="prompt.cancel()">
         {{ t.settings.stepUpCancel }}
-      </NButton>
-      <NButton
+      </TButton>
+      <TButton
         v-if="inCodeFlow"
-        size="small"
-        type="primary"
+        variant="primary"
         :loading="verifying"
-        :disabled="!code.trim() || prompt.busy"
+        :disabled="!canSubmit"
         @click="submit"
       >
         {{ t.settings.stepUpVerify }}
-      </NButton>
+      </TButton>
     </div>
   </section>
 </template>
@@ -169,6 +181,9 @@ async function submit(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.t-step-up__input {
+  max-width: 220px;
 }
 .t-step-up__links {
   display: flex;

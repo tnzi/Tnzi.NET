@@ -12,12 +12,14 @@ public class AiUtilityService : IAiUtility
     private readonly IOptionsMonitor<AiUtilityOptions> _options;
     private readonly ILogger<AiUtilityService> _logger;
     private readonly IChatClientProvider? _inlineClientProvider;
+    private readonly IOptionsMonitor<AIOptions>? _aiOptions;
 
     public AiUtilityService(
         IChatClientFactory chatClientFactory,
         IOptionsMonitor<AiUtilityOptions> options,
         ILogger<AiUtilityService>? logger = null,
-        IEnumerable<IChatClientProvider>? chatClientProviders = null)
+        IEnumerable<IChatClientProvider>? chatClientProviders = null,
+        IOptionsMonitor<AIOptions>? aiOptions = null)
     {
         _chatClientFactory = Check.NotNull(chatClientFactory);
         _options = Check.NotNull(options);
@@ -25,22 +27,57 @@ public class AiUtilityService : IAiUtility
         // 与 ChatClientFactory 的索引规则一致：同名时后注册的覆盖先注册的
         _inlineClientProvider = chatClientProviders?.LastOrDefault(
             p => string.Equals(p.ProviderName, InlineProtocol, StringComparison.OrdinalIgnoreCase));
+        _aiOptions = aiOptions;
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// 只看配置来源的提供商（<c>IChatClientFactory.GetAvailableProviders</c>）。
-    /// 数据库里登记的 <c>Provider</c> 实体不计入 —— 本属性是同步的、不查库，
-    /// 于是「只在 admin 里配了提供商」的部署会被低报为不可用。方向刻意如此：
-    /// 少显示一个本可用的入口，好过显示一个点了没反应的入口。
+    /// 问的是 <see cref="ExecuteAsync"/> 不带提供商时会用的那一个：<c>AI:DefaultProvider</c> 经
+    /// <see cref="IChatClientFactory.IsProviderAvailable"/> 解析，与 <see cref="IChatClientFactory.GetChatClient"/>
+    /// 同一口径 —— 调用方租户的启用行优先、其次 System 行（无租户上下文时只看 System 行）、最后 <c>AI:Providers</c>。
+    /// 于是只在管理端登记的提供商也算可用，而配置里有别的提供商、默认名却解析不到时不算。
     /// <para>
-    /// 已启用的提供商必有 API Key 是启动期保证的（<c>AIOptionsValidator</c> 对
-    /// <c>Enabled</c> 却缺 <c>ApiKey</c> 的条目直接 fail-fast），故此处无需再查。
+    /// 代价：工厂按（租户, 名字）缓存数据库解析结果 60 秒（未命中也缓存），每次读本属性是一次作用域创建加一次字典查找，
+    /// 库每分钟至多查一次；管理端增删改提供商时 <see cref="IChatClientFactory.InvalidateProvider"/> 清掉这个名字的缓存，
+    /// 刚登记的提供商下一次读就算数。
+    /// </para>
+    /// <para>
+    /// 解析过程中的任何异常都答 <see langword="false"/>、不向外抛：调用方拿它决定显示什么，一个查询属性不该让请求失败。
+    /// 数据库读失败时工厂本身已回落到配置，这里只兜工厂之外的意外（例如宿主关闭期间作用域已释放）。
     /// </para>
     /// </remarks>
-    public bool IsAvailable => _chatClientFactory.GetAvailableProviders().Count > 0;
+    public bool IsAvailable
+    {
+        get
+        {
+            try
+            {
+                return _chatClientFactory.IsProviderAvailable(_aiOptions?.CurrentValue.DefaultProvider ?? string.Empty);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "IAiUtility.IsAvailable could not resolve the default provider; reporting unavailable");
+                return false;
+            }
+        }
+    }
 
     public async Task<string?> ExecuteAsync(
+        string systemPrompt,
+        string userMessage,
+        AiUtilityCallOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await ExecuteForResponseAsync(systemPrompt, userMessage, options, cancellationToken);
+        return string.IsNullOrEmpty(response?.Text) ? null : response.Text;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 提供商是这次调用解析到的配置名（未指定时即 <c>AI:DefaultProvider</c>，与 <c>IChatClientFactory</c> 同一规则），
+    /// 模型取响应自报的模型、没报时取请求的模型；调用方自带提供商时提供商名是它的日志描述。
+    /// </remarks>
+    public async Task<AiUtilityResponse?> ExecuteForResponseAsync(
         string systemPrompt,
         string userMessage,
         AiUtilityCallOptions? options = null,
@@ -66,8 +103,8 @@ public class AiUtilityService : IAiUtility
             var response = await chatClient.GetResponseAsync(
                 BuildMessages(systemPrompt, userMessage), BuildChatOptions(options, defaults), cancellationToken);
 
-            var result = response.Text?.Trim();
-            return string.IsNullOrEmpty(result) ? null : result;
+            var provider = _aiOptions?.CurrentValue.DefaultProvider;
+            return ToResponse(response, provider, model ?? _chatClientFactory.GetDefaultModel(provider));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -95,7 +132,7 @@ public class AiUtilityService : IAiUtility
     /// 加载本模块不改变自带提供商的行为，只换掉发请求的那一层。
     /// </para>
     /// </remarks>
-    private async Task<string?> ExecuteInlineAsync(
+    private async Task<AiUtilityResponse?> ExecuteInlineAsync(
         string systemPrompt,
         string userMessage,
         AiUtilityCallOptions options,
@@ -150,8 +187,7 @@ public class AiUtilityService : IAiUtility
             var response = await chatClient.GetResponseAsync(
                 BuildMessages(systemPrompt, userMessage), BuildChatOptions(options, _options.CurrentValue), cancellationToken);
 
-            var result = response.Text?.Trim();
-            return string.IsNullOrEmpty(result) ? null : result;
+            return ToResponse(response, label, model);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -177,4 +213,39 @@ public class AiUtilityService : IAiUtility
         MaxOutputTokens = options?.MaxTokens ?? defaults.MaxTokens,
         Temperature = (float?)(options?.Temperature ?? defaults.Temperature)
     };
+
+    /// <summary>
+    /// 把一次 MEAI 响应投影成 <see cref="AiUtilityResponse"/>：文本、停止原因、用量、实际模型。
+    /// </summary>
+    /// <remarks>
+    /// 响应里带着工具调用时一律报 <see cref="AiUtilityFinishReason.ToolCalls"/>：utility 调用不给工具，
+    /// 模型仍要调就说明它没按要求作答，有的提供商此时的停止原因写的却是 stop。
+    /// </remarks>
+    internal static AiUtilityResponse ToResponse(ChatResponse response, string? provider, string? requestedModel)
+    {
+        var callsTools = response.Messages.SelectMany(m => m.Contents).OfType<FunctionCallContent>().Any();
+        var finishReason = callsTools
+            ? AiUtilityFinishReason.ToolCalls
+            : response.FinishReason switch
+            {
+                { } r when r == ChatFinishReason.Stop => AiUtilityFinishReason.Stop,
+                { } r when r == ChatFinishReason.Length => AiUtilityFinishReason.Length,
+                { } r when r == ChatFinishReason.ToolCalls => AiUtilityFinishReason.ToolCalls,
+                { } r when r == ChatFinishReason.ContentFilter => AiUtilityFinishReason.ContentFilter,
+                _ => AiUtilityFinishReason.Unknown
+            };
+
+        return new AiUtilityResponse
+        {
+            Text = response.Text?.Trim() ?? string.Empty,
+            FinishReason = finishReason,
+            Provider = string.IsNullOrWhiteSpace(provider) ? null : provider,
+            Model = string.IsNullOrWhiteSpace(response.ModelId) ? requestedModel : response.ModelId,
+            InputTokens = ToInt(response.Usage?.InputTokenCount),
+            OutputTokens = ToInt(response.Usage?.OutputTokenCount),
+            CachedInputTokens = ToInt(response.Usage?.CachedInputTokenCount)
+        };
+    }
+
+    private static int? ToInt(long? value) => value is { } v ? (int)Math.Clamp(v, 0, int.MaxValue) : null;
 }

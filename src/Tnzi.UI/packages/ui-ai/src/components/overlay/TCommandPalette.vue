@@ -8,10 +8,11 @@
  */
 import { computed, onMounted, onBeforeUnmount, ref, watch, toRef } from 'vue'
 import { Icon } from '@iconify/vue'
-import { useFocusTrap } from '@tnzi/ui'
+import { useFocusTrap } from '@tnzi/ui/headless'
 import { isImeComposing } from '@tnzi/core/utils'
 import { useCommandPalette, type CommandAction } from '../../headless/useCommandPalette'
 import { useBodyScrollLock } from '../../headless/useBodyScrollLock'
+import { useDialogLayer } from './layers'
 import { useAiI18n } from '../../i18n/index'
 
 const props = withDefaults(
@@ -51,6 +52,9 @@ useFocusTrap(dialogEl, () => palette.open.value, {
 })
 
 useBodyScrollLock(() => palette.open.value)
+
+/* On the dialog layer, above any dialog open under it (`TDialog` included). */
+const zIndex = useDialogLayer(() => palette.open.value)
 
 watch(
   () => props.modelValue,
@@ -110,7 +114,8 @@ onBeforeUnmount(() => {
     <transition name="t-cmdk-fade">
       <div
         v-if="palette.open.value"
-        class="t-cmdk-backdrop t-ai-scroll-scope"
+        class="t-cmdk-backdrop t-dialog-backdrop t-ai-scroll-scope"
+        :style="{ zIndex }"
         role="dialog"
         aria-modal="true"
         :aria-label="t.sidebar.commandPalette"
@@ -131,7 +136,7 @@ onBeforeUnmount(() => {
             <kbd class="t-cmdk__hint">{{ t.palette.escHint }}</kbd>
             <button
               type="button"
-              class="t-cmdk__close"
+              class="t-cmdk__close t-dialog__close"
               :aria-label="t.common.close"
               @click="palette.hide()"
             >
@@ -168,21 +173,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* The backdrop covers the whole viewport; the palette is placed below the
-   page's top inset (`--tnzi-overlay-inset-top`, a frameless window's title
-   bar), like the content of every overlay of this package. */
+/* The shared `.t-dialog-backdrop` covers the whole viewport and dims it; the
+   palette is placed below the page's top inset (`--tnzi-overlay-inset-top`, a
+   frameless window's title bar), like the content of every overlay of this
+   package. */
 .t-cmdk-backdrop {
-  position: fixed;
-  inset: 0;
-  box-sizing: border-box;
-  background: var(--tnzi-ai-backdrop, rgba(0, 0, 0, 0.6));
-  backdrop-filter: blur(var(--tnzi-ai-backdrop-blur, 4px));
-  -webkit-backdrop-filter: blur(var(--tnzi-ai-backdrop-blur, 4px));
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding-top: calc(var(--tnzi-overlay-inset-top, 0px) + 15vh);
-  z-index: 100;
 }
 .t-cmdk {
   width: min(650px, 92vw);
@@ -224,23 +223,10 @@ onBeforeUnmount(() => {
   color: var(--tnzi-ai-text-tertiary, rgba(0, 0, 0, 0.4));
   font-family: var(--tnzi-ai-font-mono, monospace);
 }
+/* The close button is the shared `.t-dialog__close`; it sits in the input row
+   rather than in a corner, so it pulls the row's right padding in. */
 .t-cmdk__close {
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--tnzi-ai-border, rgba(0, 0, 0, 0.08));
-  background: transparent;
-  border-radius: 999px;
-  color: var(--tnzi-ai-text-secondary, rgba(0, 0, 0, 0.55));
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  transition: background 120ms ease, color 120ms ease;
-}
-.t-cmdk__close:hover {
-  background: var(--tnzi-ai-hover, rgba(0, 0, 0, 0.04));
-  color: var(--tnzi-ai-text, #000);
+  margin-right: -6px;
 }
 .t-cmdk__results {
   max-height: 440px;

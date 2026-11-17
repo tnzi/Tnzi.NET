@@ -92,8 +92,10 @@
 <script setup lang="ts" generic="T">
 import { computed, ref, useSlots } from 'vue'
 import { NButton } from 'naive-ui'
-import { TModalShell, TDrawerShell, TSvgIcon } from '@tnzi/ui'
-import { provideFormHost } from '@tnzi/ui/headless'
+import { TSvgIcon } from '@tnzi/ui'
+import TModalShell from '../overlay/TModalShell.vue'
+import TDrawerShell from '../overlay/TDrawerShell.vue'
+import { provideFormHost } from '../../headless/form-host'
 import TDetailLayout from './TDetailLayout.vue'
 import { useRetainedFormState } from '../../headless/useFormModal'
 import type { UseDetailReturn, DetailSection, DetailLayout } from '../../headless/useDetail'

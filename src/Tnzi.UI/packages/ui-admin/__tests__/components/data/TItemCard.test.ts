@@ -144,4 +144,23 @@ describe('TItemCard', () => {
       expect(w.emitted('update:checked')).toEqual([[true]])
     })
   })
+
+  describe('meta line and tags', () => {
+    it('wraps each meta text so a long one truncates instead of widening the card, full text in the title', () => {
+      const long = 'Alexandria Ocasio-Montgomery · alexandria@verylongcompanyname.example.com'
+      const w = mountCard({ meta: [{ icon: 'mdi:account', text: long, title: `${long}\nid` }, { text: 'openid profile' }] })
+      const items = w.findAll('.t-item-card__meta-item')
+      expect(items).toHaveLength(2)
+      expect(items[0]!.find('.t-item-card__meta-text').text()).toBe(long)
+      expect(items[0]!.attributes('title')).toBe(`${long}\nid`)
+      expect(items[1]!.attributes('title')).toBe('openid profile')
+    })
+
+    it('gives a tag its tooltip', () => {
+      const w = mountCard({ tags: [{ label: 'Draft', title: 'Not sent to anyone yet' }, { label: 'Paid' }] })
+      const tags = w.findAll('.n-tag')
+      expect(tags[0]!.attributes('title')).toBe('Not sent to anyone yet')
+      expect(tags[1]!.attributes('title')).toBeUndefined()
+    })
+  })
 })

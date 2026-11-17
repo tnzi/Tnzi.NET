@@ -2,8 +2,9 @@
 /**
  * @experimental
  * TRecentsPage - every conversation, on a page of its own: a heading, Active
- * and Archived tabs, a search, then one row per conversation with when it was
- * last active ("5 hours ago", "4 days ago", then a date), in pages.
+ * and Archived tabs, a search, then one row per conversation with when the user
+ * last wrote in it ("5 hours ago", "4 days ago", then a date), in pages, in the
+ * list's order (awaiting the user, then running, then the rest; `compareThreads`).
  *
  * `TChatApp` shows it for `view === 'recents'` (the sidebar's View all) when it
  * has a `recents` controller; use it directly in a page of your own the same
@@ -12,7 +13,13 @@
  * those also change the conversation on screen, which the shell owns.
  *
  * Rows open on click; "..." holds rename (in place), archive / unarchive and
- * delete (confirmed in place, as in the sidebar).
+ * delete (confirmed in place, as in the sidebar). `threadIcon` puts the
+ * sidebar's origin icon at a row's end, in the place of the "...", on every page
+ * loaded: at rest the icon, on hover, focus, an open menu or a touch screen the
+ * "...". Every title starts at the same x. A conversation that awaits the user,
+ * is running or has an unread reply shows that in the same cell instead of its origin
+ * (`TThreadStatus`); on a touch screen, where the "..." always shows, just
+ * before it.
  */
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { Icon } from '@iconify/vue'
@@ -20,8 +27,11 @@ import { useDebounced } from '@tnzi/core/headless'
 import { isImeComposing } from '@tnzi/core/utils'
 import { useAiI18n } from '../../i18n/index'
 import TActionMenu, { type ActionMenuItem } from '../overlay/TActionMenu.vue'
-import { formatRecentActivity, type RecentThreadsController } from '../../headless/recents'
+import { formatRecentActivity, threadOrderTime, type RecentThreadsController } from '../../headless/recents'
 import type { ThreadItem } from './TThreadList.vue'
+import TThreadIcon from './TThreadIcon.vue'
+import TThreadStatus from './TThreadStatus.vue'
+import { resolveThreadIcon, type ThreadIcon, type ThreadIconResolver } from './thread-icon'
 
 const props = withDefaults(
   defineProps<{
@@ -39,6 +49,8 @@ const props = withDefaults(
     enableDelete?: boolean
     /** Inline delete prompt. Defaults to the current locale's. */
     confirmLabel?: string
+    /** Maps a thread to the icon before its title, or null for none (see `TThreadList`). */
+    threadIcon?: ThreadIconResolver
   }>(),
   {
     title: undefined,
@@ -46,6 +58,7 @@ const props = withDefaults(
     include: undefined,
     enableDelete: true,
     confirmLabel: undefined,
+    threadIcon: undefined,
   },
 )
 
@@ -62,6 +75,9 @@ const page = props.controller.page
 const heading = computed(() => props.title ?? t.value.chat.threadsLabel)
 const confirmText = computed(() => props.confirmLabel ?? t.value.chat.deleteConfirm)
 const rows = computed(() => (props.include ? page.threads.value.filter(props.include) : page.threads.value))
+/* Every loaded page goes through the resolver: `rows` holds them all. */
+const icons = computed(() => new Map(rows.value.map((thread) => [thread.id, resolveThreadIcon(props.threadIcon, thread)])))
+const iconOf = (thread: ThreadItem): ThreadIcon | null => icons.value.get(thread.id) ?? null
 
 onMounted(() => {
   void page.load()
@@ -128,7 +144,8 @@ const emptyText = computed(() => {
 // ---------------------------------------------------------------- rows
 
 const now = ref(new Date())
-const activity = (thread: ThreadItem) => formatRecentActivity(thread.updatedAt, now.value, t.value.recents.dateLocale)
+/* The time the list is ordered by: when the user last wrote (or the creation). */
+const activity = (thread: ThreadItem) => formatRecentActivity(threadOrderTime(thread), now.value, t.value.recents.dateLocale)
 
 function rowItems(thread: ThreadItem): ActionMenuItem[] {
   const items: ActionMenuItem[] = [
@@ -295,29 +312,45 @@ function confirmDelete(id: string): void {
               type="button"
               class="t-recents-page__open"
               :aria-current="thread.id === activeThreadId ? 'true' : undefined"
+              :title="iconOf(thread)?.label || undefined"
               @click="emit('select', thread.id)"
             >
-              <span class="t-recents-page__title">{{ thread.title }}</span>
+              <span class="t-recents-page__name">
+                <!-- Read before the title, as in the sidebar: "<origin> <title>". -->
+                <span v-if="iconOf(thread)?.label" class="sr-only">{{ iconOf(thread)!.label }}</span>
+                <span class="t-recents-page__title">{{ thread.title }}</span>
+                <span v-if="thread.awaitingOwner || thread.running || thread.unread" class="sr-only">{{ thread.awaitingOwner ? t.recents.threadAwaitingOwner : thread.running ? t.recents.threadRunning : t.recents.threadUnread }}</span>
+              </span>
               <span class="t-recents-page__time">{{ activity(thread) }}</span>
             </button>
-            <TActionMenu
-              :items="rowItems(thread)"
-              :label="t.recents.moreActions"
-              @update:open="(open) => onRowMenuOpen(thread.id, open)"
-              @select="(action) => onRowAction(thread, action)"
-            >
-              <template #trigger="{ toggle, attrs }">
-                <button
-                  type="button"
-                  class="t-recents-page__row-act"
-                  v-bind="attrs"
-                  :aria-label="t.recents.moreActions"
-                  @click="toggle"
-                >
-                  <Icon icon="lucide:ellipsis" />
-                </button>
-              </template>
-            </TActionMenu>
+            <TThreadStatus class="t-recents-page__touch-status" :awaiting="thread.awaitingOwner" :running="thread.running" :unread="thread.unread" />
+            <span class="t-recents-page__end">
+              <TThreadStatus
+                v-if="thread.awaitingOwner || thread.running || thread.unread"
+                class="t-recents-page__icon"
+                :awaiting="thread.awaitingOwner" :running="thread.running"
+                :unread="thread.unread"
+              />
+              <TThreadIcon v-else-if="iconOf(thread)" class="t-recents-page__icon" :spec="iconOf(thread)!" decorative />
+              <TActionMenu
+                :items="rowItems(thread)"
+                :label="t.recents.moreActions"
+                @update:open="(open) => onRowMenuOpen(thread.id, open)"
+                @select="(action) => onRowAction(thread, action)"
+              >
+                <template #trigger="{ toggle, attrs }">
+                  <button
+                    type="button"
+                    class="t-recents-page__row-act"
+                    v-bind="attrs"
+                    :aria-label="t.recents.moreActions"
+                    @click="toggle"
+                  >
+                    <Icon icon="lucide:ellipsis" />
+                  </button>
+                </template>
+              </TActionMenu>
+            </span>
           </template>
         </li>
       </ul>
@@ -416,8 +449,8 @@ function confirmDelete(id: string): void {
     box-shadow var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
 }
 .t-recents-page__search:focus-within {
-  border-color: var(--tnzi-ai-accent);
-  box-shadow: 0 0 0 3px var(--tnzi-ai-accent-soft);
+  border-color: var(--tnzi-ai-focus-border);
+  box-shadow: var(--tnzi-ai-focus-ring);
 }
 .t-recents-page__search-icon {
   flex-shrink: 0;
@@ -510,6 +543,41 @@ function confirmDelete(id: string): void {
   text-align: left;
   cursor: pointer;
 }
+.t-recents-page__name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+/* The row's end: the origin icon and the "..." stacked in one cell, so the
+   icon shows at rest and the "..." in its place on hover, focus, an open menu
+   or a touch screen. */
+.t-recents-page__end {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+}
+.t-recents-page__end > * {
+  grid-area: 1 / 1;
+}
+.t-recents-page__icon {
+  --t-thread-icon-box: 16px;
+  pointer-events: none;
+  transition: opacity var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
+}
+.t-recents-page__row:hover .t-recents-page__icon,
+.t-recents-page__row:focus-within .t-recents-page__icon,
+.t-recents-page__row.is-menu-open .t-recents-page__icon { opacity: 0; }
+@media (hover: none) {
+  .t-recents-page__icon { opacity: 0; }
+}
+/* A touch screen always shows the "...": the state moves just before it. */
+.t-recents-page__touch-status { display: none; }
+@media (hover: none) {
+  .t-recents-page__touch-status { display: block; margin-right: -4px; }
+}
 .t-recents-page__title {
   flex: 1;
   min-width: 0;
@@ -527,7 +595,6 @@ function confirmDelete(id: string): void {
   white-space: nowrap;
 }
 .t-recents-page__row-act {
-  flex-shrink: 0;
   width: 28px;
   height: 28px;
   border: none;

@@ -48,6 +48,8 @@ using Tnzi.Identity.Permissions;
 using Tnzi.Identity;
 using Tnzi.Identity.Organization.Permissions;
 using Tnzi.Identity.Organization;
+using Tnzi.Identity.OpenIdConnect;
+using Tnzi.Identity.OpenIdConnect.Permissions;
 using Tnzi.Localization.Permissions;
 using Tnzi.Localization;
 using Tnzi.Modules;
@@ -105,6 +107,7 @@ public class PermissionProviderRegistrationTests
     {
         { typeof(IdentityModule), typeof(IdentityPermissions) },
         { typeof(IdentityOrganizationModule), typeof(IdentityOrganizationPermissions) },
+        { typeof(IdentityOpenIdConnectModule), typeof(IdentityOpenIdConnectPermissions) },
         { typeof(AuthorizationModule), typeof(AuthorizationPermissions) },
         { typeof(SystemModule), typeof(SystemPermissions) },
         { typeof(StorageModule), typeof(StoragePermissions) },

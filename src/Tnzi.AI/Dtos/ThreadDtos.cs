@@ -13,6 +13,16 @@ public class AgentThreadDto
     public string? AgentName { get; set; }
     /// <summary>Thread title</summary>
     public string? Title { get; set; }
+    /// <summary>
+    /// True while an AI title is being generated for the thread: <see cref="Title"/> is the fallback and is about to change.
+    /// A client that shows the title can read the thread again shortly.
+    /// </summary>
+    public bool TitlePending { get; set; }
+    /// <summary>
+    /// Where the thread came from: a short value the application defines and writes when the thread is created
+    /// (for example <c>Email</c> or <c>Schedule</c>); null when the application declared none. The framework passes it through as is.
+    /// </summary>
+    public string? Origin { get; set; }
     /// <summary>Message count</summary>
     public int MessageCount { get; set; }
     /// <summary>Last activity time</summary>
@@ -21,6 +31,34 @@ public class AgentThreadDto
     public DateTime CreationTime { get; set; }
     /// <summary>When the thread was archived; null when it is not archived</summary>
     public DateTime? ArchivedTime { get; set; }
+    /// <summary>
+    /// Whether the thread shows in its owner's conversation lists. Written by server code only (<see cref="ThreadListing"/>);
+    /// the user-facing list never returns a thread that is not <see cref="ThreadListing.Listed"/>.
+    /// </summary>
+    public ThreadListing Listing { get; set; }
+    /// <summary>
+    /// A turn of the thread is going on on the server right now: a run of an external agent that is queued or working
+    /// (one that only waits on its background tasks after answering does not count). Turns of a built-in agent run on
+    /// the request that started them and are not reported here.
+    /// </summary>
+    public bool Running { get; set; }
+    /// <summary>
+    /// A turn of the thread is blocked waiting for its owner: a permission request, a question or a plan of an external
+    /// agent's live run that is still unanswered and unexpired, or anything an application declares through
+    /// <c>IThreadAwaitingOwnerProvider</c> (a confirmation card of its own). The list puts these threads first.
+    /// </summary>
+    public bool AwaitingOwner { get; set; }
+    /// <summary>
+    /// When the owner last sent a message in the thread (UTC); null when they never did, and the list then uses
+    /// <see cref="CreationTime"/>. A turn an application starts on the owner's behalf counts; replies, turn ends,
+    /// renames and read marks do not. The list orders each tier by this time (see <c>ThreadListSort</c>).
+    /// </summary>
+    public DateTime? LastUserMessageTime { get; set; }
+    /// <summary>
+    /// A server-side turn wrote a reply into the thread after its owner last saw it (<c>POST threads/{id}/read</c>):
+    /// the thread has something its owner has not read.
+    /// </summary>
+    public bool Unread { get; set; }
 }
 
 /// <summary>
@@ -33,6 +71,19 @@ public class CreateAgentThreadDto
     /// <summary>Thread title</summary>
     [MaxLength(200)]
     public string? Title { get; set; }
+    /// <summary>
+    /// Where the thread came from (<see cref="AgentThreadDto.Origin"/>): an application-defined value, stored as is.
+    /// It starts with a letter and uses only letters, digits, <c>_ . : -</c>; null or empty = none.
+    /// </summary>
+    [MaxLength(ThreadOrigin.MaxLength)]
+    public string? Origin { get; set; }
+    /// <summary>
+    /// Whether the new thread shows in its owner's conversation lists (<see cref="ThreadListing"/>). Default
+    /// <see cref="ThreadListing.Listed"/>. Server code only: never read from a request body, so a client cannot create
+    /// a thread kept out of the lists.
+    /// </summary>
+    [JsonIgnore]
+    public ThreadListing Listing { get; set; } = ThreadListing.Listed;
 }
 
 /// <summary>
@@ -54,14 +105,61 @@ public class ThreadListQueryDto : PagedQueryDto
     /// <summary>Keyword search (title)</summary>
     [MaxLength(100)]
     public string? Keyword { get; set; }
-    /// <summary>Start time filter (last activity at or after)</summary>
+    /// <summary>Start time filter: the owner's last message (creation when there is none) at or after</summary>
     public DateTime? StartTime { get; set; }
-    /// <summary>End time filter (last activity at or before)</summary>
+    /// <summary>End time filter: the owner's last message (creation when there is none) at or before</summary>
     public DateTime? EndTime { get; set; }
     /// <summary>Archive filter. Default <c>All</c> (no filter)</summary>
     public ThreadListStatus Status { get; set; } = ThreadListStatus.All;
-    /// <summary>Order of the list. Default <c>LastActivity</c> (most recent first)</summary>
-    public ThreadListSort Sort { get; set; } = ThreadListSort.LastActivity;
+    /// <summary>
+    /// Order inside each tier of the list (threads awaiting their owner, then running ones, then the rest).
+    /// Default <c>LastUserMessage</c> (the owner's most recent message first)
+    /// </summary>
+    public ThreadListSort Sort { get; set; } = ThreadListSort.LastUserMessage;
+    /// <summary>
+    /// Also return threads kept out of their owner's lists (<see cref="AgentThreadDto.Listing"/> other than
+    /// <see cref="ThreadListing.Listed"/>). Default false. Set by server code only (the admin thread list sets it);
+    /// never read from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public bool IncludeUnlisted { get; set; }
+}
+
+/// <summary>
+/// 当前用户线程的关注状态查询 DTO
+/// </summary>
+public class ThreadAttentionQueryDto
+{
+    /// <summary>
+    /// Agent ID set filter: only threads of these agents (as <see cref="ThreadListQueryDto.AgentIds"/>). Null or empty = no filter.
+    /// </summary>
+    [MaxLength(50)]
+    public List<Guid>? AgentIds { get; set; }
+    /// <summary>Creator ID filter (set by the user-facing API to the current user)</summary>
+    [JsonIgnore]
+    public Guid? CreatorId { get; set; }
+}
+
+/// <summary>
+/// 当前用户线程的关注状态：哪些线程在等主人、哪些有一轮正在服务端跑、哪些有还没看过的回答
+/// （与 <see cref="AgentThreadDto.AwaitingOwner"/> / <see cref="AgentThreadDto.Running"/> / <see cref="AgentThreadDto.Unread"/> 同一判定）。
+/// </summary>
+public class ThreadAttentionDto
+{
+    /// <summary>Most thread ids each list carries; the counts are exact beyond it</summary>
+    public const int MaxThreadIds = 200;
+    /// <summary>How many threads have a turn blocked waiting for their owner</summary>
+    public int AwaitingOwnerCount { get; set; }
+    /// <summary>How many threads have a turn going on on the server</summary>
+    public int RunningCount { get; set; }
+    /// <summary>How many threads have a reply their owner has not seen</summary>
+    public int UnreadCount { get; set; }
+    /// <summary>The threads waiting for their owner, in list order (at most <see cref="MaxThreadIds"/>)</summary>
+    public List<Guid> AwaitingOwnerThreadIds { get; set; } = [];
+    /// <summary>The threads with a turn going on, in list order (at most <see cref="MaxThreadIds"/>)</summary>
+    public List<Guid> RunningThreadIds { get; set; } = [];
+    /// <summary>The threads with an unseen reply, most recent reply first (at most <see cref="MaxThreadIds"/>)</summary>
+    public List<Guid> UnreadThreadIds { get; set; } = [];
 }
 
 /// <summary>
@@ -88,6 +186,16 @@ public class AgentThreadDetailDto
     public string? AgentName { get; set; }
     /// <summary>Thread title</summary>
     public string? Title { get; set; }
+    /// <summary>
+    /// True while an AI title is being generated for the thread: <see cref="Title"/> is the fallback and is about to change.
+    /// A client that shows the title can read the thread again shortly.
+    /// </summary>
+    public bool TitlePending { get; set; }
+    /// <summary>
+    /// Where the thread came from: a short value the application defines and writes when the thread is created
+    /// (for example <c>Email</c> or <c>Schedule</c>); null when the application declared none. The framework passes it through as is.
+    /// </summary>
+    public string? Origin { get; set; }
     /// <summary>Thread metadata (JSON)</summary>
     public string? Metadata { get; set; }
     /// <summary>Total message count</summary>
@@ -98,6 +206,34 @@ public class AgentThreadDetailDto
     public DateTime CreationTime { get; set; }
     /// <summary>When the thread was archived; null when it is not archived</summary>
     public DateTime? ArchivedTime { get; set; }
+    /// <summary>
+    /// Whether the thread shows in its owner's conversation lists. Written by server code only (<see cref="ThreadListing"/>);
+    /// the user-facing list never returns a thread that is not <see cref="ThreadListing.Listed"/>.
+    /// </summary>
+    public ThreadListing Listing { get; set; }
+    /// <summary>
+    /// A turn of the thread is going on on the server right now: a run of an external agent that is queued or working
+    /// (one that only waits on its background tasks after answering does not count). Turns of a built-in agent run on
+    /// the request that started them and are not reported here.
+    /// </summary>
+    public bool Running { get; set; }
+    /// <summary>
+    /// A turn of the thread is blocked waiting for its owner: a permission request, a question or a plan of an external
+    /// agent's live run that is still unanswered and unexpired, or anything an application declares through
+    /// <c>IThreadAwaitingOwnerProvider</c> (a confirmation card of its own). The list puts these threads first.
+    /// </summary>
+    public bool AwaitingOwner { get; set; }
+    /// <summary>
+    /// When the owner last sent a message in the thread (UTC); null when they never did, and the list then uses
+    /// <see cref="CreationTime"/>. A turn an application starts on the owner's behalf counts; replies, turn ends,
+    /// renames and read marks do not. The list orders each tier by this time (see <c>ThreadListSort</c>).
+    /// </summary>
+    public DateTime? LastUserMessageTime { get; set; }
+    /// <summary>
+    /// A server-side turn wrote a reply into the thread after its owner last saw it (<c>POST threads/{id}/read</c>):
+    /// the thread has something its owner has not read.
+    /// </summary>
+    public bool Unread { get; set; }
     /// <summary>Recent messages</summary>
     public List<ThreadMessageDto> Messages { get; set; } = [];
 }
@@ -187,6 +323,11 @@ public class ThreadExportDto
     public string? AgentName { get; set; }
     /// <summary>Thread title</summary>
     public string? Title { get; set; }
+    /// <summary>
+    /// Where the thread came from: a short value the application defines and writes when the thread is created
+    /// (for example <c>Email</c> or <c>Schedule</c>); null when the application declared none. The framework passes it through as is.
+    /// </summary>
+    public string? Origin { get; set; }
     /// <summary>Thread metadata (JSON)</summary>
     public string? Metadata { get; set; }
     /// <summary>Total message count</summary>

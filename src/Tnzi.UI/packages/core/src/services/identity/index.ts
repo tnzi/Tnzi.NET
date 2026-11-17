@@ -14,3 +14,4 @@ export * from './session-security';
 
 export * from './step-up-prompt';
 export * from './session-claims';
+export * from './avatar';

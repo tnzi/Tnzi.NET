@@ -66,6 +66,49 @@ public class CliRunPlacementEnqueueTests : IntegratedTestBase<CliThreadOwnership
     }
 
     [Fact]
+    public async Task APlacementMeteredElsewhere_IsQueuedPastAReachedUsageLimit_AndTheRunSaysSo()
+    {
+        await SeedBindingAsync();
+        var limits = new Mock<IUsageLimitService>();
+        limits.Setup(l => l.CheckAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UsageLimitDenialDto { Window = UsageLimitWindow.Weekly });
+        var user = Guid.NewGuid();
+        _resolver.Setup(r => r.ResolveAsync(It.IsAny<CliRunPlacementRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CliRunPlacement { TargetId = "ws-alice", UsageMeteredElsewhere = true });
+
+        var own = await EnqueueAsync(new CliRunRequestDto { AgentId = AgentId, Prompt = "x", UserId = user }, usageLimits: limits.Object);
+
+        own.Succeeded.ShouldBeTrue(own.Message);
+        (await DbContext.Set<CliRun>().AsNoTracking().SingleAsync(r => r.Id == own.Data)).UsageMeteredElsewhere.ShouldBeTrue();
+        limits.Verify(l => l.CheckAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        // The control: the same placement on the platform's account is turned away.
+        _resolver.Setup(r => r.ResolveAsync(It.IsAny<CliRunPlacementRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CliRunPlacement { TargetId = "ws-alice" });
+        var platform = await EnqueueAsync(new CliRunRequestDto { AgentId = AgentId, Prompt = "y", UserId = user }, usageLimits: limits.Object);
+        platform.Code.ShouldBe(429);
+    }
+
+    /// <summary>
+    /// An in-process caller with nobody signed in (a thread's message queue sending what a user queued) enqueues on behalf
+    /// of a user: the run is that user's, so they see and reattach to it and its usage counts against them.
+    /// </summary>
+    [Fact]
+    public async Task AnInProcessCallerOnBehalfOfAUser_RecordsThatUserAsTheRunsCreator()
+    {
+        await SeedBindingAsync();
+        var user = Guid.NewGuid();
+
+        var onBehalf = await EnqueueAsync(new CliRunRequestDto { AgentId = AgentId, Prompt = "x", UserId = user }, resolver: false);
+        var nobody = await EnqueueAsync(new CliRunRequestDto { AgentId = AgentId, Prompt = "y" }, resolver: false);
+
+        onBehalf.Succeeded.ShouldBeTrue(onBehalf.Message);
+        (await DbContext.Set<CliRun>().AsNoTracking().SingleAsync(r => r.Id == onBehalf.Data)).CreatorId.ShouldBe(user);
+        (await DbContext.Set<CliRun>().AsNoTracking().SingleAsync(r => r.Id == nobody.Data)).CreatorId
+            .ShouldBeNull("a background run for nobody has no creator, as before");
+    }
+
+    [Fact]
     public async Task ASecondRunOnTheSameWorkspace_UsesTheSameRuntimeRow()
     {
         await SeedBindingAsync();
@@ -149,7 +192,7 @@ public class CliRunPlacementEnqueueTests : IntegratedTestBase<CliThreadOwnership
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    private async Task<Result<Guid>> EnqueueAsync(CliRunRequestDto request, bool resolver = true, string? minimumVersion = null)
+    private async Task<Result<Guid>> EnqueueAsync(CliRunRequestDto request, bool resolver = true, string? minimumVersion = null, IUsageLimitService? usageLimits = null)
     {
         var options = new CliAgentOptions { Enabled = true };
         options.Providers["claude"] = new CliProviderOptions { MinimumVersion = minimumVersion };
@@ -168,7 +211,8 @@ public class CliRunPlacementEnqueueTests : IntegratedTestBase<CliThreadOwnership
             ServiceProvider,
             providerRegistry: new CliProviderRegistry(monitor),
             placementResolver: resolver ? _resolver.Object : null,
-            queueSignal: new CliRunQueueSignal());
+            queueSignal: new CliRunQueueSignal(),
+            usageLimits: usageLimits);
 
         return await dispatcher.EnqueueAsync(request);
     }

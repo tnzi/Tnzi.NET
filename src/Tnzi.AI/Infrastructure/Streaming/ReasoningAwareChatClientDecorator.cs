@@ -93,7 +93,7 @@ public sealed class ReasoningAwareChatClientDecorator : IChatClient
 
         try
         {
-            await foreach (var update in _inner.GetStreamingResponseAsync(chatMessages, options, cancellationToken))
+            await foreach (var update in _inner.GetStreamingResponseAsync(chatMessages, SamplingParameterGuard.Apply(options, _model), cancellationToken))
             {
                 // Drain reasoning accumulated before this MEAI update.
                 // Reasoning bytes are written to the channel BEFORE being written to the Pipe,
@@ -138,7 +138,7 @@ public sealed class ReasoningAwareChatClientDecorator : IChatClient
 
         try
         {
-            return await _inner.GetResponseAsync(chatMessages, options, cancellationToken);
+            return await _inner.GetResponseAsync(chatMessages, SamplingParameterGuard.Apply(options, _model), cancellationToken);
         }
         finally
         {

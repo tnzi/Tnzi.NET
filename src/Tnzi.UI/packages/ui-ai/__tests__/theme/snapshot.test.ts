@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { nextTick } from 'vue';
-import { createThemeContext, mergeThemeSettings } from '@tnzi/ui';
+import { createThemeContext } from '@tnzi/ui/headless';
+import { mergeThemeSettings } from '@tnzi/ui/theme';
 import {
   AI_THEME_SNAPSHOT_VERSION,
   applyAiThemeSnapshot,
@@ -131,7 +132,7 @@ describe('applyAiThemeSnapshot', () => {
 /**
  * The published brand colour. `--tnzi-primary` alone is not the brand: the
  * accent tints derive from `--tnzi-primary-rgb`, the palette levels feed the
- * atoms, and the naive controls take theirs from the host theme context. And a
+ * atoms. And a
  * host context re-writes `--tnzi-primary` itself on every change to its
  * settings (a light/dark switch included), so an inline write next to it was
  * undone by the next mode switch.

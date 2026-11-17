@@ -43,6 +43,18 @@ public abstract class TnziDbContext<TDbContext> : DbContext
 
     public bool IsMultiTenancyEnabled => _multiTenancyEnabled;
 
+    /// <remarks>
+    /// 经 <see cref="TnziDbContextHelper.OnConfiguring"/> 挂上 <see cref="Interceptors.PostgreSqlNulCharacterInterceptor"/>：
+    /// PostgreSQL 的文本列存不了 U+0000，一个 NUL 就让整次写入失败。挂在基类而不是注册漏斗上，是为了不论上下文怎么来的
+    /// （<c>AddTnziDbContext</c>、裸 <c>AddDbContext</c>、设计期工厂、手工构造）都一样。
+    /// 覆写本方法的派生类要调 <c>base.OnConfiguring</c>。
+    /// </remarks>
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+        TnziDbContextHelper.OnConfiguring(optionsBuilder);
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

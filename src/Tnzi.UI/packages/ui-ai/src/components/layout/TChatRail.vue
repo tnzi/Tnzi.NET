@@ -14,12 +14,22 @@
  *
  * Every nav group's items are rendered, not just the primary ones: collapsing
  * the sidebar must not put a destination out of reach. Groups are separated by
- * a rule since their headings cannot fit.
+ * a rule since their headings cannot fit. A destination that is a list rather
+ * than a page (the recent conversations) goes in the `after-groups` slot as a
+ * `TRailFlyout`, below a rule of its own.
+ *
+ * Labels are gone at this width, so every control names itself twice: its
+ * accessible name and a tooltip beside it (`TRailButton` / `vTooltip`). The
+ * brand button's tooltip is `expandLabel`. Put `TRailButton` in the slots for
+ * a product's own entries so they behave the same.
  */
+import { useSlots } from 'vue'
 import { Icon } from '@iconify/vue'
 import type { NavItem, NavGroup } from './TSidebarNav.vue'
+import TRailButton from './TRailButton.vue'
+import { vTooltip } from '../../headless/tooltip'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     groups?: ReadonlyArray<NavGroup>
     /** `'monogram'` renders the built-in T-mark; any other string is an
@@ -38,6 +48,9 @@ const emit = defineEmits<{
   expand: []
   select: [item: NavItem, group: NavGroup]
 }>()
+
+const slots = useSlots()
+const hasAnyGroupItem = (): boolean => props.groups.some((group) => group.items.length > 0)
 </script>
 
 <template>
@@ -45,6 +58,7 @@ const emit = defineEmits<{
     <button
       type="button"
       class="t-chat-rail__brand"
+      v-tooltip="{ text: expandLabel, side: 'right' }"
       :aria-label="expandLabel"
       @click="emit('expand')"
     >
@@ -73,17 +87,23 @@ const emit = defineEmits<{
       <slot name="top" />
       <template v-for="(group, groupIndex) in groups" :key="group.id">
         <div v-if="groupIndex > 0" class="t-chat-rail__sep" />
-        <button
+        <TRailButton
           v-for="item in group.items"
           :key="item.id"
-          type="button"
           class="t-chat-rail__btn"
-          :class="{ 'is-active': item.active }"
-          :aria-label="item.label"
+          :label="item.label"
+          :icon="item.icon"
+          :icon-motion="item.iconMotion"
+          :active="item.active"
+          :badge="item.badge"
+          :badge-tone="item.badgeTone"
+          :aria-current="item.active ? 'page' : undefined"
           @click="emit('select', item, group)"
-        >
-          <Icon v-if="item.icon" :icon="item.icon" />
-        </button>
+        />
+      </template>
+      <template v-if="slots['after-groups']">
+        <div v-if="hasAnyGroupItem() || slots.top" class="t-chat-rail__sep" />
+        <slot name="after-groups" />
       </template>
     </div>
 
@@ -144,8 +164,28 @@ const emit = defineEmits<{
   opacity: 0;
   transition: opacity var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
 }
-.t-chat-rail__brand:hover .t-chat-rail__brand-logo { opacity: 0; }
-.t-chat-rail__brand:hover .t-chat-rail__brand-expand { opacity: 1; }
+.t-chat-rail__brand-logo {
+  transition: opacity var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
+}
+/* Keyboard focus shows the button form too: the accessible name is the
+   action, so the icon that says it has to be what a keyboard user sees. */
+.t-chat-rail__brand:focus-visible {
+  outline: var(--tnzi-ai-focus-outline);
+  outline-offset: 1px;
+}
+.t-chat-rail__brand:focus-visible .t-chat-rail__brand-logo { opacity: 0; }
+.t-chat-rail__brand:focus-visible .t-chat-rail__brand-expand { opacity: 1; }
+/* Hover swaps only where the primary pointer can hover: a touch browser keeps
+   `:hover` on the last tapped spot, which would leave the expand icon showing
+   in place of the logo. */
+@media (hover: hover) {
+  .t-chat-rail__brand:hover .t-chat-rail__brand-logo { opacity: 0; }
+  .t-chat-rail__brand:hover .t-chat-rail__brand-expand { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-chat-rail__brand-logo,
+  .t-chat-rail__brand-expand { transition: none; }
+}
 
 .t-chat-rail__group {
   display: flex;
@@ -158,30 +198,6 @@ const emit = defineEmits<{
 .t-chat-rail__group--bottom {
   margin-top: auto;
   padding-top: 8px;
-}
-.t-chat-rail__btn {
-  width: 40px;
-  height: 40px;
-  border: none;
-  background: transparent;
-  border-radius: 10px;
-  color: var(--tnzi-ai-text-secondary);
-  font-size: 19px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing),
-              color var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
-}
-.t-chat-rail__btn:hover {
-  background: var(--tnzi-ai-hover);
-  color: var(--tnzi-ai-text);
-}
-.t-chat-rail__btn.is-active {
-  background: var(--tnzi-ai-accent-soft);
-  color: var(--tnzi-ai-accent-text);
 }
 /* Stands in for the group headings that cannot fit at 56px. */
 .t-chat-rail__sep {

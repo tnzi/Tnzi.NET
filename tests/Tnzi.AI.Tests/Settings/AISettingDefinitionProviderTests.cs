@@ -28,7 +28,8 @@ public class AISettingDefinitionProviderTests
         Assert.Contains(g.Fields, f => f.Key == "AI:Utility:MaxTokens");
         Assert.Contains(g.Fields, f => f.Key == "AI:Utility:Temperature");
         Assert.Equal("4096", g.Fields.Single(f => f.Key == "AI:Utility:MaxTokens").DefaultValueAccessor!());
-        Assert.Equal("0.3", g.Fields.Single(f => f.Key == "AI:Utility:Temperature").DefaultValueAccessor!());
+        // unset by default: newer Claude models answer 400 to any temperature
+        Assert.Null(g.Fields.Single(f => f.Key == "AI:Utility:Temperature").DefaultValueAccessor);
     }
 
     [Fact]
@@ -41,6 +42,10 @@ public class AISettingDefinitionProviderTests
         Assert.Contains(g.Fields, f => f.Key == "AI:Thread:TitleMaxLength");
         Assert.Equal("False", g.Fields.Single(f => f.Key == "AI:Thread:AutoGenerateTitle").DefaultValueAccessor!());
         Assert.Equal("50", g.Fields.Single(f => f.Key == "AI:Thread:TitleMaxLength").DefaultValueAccessor!());
+        Assert.Equal("5", g.Fields.Single(f => f.Key == "AI:Thread:TitleTargetWords").DefaultValueAccessor!());
+        Assert.Equal("10", g.Fields.Single(f => f.Key == "AI:Thread:TitleTargetCjkCharacters").DefaultValueAccessor!());
+        Assert.Equal("4096", g.Fields.Single(f => f.Key == "AI:Thread:TitleMaxInputBytes").DefaultValueAccessor!());
+        Assert.Contains(g.Fields, f => f.Key == "AI:Thread:TitleModel");
     }
 
     [Fact]

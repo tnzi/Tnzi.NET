@@ -27,25 +27,13 @@
 import { EMPTY_DASH } from '../../utils/placeholders'
 import { defineComponent, h, type PropType } from 'vue'
 import { NInput, NSelect, type SelectOption } from 'naive-ui'
-import {
-  TSchemaForm,
-  type FormSchemaItem,
-  type FormSchemaSection,
-  type FieldRenderer,
-  type ReadonlyLayout,
-} from '@tnzi/ui'
+import TSchemaForm from '../../components/forms/TSchemaForm'
+import { type FormSchemaItem, type FormSchemaSection, type FieldRenderer, type ReadonlyLayout } from '../../components/forms/TSchemaForm'
 import TIconPicker from '../../components/inputs/TIconPicker.vue'
 import TJsonEditor from '../../components/inputs/TJsonEditor.vue'
 import { translatePageKey } from './translate'
 
-export type {
-  FormSchemaItem,
-  FormSchemaSection,
-  FormSchemaFieldType,
-  FieldRenderer,
-  FieldRenderContext,
-  ReadonlyLayout,
-} from '@tnzi/ui'
+export type { FormSchemaItem, FormSchemaOption, FormSchemaSection, FormSchemaFieldType, FieldRenderer, FieldRenderContext, ReadonlyLayout } from '../../components/forms/TSchemaForm'
 
 // Default admin translator - used only when the caller does NOT supply a
 // `translate` prop. Resolves absolute `admin.*` keys via the shared

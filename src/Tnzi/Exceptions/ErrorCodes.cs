@@ -12,6 +12,11 @@ public static class ErrorCodes
     public const string BUSINESS_ERROR = "BUSINESS_ERROR";
     public const string VALIDATION_ERROR = "VALIDATION_ERROR";
 
+    /// <summary>
+    /// 请求本身读不了（体没读完客户端就走了、格式错误、超过服务器的上限），由 ASP.NET Core 的 <c>BadHttpRequestException</c> 报出。
+    /// </summary>
+    public const string BAD_REQUEST = "BAD_REQUEST";
+
     // ==================== 资源相关错误码 ====================
     public const string RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND";
     public const string RESOURCE_ALREADY_EXISTS = "RESOURCE_ALREADY_EXISTS";
@@ -95,6 +100,11 @@ public static class ErrorCodes
     public const string IDENTITY_USER_IN_USE = "IDENTITY_USER_IN_USE";
 
     /// <summary>
+    /// 要写成头像的文件不是允许的图片格式（PNG / JPEG / WebP，按文件头判定），或超过 <c>Identity:Avatar:MaxBytes</c>（HTTP 400）。
+    /// </summary>
+    public const string IDENTITY_AVATAR_INVALID = "IDENTITY_AVATAR_INVALID";
+
+    /// <summary>
     /// 管理端用户 CSV 导出命中的行数超过导出上限，整次导出被拒绝（HTTP 400）。导出从不静默截断，
     /// 拿到的文件就是筛选条件下的全部结果；被拒时消息里写着命中了多少行，提示收窄筛选再导。
     /// </summary>
@@ -138,6 +148,12 @@ public static class ErrorCodes
     public const string IDENTITY_SESSION_REVOKED = "IDENTITY_SESSION_REVOKED";
 
     /// <summary>
+    /// 按手机号认账号时，这个号码被不止一个账号持有（HTTP 409）。框架不替用户挑一个，
+    /// 消息里请对方改用邮箱或用户名；前端可据此把输入框切到邮箱 / 用户名。
+    /// </summary>
+    public const string IDENTITY_PHONE_NUMBER_AMBIGUOUS = "IDENTITY_PHONE_NUMBER_AMBIGUOUS";
+
+    /// <summary>
     /// 检测到刷新令牌重放：一枚已经被轮换掉的刷新令牌在宽限窗之外又被使用。
     /// 整条会话已被撤销，客户端必须重新登录（不要重试刷新）。
     /// </summary>
@@ -167,6 +183,26 @@ public static class ErrorCodes
 
     public const string IDENTITY_CAPTCHA_REQUIRED = "IDENTITY_CAPTCHA_REQUIRED";
     public const string IDENTITY_STEP_UP_REQUIRED = "IDENTITY_STEP_UP_REQUIRED";
+
+    // ---- OpenID Connect 提供方（Tnzi.Identity.OpenIdConnect）----
+
+    /// <summary>没有这个 OIDC 客户端（按 client_id 或 Id 都查不到）。HTTP 404。</summary>
+    public const string IDENTITY_OIDC_CLIENT_NOT_FOUND = "IDENTITY_OIDC_CLIENT_NOT_FOUND";
+
+    /// <summary>
+    /// OIDC 客户端存在但已被停用：同意页与授权操作对它一律不可用。HTTP 404（与「没有这个客户端」同一状态码，
+    /// 只是码不同，好让同意页说「这个应用已被停用」而不是「找不到」）。
+    /// </summary>
+    public const string IDENTITY_OIDC_CLIENT_DISABLED = "IDENTITY_OIDC_CLIENT_DISABLED";
+
+    /// <summary>已有客户端使用这个 client_id。HTTP 409。</summary>
+    public const string IDENTITY_OIDC_CLIENT_ALREADY_EXISTS = "IDENTITY_OIDC_CLIENT_ALREADY_EXISTS";
+
+    /// <summary>公开客户端（SPA、原生应用）没有密钥，不能轮换。HTTP 400。</summary>
+    public const string IDENTITY_OIDC_CLIENT_HAS_NO_SECRET = "IDENTITY_OIDC_CLIENT_HAS_NO_SECRET";
+
+    /// <summary>没有这条 OIDC 授权记录。HTTP 404。</summary>
+    public const string IDENTITY_OIDC_GRANT_NOT_FOUND = "IDENTITY_OIDC_GRANT_NOT_FOUND";
 
     // ==================== FileStorage 模块错误码 ====================
     public const string FILE_STORAGE_ERROR = "FILE_STORAGE_ERROR";

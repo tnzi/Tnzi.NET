@@ -97,7 +97,7 @@
 import { computed, ref, watch } from 'vue'
 import { NPopover, NCheckbox, NDivider } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { DraggableFallback, useDraggableComponent } from '@tnzi/ui/headless'
+import { DraggableFallback, useDraggableComponent } from '../../headless/useReorderable'
 import { useColumnSettings, type ColumnDef } from '../../headless/useColumnSettings'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 

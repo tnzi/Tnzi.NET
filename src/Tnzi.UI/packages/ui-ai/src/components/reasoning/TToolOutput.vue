@@ -93,7 +93,7 @@ const toggleLabel = computed(() =>
 }
 .t-tool-output__toggle:hover { text-decoration: underline; }
 .t-tool-output__toggle:focus-visible {
-  outline: 2px solid var(--tnzi-ai-accent);
+  outline: var(--tnzi-ai-focus-outline);
   outline-offset: 2px;
 }
 </style>

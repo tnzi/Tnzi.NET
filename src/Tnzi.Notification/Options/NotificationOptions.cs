@@ -362,6 +362,25 @@ public class MailSenderOptions
     /// Configure via "Notification:MailSender:DevOverrideEmail" in appsettings.Development.json.
     /// </summary>
     public string? DevOverrideEmail { get; set; }
+
+    /// <summary>
+    /// 获取或设置 这一节 SMTP 连接经的代理（<c>http://</c>、<c>https://</c>、<c>socks4://</c>、<c>socks4a://</c>、
+    /// <c>socks5://</c>；可带 <c>user:password@</c>）。留空 = 按 <see cref="UseEnvironmentProxy"/> 决定。
+    /// </summary>
+    /// <remarks>
+    /// 写了就一律经它，<c>NO_PROXY</c> 不管。TLS 仍在隧道里对 <see cref="SmtpServer"/> 握，证书校验不变。
+    /// 规则见 <c>MailProxySelector</c>。
+    /// </remarks>
+    public string? Proxy { get; set; }
+
+    /// <summary>
+    /// 获取或设置 没写 <see cref="Proxy"/> 时是否按标准环境变量走代理（默认 true）。
+    /// </summary>
+    /// <remarks>
+    /// 读的是 <c>HTTPS_PROXY</c> → <c>ALL_PROXY</c> → <c>HTTP_PROXY</c>（小写优先）与 <c>NO_PROXY</c>，与 <c>HttpClient</c> 同一套。
+    /// 环境里没有代理时就是直连。设为 false = 无论环境怎么写都直连。
+    /// </remarks>
+    public bool UseEnvironmentProxy { get; set; } = true;
 }
 
 /// <summary>
@@ -577,6 +596,16 @@ public class FaxConfirmationOptions
     /// 所以最坏后果只是每轮都白判读一遍同样的邮件）。
     /// </remarks>
     public bool MarkAsRead { get; set; } = true;
+
+    /// <summary>
+    /// 获取或设置 IMAP 连接经的代理，形状与规则同 <see cref="MailSenderOptions.Proxy"/>。留空 = 按 <see cref="UseEnvironmentProxy"/> 决定。
+    /// </summary>
+    public string? Proxy { get; set; }
+
+    /// <summary>
+    /// 获取或设置 没写 <see cref="Proxy"/> 时是否按标准环境变量走代理（默认 true），同 <see cref="MailSenderOptions.UseEnvironmentProxy"/>。
+    /// </summary>
+    public bool UseEnvironmentProxy { get; set; } = true;
 
     /// <summary>
     /// 这一节到底配全了没有 —— <b>注册后台服务与配置校验共用这一个判据</b>。

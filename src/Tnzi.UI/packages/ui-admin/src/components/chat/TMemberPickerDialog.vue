@@ -65,7 +65,7 @@
 import { ref, reactive, watch } from 'vue'
 import { NScrollbar, NCheckbox, NButton } from 'naive-ui'
 import { Icon } from '@iconify/vue'
-import { useSafeMessage } from '@tnzi/ui'
+import { useSafeMessage } from '../../headless/useSafeMessage'
 import { useDebounced } from '@tnzi/core/headless'
 import type { ChatContactDto } from '@tnzi/core/services/chat'
 import { useChatStore } from '../../stores/useChatStore'

@@ -7,7 +7,7 @@ public class EventPublisherTests
     {
         var captured = new List<AgentRunStartedEvent>();
         var eventBus = CreateEventBus<AgentRunStartedEvent>(captured);
-        var publisher = new EventPublisher(eventBus.Object, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>());
+        var publisher = new EventPublisher(eventBus.Object, Mock.Of<ILogger<EventPublisher>>());
 
         await publisher.PublishRunStartedEventAsync(
             new AgentRunRequest { AgentId = Guid.NewGuid(), UserId = Guid.NewGuid(), ThreadId = Guid.NewGuid() },
@@ -25,7 +25,7 @@ public class EventPublisherTests
     [Fact]
     public async Task PublishRunStartedEventAsync_EventBusNull_DoesNotThrow()
     {
-        var publisher = new EventPublisher(eventBus: null, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>());
+        var publisher = new EventPublisher(eventBus: null, Mock.Of<ILogger<EventPublisher>>());
 
         await publisher.PublishRunStartedEventAsync(
             new AgentRunRequest(), null, false, null, null, AgentExecutionMode.Single);
@@ -37,7 +37,7 @@ public class EventPublisherTests
         var eventBus = new Mock<IEventBus>();
         eventBus.Setup(x => x.PublishAsync(It.IsAny<AgentRunStartedEvent>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("bus down"));
-        var publisher = new EventPublisher(eventBus.Object, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>());
+        var publisher = new EventPublisher(eventBus.Object, Mock.Of<ILogger<EventPublisher>>());
 
         await publisher.PublishRunStartedEventAsync(
             new AgentRunRequest(), null, false, null, null, AgentExecutionMode.Single);
@@ -48,7 +48,7 @@ public class EventPublisherTests
     {
         var captured = new List<AgentRunCompletedEvent>();
         var eventBus = CreateEventBus<AgentRunCompletedEvent>(captured);
-        var publisher = new EventPublisher(eventBus.Object, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>());
+        var publisher = new EventPublisher(eventBus.Object, Mock.Of<ILogger<EventPublisher>>());
 
         var run = new AgentRun { Id = Guid.NewGuid(), Status = AgentRunStatus.Completed };
         var result = new AgentRunResult
@@ -77,7 +77,7 @@ public class EventPublisherTests
     {
         var captured = new List<AgentRunCompletedEvent>();
         var eventBus = CreateEventBus<AgentRunCompletedEvent>(captured);
-        var publisher = new EventPublisher(eventBus.Object, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>());
+        var publisher = new EventPublisher(eventBus.Object, Mock.Of<ILogger<EventPublisher>>());
 
         var result = new AgentRunResult
         {
@@ -97,7 +97,7 @@ public class EventPublisherTests
     {
         var captured = new List<AgentRunFailedEvent>();
         var eventBus = CreateEventBus<AgentRunFailedEvent>(captured);
-        var publisher = new EventPublisher(eventBus.Object, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>());
+        var publisher = new EventPublisher(eventBus.Object, Mock.Of<ILogger<EventPublisher>>());
 
         var ex = new InvalidOperationException("pipeline crash");
 
@@ -114,37 +114,10 @@ public class EventPublisherTests
     [Fact]
     public async Task PublishRunFailedEventAsync_EventBusNull_DoesNotThrow()
     {
-        var publisher = new EventPublisher(eventBus: null, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>());
+        var publisher = new EventPublisher(eventBus: null, Mock.Of<ILogger<EventPublisher>>());
 
         await publisher.PublishRunFailedEventAsync(
             new AgentRunRequest(), null, new InvalidOperationException("x"), 0, false);
-    }
-
-    [Fact]
-    public async Task HandleNewThreadTitleAsync_ThreadIdMissing_ReturnsSilently()
-    {
-        var scopeFactory = new Mock<IServiceScopeFactory>();
-        var publisher = new EventPublisher(null, scopeFactory.Object, Mock.Of<ILogger<EventPublisher>>());
-
-        await publisher.HandleNewThreadTitleAsync(
-            new AgentRunRequest { ThreadId = null, UserMessage = "anything" },
-            new AgentRunResult { Response = "hi" });
-
-        scopeFactory.Verify(x => x.CreateScope(), Times.Never);
-    }
-
-    [Fact]
-    public async Task HandleNewThreadTitleAsync_ExceptionInScopedWork_SwallowsAndLogs()
-    {
-        var scopeFactory = new Mock<IServiceScopeFactory>();
-        scopeFactory.Setup(x => x.CreateScope()).Throws(new InvalidOperationException("boom"));
-
-        var publisher = new EventPublisher(null, scopeFactory.Object, Mock.Of<ILogger<EventPublisher>>());
-
-        // Should not throw - the scoped work error is caught inside HandleNewThreadTitleAsync
-        await publisher.HandleNewThreadTitleAsync(
-            new AgentRunRequest { ThreadId = Guid.NewGuid(), UserMessage = "hi" },
-            new AgentRunResult { Response = "hi back" });
     }
 
     private static Mock<IEventBus> CreateEventBus<TEvent>(List<TEvent> target)

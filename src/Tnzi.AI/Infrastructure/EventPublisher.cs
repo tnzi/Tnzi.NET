@@ -3,14 +3,12 @@ namespace Tnzi.AI.Infrastructure;
 public class EventPublisher : IEventPublisher
 {
     private readonly IEventBus? _eventBus;
-    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<EventPublisher> _logger;
     private readonly bool _eventBusAvailable;
 
-    public EventPublisher(IEventBus? eventBus, IServiceScopeFactory scopeFactory, ILogger<EventPublisher> logger)
+    public EventPublisher(IEventBus? eventBus, ILogger<EventPublisher> logger)
     {
         _eventBus = eventBus;
-        _scopeFactory = Check.NotNull(scopeFactory);
         _logger = Check.NotNull(logger);
         _eventBusAvailable = eventBus != null;
     }
@@ -114,52 +112,6 @@ public class EventPublisher : IEventPublisher
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to publish AgentRunCancelledEvent");
-        }
-    }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// 标题用的是 <paramref name="userTurnText"/>（本轮模型实际收到的用户文本：守卫改写之后、带内容块时取内容块），
-    /// 没给时才退回 <c>request.UserMessage</c>。兜底标题会落库、正式标题还要交给 LLM：
-    /// 用请求原文，被输入守卫脱敏掉的内容就以线程标题的形式留在线程列表里。
-    /// </remarks>
-    public async Task HandleNewThreadTitleAsync(AgentRunRequest request, AgentRunResult result, string? userTurnText = null)
-    {
-        if (!request.ThreadId.HasValue) return;
-
-        var userText = string.IsNullOrWhiteSpace(userTurnText) ? request.UserMessage : userTurnText;
-
-        try
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var sp = scope.ServiceProvider;
-
-            var threadOptions = sp.GetService<IOptionsMonitor<ThreadOptions>>();
-            var maxLength = threadOptions?.CurrentValue.TitleMaxLength ?? 50;
-            var fallbackTitle = AgentThreadService.GenerateFallbackTitle(userText, maxLength);
-            if (fallbackTitle != null)
-            {
-                var threadService = sp.GetService<IAgentThreadService>();
-                if (threadService != null)
-                {
-                    await threadService.UpdateTitleAsync(request.ThreadId.Value, fallbackTitle);
-                }
-            }
-
-            var eventBus = sp.GetService<IEventBus>();
-            if (eventBus != null && !string.IsNullOrWhiteSpace(userText))
-            {
-                await eventBus.PublishAsync(new ThreadFirstReplyCompletedEvent
-                {
-                    ThreadId = request.ThreadId.Value,
-                    UserMessage = userText,
-                    AssistantReply = StringTruncator.Truncate(result.Response, 500)
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to handle new thread title for Thread {ThreadId}", request.ThreadId);
         }
     }
 }

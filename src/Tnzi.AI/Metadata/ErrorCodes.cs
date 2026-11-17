@@ -63,6 +63,11 @@ public static class ErrorCodes
     public const string ModelNotAllowed = "AI_MODEL_NOT_ALLOWED";
 
     /// <summary>
+    /// The requested reasoning effort is not one the turn's model offers to this user (or the model offers no effort choice). HTTP 403.
+    /// </summary>
+    public const string EffortNotAllowed = "AI_EFFORT_NOT_ALLOWED";
+
+    /// <summary>
     /// Agent run failed.
     /// </summary>
     public const string AgentRunFailed = "AI_AGENT_RUN_FAILED";
@@ -408,9 +413,32 @@ public static class ErrorCodes
     public const string CliPermissionOptionInvalid = "AI_CLI_PERMISSION_OPTION_INVALID";
 
     /// <summary>
+    /// The answers to a question request are missing or do not fit its questions
+    /// (an unknown question, an unanswered question, or several answers to a single-choice question).
+    /// </summary>
+    public const string CliQuestionAnswersInvalid = "AI_CLI_QUESTION_ANSWERS_INVALID";
+
+    /// <summary>
     /// The registered <c>ICliAgentDispatcher</c> implementation does not relay permission requests.
     /// </summary>
     public const string CliPermissionNotSupported = "AI_CLI_PERMISSION_NOT_SUPPORTED";
+
+    /// <summary>
+    /// A single task (a sub-agent, a background command) of an external CLI run cannot be stopped: the run's CLI protocol
+    /// has no way to do it (ACP), or the registered <c>ICliAgentDispatcher</c> implementation does not provide it.
+    /// Stopping the whole run still works.
+    /// </summary>
+    public const string CliTaskStopNotSupported = "AI_CLI_TASK_STOP_NOT_SUPPORTED";
+
+    /// <summary>
+    /// The task id given to stop a task is not one the CLI could have given (empty, too long, or with characters outside letters, digits, <c>-</c> and <c>_</c>).
+    /// </summary>
+    public const string CliTaskIdInvalid = "AI_CLI_TASK_ID_INVALID";
+
+    /// <summary>
+    /// No run is going on in the conversation, so there is no process whose task could be stopped.
+    /// </summary>
+    public const string ChatNoActiveRun = "AI_CHAT_NO_ACTIVE_RUN";
 
     /// <summary>
     /// The requested external agent provider is unknown or not enabled in this deployment.
@@ -434,7 +462,7 @@ public static class ErrorCodes
     public const string CliBudgetExceeded = "AI_CLI_BUDGET_EXCEEDED";
 
     /// <summary>
-    /// An attachment is larger than <c>AI:Chat:Attachments:MaxBytes</c>.
+    /// An attachment is larger than <c>AI:Chat:Attachments:MaxBytes</c> (an image or a PDF) or <c>MaxFileBytes</c> (another file).
     /// </summary>
     public const string AttachmentTooLarge = "AI_ATTACHMENT_TOO_LARGE";
 
@@ -489,4 +517,53 @@ public static class ErrorCodes
     /// A chat request's per-turn metadata is not valid (too many keys, a malformed key, or too large).
     /// </summary>
     public const string InvalidTurnMetadata = "AI_INVALID_TURN_METADATA";
+
+    /// <summary>
+    /// A thread origin is not well formed (it starts with a letter and uses only letters, digits, <c>_ . : -</c>, at most 64 characters).
+    /// </summary>
+    public const string InvalidThreadOrigin = "AI_INVALID_THREAD_ORIGIN";
+
+    /// <summary>
+    /// A chat request declared a thread origin the application does not let clients declare (<c>IThreadOriginPolicy</c>).
+    /// </summary>
+    public const string ThreadOriginNotAllowed = "AI_THREAD_ORIGIN_NOT_ALLOWED";
+
+    /// <summary>
+    /// The thread has no queued message with this id (it went out as a turn, was removed, or is not the caller's).
+    /// </summary>
+    public const string QueuedMessageNotFound = "AI_QUEUED_MESSAGE_NOT_FOUND";
+
+    /// <summary>
+    /// The queued message is going out as the thread's next turn right now, so it can no longer be changed or removed.
+    /// </summary>
+    public const string QueuedMessageDelivering = "AI_QUEUED_MESSAGE_DELIVERING";
+
+    /// <summary>
+    /// The thread already holds as many queued messages as <c>AI:Chat:Queue:MaxMessagesPerThread</c> allows.
+    /// </summary>
+    public const string QueueFull = "AI_QUEUE_FULL";
+
+    /// <summary>
+    /// The application's <c>IChatQueuePolicy</c> does not let this session queue, edit or send now a queued message (for
+    /// example a session signed in on a temporary device with a one-time pass).
+    /// </summary>
+    public const string QueueNotAllowed = "AI_QUEUE_NOT_ALLOWED";
+
+    /// <summary>
+    /// A queued message was going out when the service stopped, so whether it reached the thread is unknown: it is held
+    /// for the user to send again or remove.
+    /// </summary>
+    public const string QueuedMessageInterrupted = "AI_QUEUED_MESSAGE_INTERRUPTED";
+
+    /// <summary>
+    /// A queued message handed to the running agent was not taken in: the CLI declined it, or its session ended before the
+    /// message's turn came. It is held for the user to send again or remove.
+    /// </summary>
+    public const string QueuedMessageNotTaken = "AI_QUEUED_MESSAGE_NOT_TAKEN";
+
+    /// <summary>
+    /// The turn a queued message waited for (or had been handed to) was stopped, so the message was not sent: stopping means
+    /// "do not go on like this". It is held for the user to send or remove.
+    /// </summary>
+    public const string QueuedTurnStopped = "AI_QUEUED_TURN_STOPPED";
 }

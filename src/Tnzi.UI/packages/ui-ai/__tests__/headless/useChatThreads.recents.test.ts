@@ -7,7 +7,14 @@ vi.mock('@tnzi/core/services/ai', () => ({
 
 const { useChatThreads } = await import('../../src/headless/useChatThreads');
 
-type Row = { id: string; title: string; lastActivityTime: string; creationTime?: string; archivedTime?: string | null };
+type Row = {
+  id: string;
+  title: string;
+  lastActivityTime: string;
+  lastUserMessageTime?: string;
+  creationTime?: string;
+  archivedTime?: string | null;
+};
 
 /** A tiny server: the list honours `status` and `keyword` so the tests can see what the hook asked for. */
 function server(rows: Row[]) {
@@ -51,10 +58,18 @@ function deps(threadApi: ReturnType<typeof server>, extra: Record<string, unknow
   } as never;
 }
 
+/* In the server's order: the user's last message, newest first. */
 const ROWS: Row[] = [
-  { id: 'a', title: 'Alpha', lastActivityTime: '2026-10-21T10:00:00Z', creationTime: '2026-10-01T10:00:00Z' },
-  { id: 'b', title: 'Beta', lastActivityTime: '2026-10-20T10:00:00Z' },
-  { id: 'z', title: 'Zeta', lastActivityTime: '2026-10-19T10:00:00Z', archivedTime: '2026-10-19T11:00:00Z' },
+  { id: 'a', title: 'Alpha', lastActivityTime: '2026-10-21T10:00:00Z', lastUserMessageTime: '2026-10-21T09:00:00Z', creationTime: '2026-10-01T10:00:00Z' },
+  { id: 'b', title: 'Beta', lastActivityTime: '2026-10-20T10:00:00Z', creationTime: '2026-10-20T09:00:00Z' },
+  {
+    id: 'z',
+    title: 'Zeta',
+    lastActivityTime: '2026-10-19T10:00:00Z',
+    lastUserMessageTime: '2026-10-19T09:00:00Z',
+    creationTime: '2026-10-01T10:00:00Z',
+    archivedTime: '2026-10-19T11:00:00Z',
+  },
 ];
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -67,7 +82,7 @@ describe('useChatThreads recents', () => {
     const chat = useChatThreads(deps(api));
     await chat.loadThreads();
 
-    expect(api.getList).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'Active', sort: 'LastActivity' }));
+    expect(api.getList).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'Active', sort: 'LastUserMessage' }));
     expect(chat.threads.value.map((t) => t.id)).toEqual(['a', 'b']);
     expect(chat.threads.value[0]).toMatchObject({ createdAt: '2026-10-01T10:00:00Z' });
     expect(chat.threads.value[0]).not.toHaveProperty('archived');
@@ -258,7 +273,7 @@ describe('useChatThreads recents', () => {
     await chat.recents.page.search('alp');
 
     expect(api.getList).toHaveBeenLastCalledWith(
-      expect.objectContaining({ keyword: 'alp', status: 'Active', sort: 'LastActivity' }),
+      expect.objectContaining({ keyword: 'alp', status: 'Active', sort: 'LastUserMessage' }),
     );
     expect(chat.recents.page.threads.value.map((t) => t.id)).toEqual(['a']);
     expect(chat.recents.page.loaded.value).toBe(true);

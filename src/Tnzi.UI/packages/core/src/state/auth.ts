@@ -11,6 +11,8 @@ import type { LoginDto, LoginResultDto, UserProfile, UserDto, UpdateProfileDto }
 import { useAuthApi, useProfileApi } from '../services/identity/index';
 import { isSessionEndedForSecurity, isSignInIpNotAllowed } from '../services/identity/session-security';
 import { readUserIdClaim } from '../services/identity/session-claims';
+import { profileAvatarUrl } from '../services/identity/avatar';
+import type { HttpClient } from '../http/http';
 import { HttpError, isHttpError } from '../errors/api-error';
 import { useLogger } from '../adapters/logger';
 import type { StateDeps } from './types/deps';
@@ -20,14 +22,21 @@ import { fetchAccessProfilePermissions } from './access-profile';
  * Map UserDto to UserProfile.
  * UserDto doesn't have a permissions field, uses existing permissions or empty array.
  */
-function toUserProfile(dto: UserDto, existingPermissions: string[] = []): UserProfile {
+function toUserProfile(
+  dto: UserDto,
+  existingPermissions: string[] = [],
+  client?: Pick<HttpClient, 'resolveUrl'> | null,
+): UserProfile {
   return {
     id: dto.id,
     userName: dto.userName,
     email: dto.email,
     phoneNumber: dto.phoneNumber,
     nickname: dto.nickname,
-    avatar: dto.avatar,
+    // An uploaded photo wins over an imported link; before this, `avatar`
+    // carried only the link, so an uploaded photo never reached the shell.
+    avatar: profileAvatarUrl(client, dto),
+    avatarId: dto.avatarId ?? null,
     roles: dto.roles,
     permissions: existingPermissions,
   };
@@ -678,7 +687,7 @@ export class AuthStateManager {
       // Signed out, or another session began, while the request was out.
       if (session !== this._session) return;
       if (result.succeeded && result.data) {
-        this.user = toUserProfile(result.data, this.permissions);
+        this.user = toUserProfile(result.data, this.permissions, this.deps.httpClient);
       }
     } catch (error) {
       useLogger().error('Failed to fetch user profile:', error);
@@ -696,7 +705,7 @@ export class AuthStateManager {
       if (!result.succeeded || !result.data) {
         throw new HttpError({ ...result, message: result.message ?? 'Update failed' });
       }
-      this.user = toUserProfile(result.data, this.permissions);
+      this.user = toUserProfile(result.data, this.permissions, this.deps.httpClient);
       return this.user;
     } catch (error) {
       this.error = error instanceof Error ? error.message : 'Update failed';
@@ -845,7 +854,7 @@ export class AuthStateManager {
       if (!result.succeeded || !result.data) {
         throw new Error('Failed to fetch profile');
       }
-      this.user = toUserProfile(result.data);
+      this.user = toUserProfile(result.data, [], this.deps.httpClient);
       this.roles = result.data.roles ?? [];
 
       // Fetch permissions before marking as authenticated,

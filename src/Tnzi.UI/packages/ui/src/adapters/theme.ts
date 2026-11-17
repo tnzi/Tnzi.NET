@@ -1,21 +1,21 @@
 /**
  * @tnzi/ui/adapters/theme
  *
- * Theme adapter using Naive UI's theme system.
+ * The core `ThemeAdapter` for a browser document: the mode lands on `<html>`
+ * through `theme/document`, the one writer of the `dark` class. It knows no
+ * component library; a package that renders one (Naive UI's
+ * `n-config-provider`, Vant's theme class) follows the same document state or
+ * the theme context on its own.
  */
 
 import type { ThemeAdapter } from '@tnzi/core/adapters/theme';
 import type { ThemeMode } from '@tnzi/core/types';
-import { applyThemeToDOM } from '../utils/naive-helpers';
+import { applyThemeToDOM } from '../theme/document';
 
 /**
- * Create a Naive UI theme adapter.
- *
- * Naive UI 使用 `n-config-provider` 的 `theme` prop 控制主题：
- * - darkTheme 用于暗色模式
- * - null 用于亮色模式
- *
- * 此适配器同时操作 document.documentElement 的 class 以便 CSS 层面配合。
+ * Create the document theme adapter: applying a mode writes it to `<html>`,
+ * the resolved mode is read back from there, and OS colour-scheme changes are
+ * reported through `prefers-color-scheme`.
  */
 export function createThemeAdapter(): ThemeAdapter {
   return {

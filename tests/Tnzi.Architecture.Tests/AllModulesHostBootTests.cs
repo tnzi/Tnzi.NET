@@ -239,6 +239,7 @@ public sealed class AllModulesHostBootTests
     typeof(Tnzi.Finance.Offers.FinanceOffersModule),
     typeof(Tnzi.Authorization.DataAuth.AuthorizationDataAuthModule),
     typeof(Tnzi.Identity.Organization.IdentityOrganizationModule),
+    typeof(Tnzi.Identity.OpenIdConnect.IdentityOpenIdConnectModule),
     typeof(Tnzi.Payment.Billing.PaymentBillingModule),
     typeof(Tnzi.Payment.Subscriptions.PaymentSubscriptionsModule),
     typeof(Tnzi.Payment.Promotions.PaymentPromotionsModule),

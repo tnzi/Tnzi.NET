@@ -80,7 +80,7 @@ withDefaults(
 }
 .t-tool-links__row:hover { background: var(--tnzi-ai-press); }
 .t-tool-links__row:focus-visible {
-  outline: 2px solid var(--tnzi-ai-accent);
+  outline: var(--tnzi-ai-focus-outline);
   outline-offset: -2px;
 }
 .t-tool-links__icon {

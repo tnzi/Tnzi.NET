@@ -43,8 +43,8 @@ vi.mock('naive-ui', () => ({
   }),
 }))
 
-vi.mock('@tnzi/ui', () => ({
-  TModalShell: defineComponent({
+vi.mock('../../../src/components/overlay/TModalShell.vue', () => ({
+  default: defineComponent({
     name: 'TModalShell',
     props: ['show', 'title', 'width', 'maskClosable'],
     emits: ['update:show'],
@@ -59,6 +59,9 @@ vi.mock('@tnzi/ui', () => ({
           : h('div', { class: 'modal-closed' })
     },
   }),
+}))
+
+vi.mock('@tnzi/ui', () => ({
   TSvgIcon: defineComponent({ name: 'TSvgIcon', props: ['icon', 'size'], render: () => h('i') }),
 }))
 

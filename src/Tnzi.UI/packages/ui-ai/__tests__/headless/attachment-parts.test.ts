@@ -92,4 +92,54 @@ describe('filesToContentParts', () => {
       filesToContentParts('x', [makeFile('notes.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')], { uploadFile }),
     ).rejects.toThrow('storage down');
   });
+
+  /**
+   * An agent that runs as an external CLI opens files with its own tools; the
+   * backend takes them inline on turns it accepts files for.
+   */
+  describe('inlineFiles', () => {
+    it('sends any other file inline as a document part with its name and type', async () => {
+      const uploadFile = vi.fn();
+      const result = await filesToContentParts('what does it want?', [makeFile('invoice.eml', 'message/rfc822', [0x46, 0x72])], {
+        inlineFiles: true,
+        uploadFile,
+      });
+
+      expect(result.parts).toEqual([
+        { type: 'text', text: 'what does it want?' },
+        { type: 'document', base64Data: 'RnI=', mediaType: 'message/rfc822', fileName: 'invoice.eml' },
+      ]);
+      expect(result.attachments).toEqual([
+        { type: 'file', fileName: 'invoice.eml', mediaType: 'message/rfc822', base64Data: 'RnI=', size: 2 },
+      ]);
+      expect(uploadFile).not.toHaveBeenCalled();
+    });
+
+    it('a file the browser gave no type is sent as application/octet-stream', async () => {
+      const result = await filesToContentParts('', [makeFile('build.log', '')], { inlineFiles: true });
+      expect(result.parts?.[1]).toMatchObject({ type: 'document', mediaType: 'application/octet-stream', fileName: 'build.log' });
+      expect(result.message).toBe('[Attached: build.log]');
+    });
+
+    it('images and PDFs keep their own parts', async () => {
+      const result = await filesToContentParts('x', [makeFile('a.png', 'image/png'), makeFile('b.pdf', 'application/pdf')], { inlineFiles: true });
+      expect(result.parts?.slice(1).map((p) => [p.type, (p as { mediaType?: string }).mediaType])).toEqual([
+        ['image', 'image/png'],
+        ['document', 'application/pdf'],
+      ]);
+    });
+
+    it('files have their own size ceiling, images keep theirs', async () => {
+      const big = makeFile('data.csv', 'text/csv', new Array(20).fill(1));
+      await expect(filesToContentParts('x', [big], { inlineFiles: true, maxBytes: 10, maxFileBytes: 30 })).resolves.toBeTruthy();
+      await expect(filesToContentParts('x', [big], { inlineFiles: true, maxBytes: 10, maxFileBytes: 15 })).rejects.toMatchObject({
+        reason: 'too-large',
+        fileName: 'data.csv',
+      });
+      const image = makeFile('a.png', 'image/png', new Array(20).fill(1));
+      await expect(filesToContentParts('x', [image], { inlineFiles: true, maxBytes: 10, maxFileBytes: 30 })).rejects.toBeInstanceOf(
+        AttachmentRefusedError,
+      );
+    });
+  });
 });

@@ -3,10 +3,10 @@ import { defineConfig, presetWind4, presetIcons } from 'unocss'
 /**
  * UnoCSS configuration for @tnzi/ui-admin.
  *
- * Mirrors `@tnzi/ui/uno.config.ts` so both packages share the same atomic
- * vocabulary. Internal components prefer numeric scales (`text-4`, `gap-12px`)
- * and Naive UI design-token shortcuts; consumer apps that include this
- * package's `dist/style.css` automatically receive the compiled atoms.
+ * Shares the atomic vocabulary of `@tnzi/ui/uno.config.ts`. Internal components
+ * prefer numeric scales (`text-4`, `gap-12px`) and the design-token shortcuts
+ * below; consumer apps that include this package's `dist/style.css`
+ * automatically receive the compiled atoms.
  *
  * Soybean-style flex shortcuts (`flex-y-center`, `flex-center`,
  * `flex-col-center`, `flex-between`) match the soybean-admin source we
@@ -47,6 +47,15 @@ export default defineConfig({
     'border-tnzi': 'border border-[var(--tnzi-border,#e5e7eb)]',
     'bg-layout': 'bg-[var(--tnzi-layout-bg,#f5f7fa)]',
     'bg-card': 'bg-[var(--tnzi-container-bg,#fff)]',
+    'text-disabled': 'text-[var(--n-text-color-disabled,#999)]',
+
+    // Naive UI design tokens: the variables naive sets on its own components,
+    // for markup drawn inside one of them.
+    'border-naive': 'border border-[var(--n-border-color,#e0e0e6)]',
+    'bg-naive-hover': 'bg-[var(--n-color-hover,rgba(0,0,0,0.03))]',
+    'bg-naive-card': 'bg-[var(--n-card-color,#fff)]',
+    'text-naive-secondary': 'text-[var(--n-text-color-3,#999)]',
+    'text-naive-primary': 'text-[var(--n-text-color-1,#333)]',
   },
 
   safelist: [],

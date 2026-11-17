@@ -10,6 +10,29 @@ function makeFile(name: string, size: number, type = 'text/plain'): File {
   return file;
 }
 
+/**
+ * A paste as Chromium / WebView2 delivers it: the files in `files` and again
+ * as `items` of kind `file` (new File objects each time), text under its type.
+ */
+function clipboardEvent(content: { files?: File[]; itemsOnly?: File[]; text?: string }) {
+  const files = content.files ?? [];
+  const asItems = content.itemsOnly ?? files;
+  const items = [
+    ...asItems.map((f) => ({ kind: 'file', type: f.type, getAsFile: () => new File([f], f.name, { type: f.type }) })),
+    ...(content.text === undefined ? [] : [{ kind: 'string', type: 'text/plain', getAsFile: () => null }]),
+  ];
+  const preventDefault = vi.fn();
+  const event = {
+    preventDefault,
+    clipboardData: {
+      files,
+      items,
+      getData: (type: string) => (type === 'text/plain' ? content.text ?? '' : ''),
+    },
+  } as unknown as ClipboardEvent;
+  return { event, preventDefault };
+}
+
 beforeEach(() => {
   // happy-dom does not implement object URLs.
   globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock');
@@ -121,10 +144,7 @@ describe('useComposerAttachments', () => {
   describe('enabled gate', () => {
     const dropEvent = (files: File[]) =>
       ({ preventDefault() {}, dataTransfer: { files } }) as unknown as DragEvent;
-    const pasteEvent = (files: File[]) =>
-      ({
-        clipboardData: { items: files.map((f) => ({ type: f.type, getAsFile: () => f })) },
-      }) as unknown as ClipboardEvent;
+    const pasteEvent = (files: File[]) => clipboardEvent({ files }).event;
 
     it('paste, drop, drag-over and addFiles are inert when disabled', () => {
       const c = useComposerAttachments({ enabled: () => false });
@@ -214,6 +234,87 @@ describe('useComposerAttachments', () => {
       const c = useComposerAttachments({ enabled: () => false, onReject });
       expect(c.addFiles([makeFile('a.txt', 1)])).toBeNull();
       expect(onReject).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Copying files in Explorer / Finder and pressing Ctrl+V / Cmd+V attaches
+   * them, through the same checks as any other way in. Text still pastes.
+   */
+  describe('paste', () => {
+    it('attaches every copied file, of any type, once', () => {
+      const c = useComposerAttachments();
+      const { event, preventDefault } = clipboardEvent({
+        files: [makeFile('mail.eml', 10, 'message/rfc822'), makeFile('data.csv', 10, 'text/csv'), makeFile('shot.png', 10, 'image/png')],
+      });
+
+      c.onPaste(event);
+
+      expect(c.files.value.map((f) => f.name)).toEqual(['mail.eml', 'data.csv', 'shot.png']);
+      expect(preventDefault).toHaveBeenCalled();
+    });
+
+    it('a screenshot attaches once, though the clipboard lists it as a file and as an item', () => {
+      const c = useComposerAttachments();
+      c.onPaste(clipboardEvent({ files: [makeFile('image.png', 10, 'image/png')] }).event);
+      expect(c.files.value).toHaveLength(1);
+    });
+
+    it('takes a screenshot from the items when the engine lists no files', () => {
+      const c = useComposerAttachments();
+      c.onPaste(clipboardEvent({ itemsOnly: [makeFile('image.png', 10, 'image/png')] }).event);
+      expect(c.files.value.map((f) => f.name)).toEqual(['image.png']);
+    });
+
+    it('reports the refused ones and keeps the rest', () => {
+      const onReject = vi.fn();
+      const c = useComposerAttachments({ maxFileSize: 100, accept: () => '.eml,.txt', onReject });
+
+      c.onPaste(clipboardEvent({
+        files: [makeFile('mail.eml', 10), makeFile('setup.exe', 10, 'application/x-msdownload'), makeFile('huge.txt', 500)],
+      }).event);
+
+      expect(c.files.value.map((f) => f.name)).toEqual(['mail.eml']);
+      expect(c.rejected.value.map((r) => [r.file.name, r.reason])).toEqual([
+        ['setup.exe', 'unsupported-type'],
+        ['huge.txt', 'too-large'],
+      ]);
+      expect(onReject).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not paste the names of the files it took as text', () => {
+      const c = useComposerAttachments();
+      const { event, preventDefault } = clipboardEvent({
+        files: [makeFile('a.txt', 1), makeFile('b.txt', 1)],
+        text: 'C:\\Users\\me\\a.txt\r\n"C:\\Users\\me\\b.txt"',
+      });
+      c.onPaste(event);
+      expect(preventDefault).toHaveBeenCalled();
+    });
+
+    it('lets other text paste alongside a picture of it (a spreadsheet range)', () => {
+      const c = useComposerAttachments();
+      const { event, preventDefault } = clipboardEvent({ files: [makeFile('image.png', 10, 'image/png')], text: 'Q1\t120\nQ2\t140' });
+      c.onPaste(event);
+      expect(c.files.value).toHaveLength(1);
+      expect(preventDefault).not.toHaveBeenCalled();
+    });
+
+    it('plain text pastes untouched', () => {
+      const c = useComposerAttachments();
+      const { event, preventDefault } = clipboardEvent({ text: 'hello' });
+      c.onPaste(event);
+      expect(c.files.value).toHaveLength(0);
+      expect(c.rejected.value).toHaveLength(0);
+      expect(preventDefault).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when attachments are off, so a file paste falls back to the browser', () => {
+      const c = useComposerAttachments({ enabled: () => false });
+      const { event, preventDefault } = clipboardEvent({ files: [makeFile('a.txt', 1)], text: 'a.txt' });
+      c.onPaste(event);
+      expect(c.files.value).toHaveLength(0);
+      expect(preventDefault).not.toHaveBeenCalled();
     });
   });
 });

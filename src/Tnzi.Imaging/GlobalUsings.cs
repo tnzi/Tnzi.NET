@@ -10,6 +10,7 @@ global using SixLabors.ImageSharp.Formats;
 global using SixLabors.ImageSharp.PixelFormats;
 global using SixLabors.ImageSharp.Processing;
 global using System;
+global using System.Buffers.Binary;
 global using System.Collections.Generic;
 global using System.IO;
 global using System.Linq;

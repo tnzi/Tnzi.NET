@@ -68,7 +68,7 @@ public class CliRunResumeRetryTests : IntegratedTestBase<CliBudgetDbContext>
         adapter.Contexts.Count.ShouldBe(2);
         adapter.Contexts[0].ResumeSessionId.ShouldBe("stale-session");
         adapter.Contexts[1].ResumeSessionId.ShouldBeNull();
-        adapter.Contexts[1].Prompt.ShouldContain("could not be resumed");
+        adapter.Contexts[1].PromptWithTurnContext.ShouldContain("could not be resumed");
     }
 
     [Fact]

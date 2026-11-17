@@ -15,7 +15,7 @@
  * header, the tray and the two config providers import this file.
  */
 import { computed, type ComputedRef } from 'vue'
-import { getNaiveLocale, type NaiveLocaleBundle } from '@tnzi/ui'
+import { getNaiveLocale, type NaiveLocaleBundle } from '../i18n/naive-locale'
 import { useAdminAppStore } from '../stores/useAdminAppStore'
 import {
   getDefaultAdminLocale,

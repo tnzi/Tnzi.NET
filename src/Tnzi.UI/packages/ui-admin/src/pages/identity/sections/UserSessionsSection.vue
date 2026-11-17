@@ -71,7 +71,8 @@
  */
 import { computed, ref } from 'vue'
 import { NButton, NPopconfirm, NSpin } from 'naive-ui'
-import { TRelativeTime, TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
+import TRelativeTime from '../../../components/display/TRelativeTime.vue'
 import TDetailSection from '../../../components/detail/TDetailSection.vue'
 import { TEmpty } from '@tnzi/ui'
 import TItemCard, { type ItemCardTag } from '../../../components/data/TItemCard.vue'

@@ -1,169 +1,64 @@
-using AgentThreadEntity = Tnzi.AI.Entities.AgentThread;
-
 namespace Tnzi.AI.Tests;
 
 public class ThreadTitleGenerationHandlerTests
 {
-    private static IOptionsMonitor<ThreadOptions> CreateOptions(bool autoGenerateTitle, int titleMaxLength = 50)
-    {
-        var options = new ThreadOptions
-        {
-            AutoGenerateTitle = autoGenerateTitle,
-            TitleMaxLength = titleMaxLength
-        };
-        var monitor = new Mock<IOptionsMonitor<ThreadOptions>>();
-        monitor.Setup(x => x.CurrentValue).Returns(options);
-        return monitor.Object;
-    }
-
     /// <summary>
-    /// Builds a real <see cref="IServiceScopeFactory"/> backed by an in-memory container so the
-    /// handler - which now isolates work in a child scope - can resolve its dependencies from
-    /// the supplied mocks. Optional services may be passed as <c>null</c> to simulate "service
-    /// not registered" scenarios such as HostingLite.
-    /// </summary>
-    private static IServiceScopeFactory CreateScopeFactory(
-        IAiUtility? aiUtility,
-        IRepository<AgentThreadEntity, Guid>? repository,
-        IOptionsMonitor<ThreadOptions>? options,
-        IUnitOfWork? unitOfWork = null)
-    {
-        var services = new ServiceCollection();
-        if (aiUtility != null) services.AddSingleton(aiUtility);
-        if (repository != null) services.AddSingleton(repository);
-        if (options != null) services.AddSingleton(options);
-        if (unitOfWork != null) services.AddSingleton(unitOfWork);
-        return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
-    }
-
-    /// <summary>
-    /// 标题要再调一次 LLM。同步处理器会让发布方（首轮收尾）等它完成：非流式响应多一次完整的 LLM 往返，
-    /// 流式连接在 done 之后也要挂到标题生成结束。总线按这份元数据决定是否放到后台。
+    /// The AI title is requested the moment the first message is accepted, while the reply is still being written.
+    /// A synchronous handler would make the publisher (the turn itself) wait for a second model call before it can
+    /// even start answering; as a background handler the turn and the title run side by side.
     /// </summary>
     [Fact]
-    public void Handler_RunsInTheBackground_SoTheFirstReplyDoesNotWaitForTheTitle()
+    public void Handler_RunsInTheBackground()
     {
-        var metadata = EventHandlerInvoker.GetMetadata(typeof(ThreadTitleGenerationHandler), typeof(ThreadFirstReplyCompletedEvent));
+        var metadata = EventHandlerInvoker.GetMetadata(typeof(ThreadTitleGenerationHandler), typeof(ThreadTitleRequestedEvent));
 
         metadata.IsBackground.ShouldBeTrue();
     }
 
     [Fact]
-    public async Task HandleAsync_WhenEnabled_GeneratesAndUpdatesTitle()
+    public async Task HandleAsync_GeneratesTheTitleInItsOwnScope()
     {
-        var threadId = Guid.NewGuid();
-        var thread = new AgentThreadEntity { Title = null };
-        thread.Id = threadId;
-
-        var aiUtility = new Mock<IAiUtility>();
-        aiUtility.Setup(x => x.ExecuteAsync(
-                It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("Code Help");
-
-        var repository = new Mock<IRepository<AgentThreadEntity, Guid>>();
-        repository.Setup(x => x.GetAsync(threadId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(thread);
-        repository.Setup(x => x.UpdateAsync(It.IsAny<AgentThreadEntity>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        var unitOfWork = new Mock<IUnitOfWork>();
-        var scopeFactory = CreateScopeFactory(aiUtility.Object, repository.Object, CreateOptions(true), unitOfWork.Object);
-        var handler = new ThreadTitleGenerationHandler(scopeFactory);
-
-        var @event = new ThreadFirstReplyCompletedEvent
-        {
-            ThreadId = threadId,
-            UserMessage = "How do I write a loop?",
-            AssistantReply = "You can use a for loop."
-        };
+        var titles = new Mock<IThreadTitleService>();
+        var handler = new ThreadTitleGenerationHandler(ScopeFactory(titles.Object));
+        var @event = new ThreadTitleRequestedEvent { ThreadId = Guid.NewGuid(), UserMessage = "plan a trip" };
 
         await handler.HandleAsync(@event);
 
-        thread.Title.ShouldBe("Code Help");
-        repository.Verify(x => x.UpdateAsync(thread, It.IsAny<CancellationToken>()), Times.Once);
-        unitOfWork.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        titles.Verify(t => t.GenerateAsync(@event, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task HandleAsync_WhenDisabled_DoesNotCallUtility()
+    public async Task HandleAsync_WithoutATitleService_DoesNothing()
     {
-        var aiUtility = new Mock<IAiUtility>();
-        var repository = new Mock<IRepository<AgentThreadEntity, Guid>>();
+        var handler = new ThreadTitleGenerationHandler(ScopeFactory(null));
 
-        var scopeFactory = CreateScopeFactory(aiUtility.Object, repository.Object, CreateOptions(false));
-        var handler = new ThreadTitleGenerationHandler(scopeFactory);
-
-        var @event = new ThreadFirstReplyCompletedEvent
-        {
-            ThreadId = Guid.NewGuid(),
-            UserMessage = "Hello",
-            AssistantReply = "Hi"
-        };
-
-        await handler.HandleAsync(@event);
-
-        aiUtility.Verify(x => x.ExecuteAsync(
-            It.IsAny<string>(), It.IsAny<string>(),
-            It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()), Times.Never);
-        repository.Verify(x => x.UpdateAsync(It.IsAny<AgentThreadEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+        await Should.NotThrowAsync(() => handler.HandleAsync(new ThreadTitleRequestedEvent { ThreadId = Guid.NewGuid() }));
     }
 
+    /// <summary>
+    /// A failed write is left to the bus (retry, dead letter): swallowing it here would turn every storage failure
+    /// into a thread that silently keeps its fallback title.
+    /// </summary>
     [Fact]
-    public async Task HandleAsync_WhenUtilityReturnsNull_DoesNotUpdateTitle()
+    public async Task HandleAsync_WriteFailure_Propagates()
     {
-        var threadId = Guid.NewGuid();
-        var thread = new AgentThreadEntity { Title = null };
-        thread.Id = threadId;
+        var titles = new Mock<IThreadTitleService>();
+        titles.Setup(t => t.GenerateAsync(It.IsAny<ThreadTitleRequestedEvent>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database down"));
+        var handler = new ThreadTitleGenerationHandler(ScopeFactory(titles.Object));
 
-        var aiUtility = new Mock<IAiUtility>();
-        aiUtility.Setup(x => x.ExecuteAsync(
-                It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string?)null);
-
-        var repository = new Mock<IRepository<AgentThreadEntity, Guid>>();
-        repository.Setup(x => x.GetAsync(threadId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(thread);
-
-        var scopeFactory = CreateScopeFactory(aiUtility.Object, repository.Object, CreateOptions(true));
-        var handler = new ThreadTitleGenerationHandler(scopeFactory);
-
-        var @event = new ThreadFirstReplyCompletedEvent
-        {
-            ThreadId = threadId,
-            UserMessage = "Hello",
-            AssistantReply = "Hi"
-        };
-
-        await handler.HandleAsync(@event);
-
-        repository.Verify(x => x.UpdateAsync(It.IsAny<AgentThreadEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => handler.HandleAsync(new ThreadTitleRequestedEvent { ThreadId = Guid.NewGuid(), UserMessage = "x" }));
     }
 
-    [Fact]
-    public async Task HandleAsync_WhenExceptionThrown_Propagates()
+    private static IServiceScopeFactory ScopeFactory(IThreadTitleService? titles)
     {
-        var threadId = Guid.NewGuid();
-
-        var aiUtility = new Mock<IAiUtility>();
-        var repository = new Mock<IRepository<AgentThreadEntity, Guid>>();
-        repository.Setup(x => x.GetAsync(threadId, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Database error"));
-
-        var scopeFactory = CreateScopeFactory(aiUtility.Object, repository.Object, CreateOptions(true));
-        var handler = new ThreadTitleGenerationHandler(scopeFactory);
-
-        var @event = new ThreadFirstReplyCompletedEvent
+        var services = new ServiceCollection();
+        if (titles is not null)
         {
-            ThreadId = threadId,
-            UserMessage = "Hello",
-            AssistantReply = "Hi"
-        };
+            services.AddScoped(_ => titles);
+        }
 
-        // 标题生成落库是持久化副作用：异常必须冒泡给事件总线（隔离/重试/DLQ），不再吞。
-        var ex = await Record.ExceptionAsync(() => handler.HandleAsync(@event));
-        ex.ShouldNotBeNull();
-        ex.ShouldBeOfType<InvalidOperationException>();
+        return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
 }

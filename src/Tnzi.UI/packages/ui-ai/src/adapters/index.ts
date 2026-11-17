@@ -160,6 +160,8 @@ function toMessageStatus(status: string | null | undefined): ChatMessage['status
       return 'error';
     case 'usage_limit':
       return 'usage_limit';
+    case 'compacted':
+      return 'compacted';
     default:
       return undefined;
   }
@@ -191,15 +193,24 @@ function toAttachments(role: ChatMessage['role'], attachments: AttachmentDto[] |
  */
 export function toThreadItem(
   thread: Pick<AgentThreadDto, 'id' | 'lastActivityTime'>
-    & Partial<Pick<AgentThreadDto, 'title' | 'creationTime' | 'archivedTime'>>,
+    & Partial<Pick<
+      AgentThreadDto,
+      'title' | 'titlePending' | 'creationTime' | 'lastUserMessageTime' | 'archivedTime' | 'origin' | 'running' | 'awaitingOwner' | 'unread'
+    >>,
   untitledLabel = 'New chat',
 ): ThreadItem {
   return {
     id: thread.id,
     title: thread.title || untitledLabel,
     updatedAt: thread.lastActivityTime,
+    ...(thread.lastUserMessageTime ? { userMessageAt: thread.lastUserMessageTime } : {}),
     ...(thread.creationTime ? { createdAt: thread.creationTime } : {}),
     ...(thread.archivedTime ? { archived: true } : {}),
+    ...(thread.titlePending ? { titlePending: true } : {}),
+    ...(thread.origin ? { origin: thread.origin } : {}),
+    ...(thread.awaitingOwner ? { awaitingOwner: true } : {}),
+    ...(thread.running ? { running: true } : {}),
+    ...(thread.unread ? { unread: true } : {}),
   };
 }
 

@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
-import { applyThemeModeToDocument, DARK_CLASS } from '../../src/theme/document'
+import {
+  applyLanguageToDOM,
+  applyThemeModeToDocument,
+  applyThemeToDOM,
+  DARK_CLASS,
+  resolveThemeMode,
+} from '../../src/theme/document'
 
 describe('applyThemeModeToDocument', () => {
   let originalMatchMedia: typeof window.matchMedia
@@ -85,5 +91,120 @@ describe('dark class single-writer convention', () => {
   it('the allowed writer really does write it (guards against a vacuous pass)', () => {
     const source = readFileSync(join(SRC, ALLOWED), 'utf8')
     expect(source).toMatch(/classList\s*\.\s*toggle\(\s*DARK_CLASS/)
+  })
+})
+
+describe('resolveThemeMode', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('returns mode unchanged for explicit light', () => {
+    expect(resolveThemeMode('light')).toEqual({ resolved: 'light' })
+  })
+
+  it('returns mode unchanged for explicit dark', () => {
+    expect(resolveThemeMode('dark')).toEqual({ resolved: 'dark' })
+  })
+
+  it('falls back to light in SSR (no window)', () => {
+    vi.stubGlobal('window', undefined)
+    expect(resolveThemeMode('auto')).toEqual({ resolved: 'light' })
+    // (vi.unstubAllGlobals in afterEach already handles cleanup)
+  })
+
+  it('resolves auto via matchMedia and attaches listener with cleanup', () => {
+    const removeListener = vi.fn()
+    const addListener = vi.fn()
+    const mockWindow = {
+      matchMedia: vi.fn().mockReturnValue({
+        matches: true,
+        addEventListener: addListener,
+        removeEventListener: removeListener,
+      }),
+    }
+    vi.stubGlobal('window', mockWindow)
+
+    const onChange = vi.fn()
+    const result = resolveThemeMode('auto', onChange)
+
+    expect(result.resolved).toBe('dark')
+    expect(mockWindow.matchMedia).toHaveBeenCalledWith('(prefers-color-scheme: dark)')
+    expect(addListener).toHaveBeenCalledTimes(1)
+    expect(onChange).not.toHaveBeenCalled() // per contract - only on change, not initial
+
+    result.cleanup?.()
+    expect(removeListener).toHaveBeenCalledTimes(1)
+    // Same handler identity for add + remove
+    expect(removeListener.mock.calls[0][1]).toBe(addListener.mock.calls[0][1])
+  })
+
+  it('auto without onChange returns resolved without cleanup', () => {
+    vi.stubGlobal('window', {
+      matchMedia: vi.fn().mockReturnValue({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }),
+    })
+    const result = resolveThemeMode('auto')
+    expect(result).toEqual({ resolved: 'light' })
+    expect(result.cleanup).toBeUndefined()
+  })
+
+  // Safari before 14 only has the deprecated addListener; resolving must not
+  // throw there (the theme context subscribes on every 'auto').
+  it('auto with onChange still resolves when the MediaQueryList has no addEventListener', () => {
+    vi.stubGlobal('window', {
+      matchMedia: vi.fn().mockReturnValue({ matches: true, addListener: vi.fn() }),
+    })
+    const result = resolveThemeMode('auto', vi.fn())
+    expect(result).toEqual({ resolved: 'dark' })
+  })
+})
+
+describe('applyThemeToDOM', () => {
+  let originalMatchMedia: typeof window.matchMedia
+  beforeEach(() => {
+    originalMatchMedia = window.matchMedia
+    document.documentElement.classList.remove('dark')
+  })
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia
+  })
+
+  it('adds dark class when theme=dark', () => {
+    applyThemeToDOM('dark')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+  })
+
+  it('removes dark class when theme=light', () => {
+    document.documentElement.classList.add('dark')
+    applyThemeToDOM('light')
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+  })
+
+  it('auto theme defers to matchMedia (dark)', () => {
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true }) as any
+    applyThemeToDOM('auto')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+  })
+
+  // Starts from the dark class already set, so a broken 'auto' resolution
+  // cannot pass by simply never adding it.
+  it('auto theme defers to matchMedia (light)', () => {
+    document.documentElement.classList.add('dark')
+    window.matchMedia = vi.fn().mockReturnValue({ matches: false }) as any
+    applyThemeToDOM('auto')
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+  })
+})
+
+describe('applyLanguageToDOM', () => {
+  it('sets documentElement.lang', () => {
+    applyLanguageToDOM('zh-CN')
+    expect(document.documentElement.lang).toBe('zh-CN')
+    applyLanguageToDOM('en-US')
+    expect(document.documentElement.lang).toBe('en-US')
   })
 })

@@ -101,6 +101,10 @@
       "types": "./dist/errors/index.d.ts",
       "import": "./dist/errors/index.js",
       "require": "./dist/errors/index.cjs"
+    },
+    "./vite": {
+      "types": "./vite.d.ts",
+      "import": "./vite.mjs"
     }
   },
   "publishConfig": {
@@ -109,6 +113,8 @@
   },
   "files": [
     "dist",
+    "vite.mjs",
+    "vite.d.ts",
     "README.md"
   ],
   "scripts": {

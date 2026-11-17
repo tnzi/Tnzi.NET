@@ -35,10 +35,15 @@
           :row-actions-collapse="rowActionsCollapse"
           :row-key="rowKey"
           :row-props="rowProps"
+          :empty-text="emptyText"
+          :empty-hint="emptyHint"
           :translate="translate"
         >
           <template v-if="$slots.rowActions" #rowActions="{ row }">
             <slot name="rowActions" :row="row" />
+          </template>
+          <template v-if="$slots.empty" #empty>
+            <slot name="empty" />
           </template>
         </TTableRenderer>
       </template>
@@ -117,7 +122,7 @@ import TCrudColumnSetting from './TCrudColumnSetting.vue'
 import type { UseCrudPageReturn } from '../../headless/useCrudPage'
 import type { ColumnDef, ColumnDefs } from '../../headless/useColumnSettings'
 import type { FormModalMode } from '../../headless/useFormModal'
-import type { FormSchemaItem } from '@tnzi/ui'
+import type { FormSchemaItem } from '../forms/TSchemaForm'
 import type { RowAction } from '../../headless/row-actions'
 
 export interface TCrudPageProps<T, TId extends string | number = string | number> {
@@ -185,6 +190,15 @@ export interface TCrudPageProps<T, TId extends string | number = string | number
   rowProps?: (row: T) => Record<string, unknown>
   titleHelp?: string
   titleHelpTitle?: string
+  /**
+   * The list's own empty line and a muted hint under it (both already
+   * translated, like `searchPlaceholder`): "No applications yet" / "Apps you
+   * register here can sign people in with their accounts." Shown on a
+   * first-load empty list only; a search that finds nothing keeps the generic
+   * line. The Create call-to-action stays. For anything else, the `#empty` slot.
+   */
+  emptyText?: string
+  emptyHint?: string
   translate?: (key: string) => string
 }
 
@@ -214,6 +228,8 @@ const props = withDefaults(defineProps<TCrudPageProps<T, TId>>(), {
   rowActionsCollapse: true,
   titleHelp: undefined,
   titleHelpTitle: undefined,
+  emptyText: undefined,
+  emptyHint: undefined,
   translate: undefined,
 })
 
@@ -231,6 +247,8 @@ defineSlots<{
   detail?: (props: { data: Partial<T> | null; mode: FormModalMode | null }) => unknown
   detailFooter?: (props: { data: Partial<T> | null }) => unknown
   rowActions?: (props: { row: T }) => unknown
+  /** Replaces the whole empty state (table and phone cards alike). */
+  empty?: () => unknown
 }>()
 
 const showColumnSetting = ref(false)

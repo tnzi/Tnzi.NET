@@ -42,6 +42,8 @@ public class ExceptionHandlingMiddleware
                 new Handlers.BusinessExceptionHandler(environment, options, serviceProvider.GetRequiredService<ILogger<Handlers.BusinessExceptionHandler>>()),
             serviceProvider.GetService<Handlers.InfrastructureExceptionHandler>() ??
                 new Handlers.InfrastructureExceptionHandler(environment, options, serviceProvider.GetRequiredService<ILogger<Handlers.InfrastructureExceptionHandler>>()),
+            serviceProvider.GetService<Handlers.BadHttpRequestExceptionHandler>() ??
+                new Handlers.BadHttpRequestExceptionHandler(environment, options, serviceProvider.GetRequiredService<ILogger<Handlers.BadHttpRequestExceptionHandler>>()),
             serviceProvider.GetService<Handlers.DefaultExceptionHandler>() ??
                 new Handlers.DefaultExceptionHandler(environment, options, serviceProvider.GetRequiredService<ILogger<Handlers.DefaultExceptionHandler>>())
         ];

@@ -203,6 +203,33 @@ public class AgentDispatchFacade : IAgentDispatchFacade
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<ChatPermissionRequestDto>> GetPendingPermissionsAsync(
+        Guid threadId, CancellationToken cancellationToken = default)
+    {
+        var pending = new List<ChatPermissionRequestDto>();
+        foreach (var run in await GetActiveRunsAsync(threadId, cancellationToken))
+        {
+            pending.AddRange(await GetRunPendingPermissionsAsync(run.RunId, cancellationToken) ?? []);
+        }
+
+        return pending.OrderBy(p => p.CreatedAt).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ChatPermissionRequestDto>?> GetRunPendingPermissionsAsync(
+        Guid runId, CancellationToken cancellationToken = default)
+    {
+        var pending = await _cliDispatcher.GetPendingPermissionsAsync(runId, cancellationToken);
+        if (pending.Succeeded && pending.Data is not null)
+        {
+            return pending.Data.Select(evt => ToPendingPermission(runId, evt)).ToList();
+        }
+
+        // 看不见（或没有）这次运行；外部执行没加载时调度器答 501：那就是「没有在等的」
+        return pending.Code == 404 ? null : [];
+    }
+
+    /// <inheritdoc />
     public async Task<Result> CancelRunAsync(Guid runId, CancellationToken cancellationToken = default)
     {
         var cancelled = await _cliDispatcher.CancelAsync(runId, cancellationToken);
@@ -212,6 +239,25 @@ public class AgentDispatchFacade : IAgentDispatchFacade
         }
 
         return Result.Failure("Run not found.", 404, ErrorCodes.ChatRunNotFound);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 从最新的那条进行中的运行往回试：交接之后进程在最新的一条手里，旧的那条已经结束（调度器对它答 409）。
+    /// </remarks>
+    public async Task<Result> StopTaskAsync(Guid threadId, string taskId, CancellationToken cancellationToken = default)
+    {
+        Result? last = null;
+        foreach (var run in (await GetActiveRunsAsync(threadId, cancellationToken)).Reverse())
+        {
+            last = await _cliDispatcher.StopTaskAsync(run.RunId, taskId, cancellationToken);
+            if (last.Succeeded || last.Code is 400 or 501)
+            {
+                return last;
+            }
+        }
+
+        return last is { Code: not 409 } ? last : Result.Failure("No run is going on in this conversation.", 409, ErrorCodes.ChatNoActiveRun);
     }
 
     /// <summary>
@@ -234,6 +280,13 @@ public class AgentDispatchFacade : IAgentDispatchFacade
             if (chunk != null && (evt.Sequence ?? int.MaxValue) > fromSequence)
             {
                 yield return chunk;
+            }
+
+            // 一轮在运行中途结束：之后的事件是下一条回答，从头折叠（与执行器写进线程的那几条回答同一个切分）；
+            // 后台子 agent 后来的进展仍更新它所在那一轮的卡片（流式块带的是那张卡片的 id）
+            if (evt.Type == CliAgentEventType.TurnCompleted || evt.UserMessage is { Taken: true })
+            {
+                reply.BeginTurn();
             }
         }
 
@@ -319,17 +372,17 @@ public class AgentDispatchFacade : IAgentDispatchFacade
         AgentRunRequest request, CliAgentBindingDto binding, CancellationToken cancellationToken)
     {
         var limits = _chatOptions?.CurrentValue.Attachments ?? new ChatAttachmentOptions();
-        var attachments = ChatAttachmentRules.Read(request.ContentParts, limits);
+        var attachments = ChatAttachmentRules.Read(request.ContentParts, limits, acceptFiles: true);
         if (!attachments.Succeeded)
         {
             throw new BusinessException(attachments.Message!, attachments.ErrorCode ?? ErrorCodes.InvalidContent, attachments.Code ?? 400);
         }
 
         var files = attachments.Data!;
-        if (files.Count > 0 && !binding.AcceptsAttachments)
+        if (files.FirstOrDefault(f => !f.IsFile && !binding.AcceptedAttachments.Accepts(f.MediaType)) is { } refused)
         {
             throw new BusinessException(
-                $"This agent runs on {binding.ProviderKey ?? "an external CLI runtime"}, which cannot receive attachments.",
+                $"This agent runs on {binding.ProviderKey ?? "an external CLI runtime"}, which cannot receive {AttachmentNoun(refused)}.",
                 ErrorCodes.UnsupportedMediaType, 415);
         }
 
@@ -353,6 +406,9 @@ public class AgentDispatchFacade : IAgentDispatchFacade
             (threadId, degraded) = await VerifyThreadAsync(threads, requested, agentId, cancellationToken);
         }
 
+        var turnAttachments = files.Select(f => new CliTurnAttachment(f.MediaType, f.FileName, f.Content.LongLength, f.IsFile)).ToList();
+        await RefuseUnacceptedFilesAsync(services, files, turnAttachments, agentId, threadId, request.UserId, cancellationToken);
+
         await RefuseOverLimitTurnAsync(request, agentId, cancellationToken);
 
         var handlers = services.GetServices<ICliAgentTurnHandler>().ToList();
@@ -362,7 +418,7 @@ public class AgentDispatchFacade : IAgentDispatchFacade
             ThreadId = threadId,
             UserId = request.UserId,
             Message = text,
-            Attachments = files.Select(f => new CliTurnAttachment(f.MediaType, f.FileName, f.Content.LongLength)).ToList(),
+            Attachments = turnAttachments,
             RewoundTurns = request.RewoundTurns,
             IsEphemeral = request.Ephemeral,
             Metadata = request.TurnMetadata ?? EmptyMetadata
@@ -371,7 +427,7 @@ public class AgentDispatchFacade : IAgentDispatchFacade
         var isNewThread = false;
         if (!request.Ephemeral && threadId is null && !degraded)
         {
-            (threadId, isNewThread) = await CreateThreadAsync(threads, agentId, cancellationToken);
+            (threadId, isNewThread) = await CreateThreadAsync(threads, agentId, request.ThreadOrigin, request.ThreadListing, cancellationToken);
         }
 
         // 就地回填到请求上。流式调用方（ChatService）正是从 request.ThreadId 读出线程 id 写进 SSE 事件的：
@@ -381,7 +437,7 @@ public class AgentDispatchFacade : IAgentDispatchFacade
         Guid? userMessageId = null;
         if (threadId is { } id)
         {
-            userMessageId = await SaveUserMessageAsync(threads, id, text, request.TurnMetadata, cancellationToken);
+            userMessageId = await SaveUserMessageAsync(threads, id, text, request.TurnMetadata, request.SentAt, cancellationToken);
         }
 
         var dispatcher = services.GetRequiredService<ICliAgentDispatcher>();
@@ -395,7 +451,10 @@ public class AgentDispatchFacade : IAgentDispatchFacade
             PerTurnContext = context,
             Attachments = files.Count > 0 ? AttachmentParts(request.ContentParts) : null,
             UserMessageId = userMessageId,
-            Model = CliModel(request.Model, binding),
+            Model = await CliModelAsync(services, request.Model, binding, agentId, threadId, request.UserId, request.TurnMetadata, cancellationToken),
+            Metadata = request.TurnMetadata,
+            // 聊天入口已按这一轮的模型校验过（ResolveChatTurnAsync）；进程内调用方给的原样交，调度器对没有登录用户的调用同样采纳
+            Effort = string.IsNullOrWhiteSpace(request.Effort) ? null : request.Effort.Trim(),
             // 有登录用户在聊的一轮有人等着：「先问我」档的权限请求交给界面批准。进程内调用方（TnziAiClient 之类）可能是后台任务，按无人值守
             Attended = request.UserId is not null && !request.TrustedToolSelection
         }, cancellationToken);
@@ -410,6 +469,13 @@ public class AgentDispatchFacade : IAgentDispatchFacade
             {
                 ErrorDetails = enqueued.ErrorDetails
             };
+        }
+
+        // 第一条消息已被接受（入队成功）：与内建路径同一时机起标题，不等外部 CLI 的回复
+        if (isNewThread && threadId is { } titledThread && !string.IsNullOrWhiteSpace(text)
+            && services.GetService<IThreadTitleService>() is { } titles)
+        {
+            await titles.StartAsync(new ThreadTitleRequest(titledThread, text, request.UserId, agentId), cancellationToken);
         }
 
         var queued = new CliTurnQueued
@@ -450,7 +516,7 @@ public class AgentDispatchFacade : IAgentDispatchFacade
     {
         try
         {
-            var (verified, _) = await threads.GetOrCreateThreadAsync(threadId, agentId, cancellationToken);
+            var (verified, _) = await threads.GetOrCreateThreadAsync(threadId, agentId, origin: null, ct: cancellationToken);
             return (verified, false);
         }
         catch (BusinessException)
@@ -466,11 +532,11 @@ public class AgentDispatchFacade : IAgentDispatchFacade
     }
 
     private async Task<(Guid? ThreadId, bool IsNew)> CreateThreadAsync(
-        IAgentThreadInternalService threads, Guid agentId, CancellationToken cancellationToken)
+        IAgentThreadInternalService threads, Guid agentId, string? origin, ThreadListing listing, CancellationToken cancellationToken)
     {
         try
         {
-            var (created, isNew) = await threads.GetOrCreateThreadAsync(null, agentId, cancellationToken);
+            var (created, isNew) = await threads.GetOrCreateThreadAsync(null, agentId, origin, listing, cancellationToken);
             return (created, isNew);
         }
         catch (BusinessException)
@@ -486,13 +552,13 @@ public class AgentDispatchFacade : IAgentDispatchFacade
 
     private async Task<Guid?> SaveUserMessageAsync(
         IAgentThreadInternalService threads, Guid threadId, string text,
-        IReadOnlyDictionary<string, JsonElement>? metadata, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, JsonElement>? metadata, DateTime? sentAt, CancellationToken cancellationToken)
     {
         try
         {
-            // 带元数据时连同它一起存（重新生成要原样再带一次）；不带时走原来那个方法
-            var id = metadata is { Count: > 0 }
-                ? await threads.SaveUserMessageAsync(threadId, text, metadata, ct: cancellationToken)
+            // 带元数据（重新生成要原样再带一次）或带发出时间（排队消息）时走用户消息的方法；都不带时走原来那个方法
+            var id = metadata is { Count: > 0 } || sentAt is not null
+                ? await threads.SaveUserMessageAsync(threadId, text, metadata, sentAt: sentAt, ct: cancellationToken)
                 : await threads.SaveMessageAsync(threadId, MessageRole.User, text, ct: cancellationToken);
             return id == Guid.Empty ? null : id;
         }
@@ -575,10 +641,13 @@ public class AgentDispatchFacade : IAgentDispatchFacade
     }
 
     /// <summary>
-    /// 交给 CLI 的模型：模型清单里有、且属于这个运行时的 provider 才交。聊天入口已经按用户的允许列表校验过；
-    /// 没配模型清单时一律不交（由绑定决定），否则任何调用方都能点名最贵的那个。
+    /// 交给 CLI 的模型：模型清单里有、且属于这一轮实际的 provider 才交。实际的 provider 是绑定的那家，或者应用的
+    /// <see cref="IChatModelTargetResolver"/> 说这段对话落在的那家（例如用户档案把它换到了 codex）。聊天入口已经按同一口径
+    /// 与用户的允许列表校验过；没配模型清单时一律不交（由绑定决定），否则任何调用方都能点名最贵的那个。
     /// </summary>
-    private string? CliModel(string? requested, CliAgentBindingDto binding)
+    private async Task<string?> CliModelAsync(
+        IServiceProvider services, string? requested, CliAgentBindingDto binding, Guid agentId, Guid? threadId, Guid? userId,
+        IReadOnlyDictionary<string, JsonElement>? metadata, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(requested) || _chatOptions?.CurrentValue.Models is not { Count: > 0 } catalog)
         {
@@ -586,17 +655,36 @@ public class AgentDispatchFacade : IAgentDispatchFacade
         }
 
         var match = catalog.FirstOrDefault(m =>
-            m is not null
-            && string.Equals(m.Id?.Trim(), requested.Trim(), StringComparison.OrdinalIgnoreCase)
-            && (string.IsNullOrWhiteSpace(m.Provider) || string.Equals(m.Provider.Trim(), binding.ProviderKey, StringComparison.OrdinalIgnoreCase)));
-
+            m is not null && string.Equals(m.Id?.Trim(), requested.Trim(), StringComparison.OrdinalIgnoreCase));
         if (match is null)
         {
-            _logger.LogWarning("Model {Model} is not in the model list for provider {ProviderKey}; the binding's model is used instead",
+            // 应用说这段对话固定用的模型可以不在清单里（ChatModelTarget.Model）：那一轮的模型由落点给出
+            _logger.LogInformation("Model {Model} is not in the model list; the run's placement or the binding ({ProviderKey}) decides the model",
                 requested, binding.ProviderKey);
+            return null;
         }
 
-        return match?.Id.Trim();
+        var provider = string.IsNullOrWhiteSpace(match.Provider) ? null : match.Provider.Trim();
+        if (provider is null || string.Equals(provider, binding.ProviderKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return match.Id.Trim();
+        }
+
+        var target = services.GetService<IChatModelTargetResolver>() is { } resolver
+            ? await resolver.ResolveAsync(new ChatModelTargetRequest
+            {
+                UserId = userId, AgentId = agentId, ThreadId = threadId, BindingProviderKey = binding.ProviderKey,
+                Metadata = metadata ?? EmptyMetadata
+            }, cancellationToken)
+            : null;
+        if (string.Equals(target?.ProviderKey?.Trim(), provider, StringComparison.OrdinalIgnoreCase))
+        {
+            return match.Id.Trim();
+        }
+
+        _logger.LogWarning("Model {Model} belongs to {ModelProvider}, not to {ProviderKey} this turn runs on; the binding's model is used instead",
+            requested, provider, target?.ProviderKey ?? binding.ProviderKey);
+        return null;
     }
 
     /// <summary>
@@ -749,12 +837,19 @@ public class AgentDispatchFacade : IAgentDispatchFacade
 
         switch (evt.Type)
         {
-            case CliAgentEventType.Text:
-                return update.Text is null
-                    ? null
-                    : new AgentStreamChunk { Text = update.Text, Mode = StreamMode.Messages, Sequence = evt.Sequence };
+            case CliAgentEventType.Text when update.Text is not null:
+                return new AgentStreamChunk { Text = update.Text, Mode = StreamMode.Messages, Sequence = evt.Sequence };
 
-            case CliAgentEventType.Thinking:
+            // 子 agent 写的字：不是回复文本，是派出它的那张卡片多了一步
+            case CliAgentEventType.Text:
+            case CliAgentEventType.ToolResult:
+            case CliAgentEventType.Task:
+                return update.ToolCalls.Count == 0
+                    ? null
+                    : new AgentStreamChunk { ToolCalls = [.. update.ToolCalls], Mode = StreamMode.Messages, Sequence = evt.Sequence };
+
+            // 子 agent 的思考不是主回复的推理
+            case CliAgentEventType.Thinking when string.IsNullOrEmpty(evt.ParentCallId):
                 return new AgentStreamChunk { ReasoningText = evt.Content, Mode = StreamMode.Messages, Sequence = evt.Sequence };
 
             case CliAgentEventType.ToolUse:
@@ -762,15 +857,10 @@ public class AgentDispatchFacade : IAgentDispatchFacade
                 {
                     IsToolCall = true,
                     ToolCallNames = evt.Tool is null ? null : [evt.Tool],
-                    ToolCalls = update.ToolCall is null ? null : [update.ToolCall],
+                    ToolCalls = update.ToolCalls.Count == 0 ? null : [.. update.ToolCalls],
                     Mode = StreamMode.Messages,
                     Sequence = evt.Sequence
                 };
-
-            case CliAgentEventType.ToolResult:
-                return update.ToolCall is null
-                    ? null
-                    : new AgentStreamChunk { ToolCalls = [update.ToolCall], Mode = StreamMode.Messages, Sequence = evt.Sequence };
 
             case CliAgentEventType.Error:
                 return new AgentStreamChunk { Error = evt.Content, Mode = StreamMode.Messages, Sequence = evt.Sequence };
@@ -789,6 +879,37 @@ public class AgentDispatchFacade : IAgentDispatchFacade
                         EventData = PermissionEventData(evt),
                         Sequence = evt.Sequence
                     };
+
+            // 一轮的回答收尾、上下文压缩：总是交出。前者告诉界面后面的文字是一条新回答，后者是一轮 /compact 唯一的结果
+            case CliAgentEventType.TurnCompleted:
+                return new AgentStreamChunk
+                {
+                    Mode = StreamMode.Messages,
+                    EventType = RunStreamEventTypes.TurnCompleted,
+                    EventData = TurnEventData(evt.Turn),
+                    Sequence = evt.Sequence
+                };
+
+            // 队列交给这一轮的一条消息有了着落：总是交出，界面据此在回答中间插入用户的话（与刷新后线程里的次序一样）
+            case CliAgentEventType.UserMessage:
+                return evt.UserMessage is null
+                    ? null
+                    : new AgentStreamChunk
+                    {
+                        Mode = StreamMode.Messages,
+                        EventType = RunStreamEventTypes.UserMessage,
+                        EventData = UserMessageEventData(evt.UserMessage),
+                        Sequence = evt.Sequence
+                    };
+
+            case CliAgentEventType.Compacted:
+                return new AgentStreamChunk
+                {
+                    Mode = StreamMode.Messages,
+                    EventType = RunStreamEventTypes.Compacted,
+                    EventData = CompactionEventData(evt.Compaction),
+                    Sequence = evt.Sequence
+                };
 
             // 状态播报、日志属于过程细节：只有显式要求更细粒度的调用方才收。
             case CliAgentEventType.Status:
@@ -809,7 +930,8 @@ public class AgentDispatchFacade : IAgentDispatchFacade
     }
 
     /// <summary>
-    /// 权限事件在聊天流上的 <c>eventData</c>（camelCase 键）：请求 id、工具、工具调用 id、入参、说明、选项、过期时间；结局另带选中的选项与回答的人。
+    /// 权限事件在聊天流上的 <c>eventData</c>（camelCase 键）：请求 id、种类、工具、工具调用 id、入参、说明、选项、过期时间，问题请求带问题、
+    /// 计划请求带计划；结局另带选中的选项、回答的人与问题的回答。
     /// </summary>
     private static Dictionary<string, object> PermissionEventData(CliAgentEvent evt)
     {
@@ -817,8 +939,22 @@ public class AgentDispatchFacade : IAgentDispatchFacade
         var data = new Dictionary<string, object>(StringComparer.Ordinal)
         {
             ["requestId"] = permission.RequestId ?? Guid.Empty,
+            ["kind"] = permission.Kind,
             ["status"] = permission.Status.ToString()
         };
+
+        if (permission.Questions is { Count: > 0 } questions)
+        {
+            data["questions"] = questions;
+        }
+
+        AddIfPresent(data, "plan", permission.Plan);
+        AddIfPresent(data, "planSource", permission.PlanSource);
+
+        if (permission.Answers is { Count: > 0 } answers)
+        {
+            data["answers"] = answers;
+        }
 
         AddIfPresent(data, "tool", evt.Tool);
         AddIfPresent(data, "toolCallId", evt.CallId);
@@ -851,11 +987,125 @@ public class AgentDispatchFacade : IAgentDispatchFacade
         return data;
     }
 
+    /// <summary>一条还在等的请求事件 → 列表里的一项（字段与流上 <c>permission_request</c> 的 <c>eventData</c> 相同）。</summary>
+    private static ChatPermissionRequestDto ToPendingPermission(Guid runId, CliAgentEvent evt)
+    {
+        var permission = evt.Permission!;
+        return new ChatPermissionRequestDto
+        {
+            RunId = runId,
+            RequestId = permission.RequestId ?? Guid.Empty,
+            Kind = permission.Kind,
+            Status = permission.Status.ToString(),
+            Tool = evt.Tool,
+            ToolCallId = evt.CallId,
+            Input = evt.Input,
+            Description = evt.Content,
+            Title = permission.Title,
+            Reason = permission.Reason,
+            BlockedPath = permission.BlockedPath,
+            Questions = permission.Questions is { Count: > 0 } questions ? questions : null,
+            Plan = permission.Plan,
+            PlanSource = permission.PlanSource,
+            Options = permission.Options,
+            ExpiresAt = permission.ExpiresAt,
+            CreatedAt = evt.CreatedAt
+        };
+    }
+
+    /// <summary>一轮收尾在聊天流上的 <c>eventData</c>：写进线程的回答 id 与还在跑的后台任务。</summary>
+    private static Dictionary<string, object> TurnEventData(CliTurnBoundary? turn)
+    {
+        var data = new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["backgroundTasks"] = turn?.BackgroundTasks ?? []
+        };
+
+        if (turn?.AssistantMessageId is { } messageId)
+        {
+            data["assistantMessageId"] = messageId;
+        }
+
+        return data;
+    }
+
+    /// <summary>交给这一轮的一条用户消息有了着落，在聊天流上的 <c>eventData</c>（没有的值省略）。</summary>
+    private static Dictionary<string, object> UserMessageEventData(CliUserMessage message)
+    {
+        var data = new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["messageId"] = message.MessageId,
+            ["taken"] = message.Taken
+        };
+        AddIfPresent(data, "text", message.Text);
+        AddIfPresent(data, "reason", message.Reason);
+        if (message.ThreadMessageId is { } threadMessageId)
+        {
+            data["threadMessageId"] = threadMessageId;
+        }
+
+        if (message.AssistantMessageId is { } assistantMessageId)
+        {
+            data["assistantMessageId"] = assistantMessageId;
+        }
+
+        return data;
+    }
+
+    /// <summary>上下文压缩在聊天流上的 <c>eventData</c>：触发方式与压缩前后的 token 数（CLI 没报的省略）。</summary>
+    private static Dictionary<string, object> CompactionEventData(CliCompaction? compaction)
+    {
+        var data = new Dictionary<string, object>(StringComparer.Ordinal);
+        AddIfPresent(data, "trigger", compaction?.Trigger);
+        if (compaction?.PreTokens is { } pre)
+        {
+            data["preTokens"] = pre;
+        }
+
+        if (compaction?.PostTokens is { } post)
+        {
+            data["postTokens"] = post;
+        }
+
+        return data;
+    }
+
     private static void AddIfPresent(Dictionary<string, object> data, string key, string? value)
     {
         if (!string.IsNullOrEmpty(value))
         {
             data[key] = value;
+        }
+    }
+
+    private static string AttachmentNoun(ChatAttachmentPayload attachment) => attachment.IsImage ? "images" : "PDF documents";
+
+    /// <summary>
+    /// 带着文件（不是图片或 PDF）的一轮，消费方的 <see cref="ICliFileAttachmentPolicy"/> 不收时以 415 拒绝；没有注册时同样拒绝。
+    /// </summary>
+    private static async Task RefuseUnacceptedFilesAsync(
+        IServiceProvider services, IReadOnlyList<ChatAttachmentPayload> files, IReadOnlyList<CliTurnAttachment> turnAttachments,
+        Guid agentId, Guid? threadId, Guid? userId, CancellationToken cancellationToken)
+    {
+        if (files.FirstOrDefault(f => f.IsFile) is not { } first)
+        {
+            return;
+        }
+
+        var accepted = await ChatAttachmentRules.AcceptsFilesAsync(
+            services.GetServices<ICliFileAttachmentPolicy>(),
+            new CliFileAttachmentRequest
+            {
+                AgentId = agentId,
+                ThreadId = threadId,
+                UserId = userId,
+                Files = turnAttachments.Where(a => a.IsFile).ToList()
+            },
+            cancellationToken);
+        if (!accepted)
+        {
+            var refusal = ChatAttachmentRules.RefuseFile(first);
+            throw new BusinessException(refusal.Message!, refusal.ErrorCode ?? ErrorCodes.UnsupportedMediaType, refusal.Code ?? 415);
         }
     }
 

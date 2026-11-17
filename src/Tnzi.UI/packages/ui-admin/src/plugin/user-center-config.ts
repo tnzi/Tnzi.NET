@@ -116,6 +116,11 @@ export interface AdminUserCenterSection {
    *  `usePermissionGuard().can()`; omit to always show (super-admin /
    *  not-yet-loaded fail-open as everywhere). */
   permission?: string
+  /** Roles allowed to SEE this section: any one of them is enough, compared
+   *  case-insensitively, the same rule as a route's `meta.roles` and a Settings
+   *  Center section's `roles`. Combined with `permission`, both must hold.
+   *  Super-user bypass and not-yet-loaded fail-open as everywhere. */
+  roles?: string[]
   /** Module short-name required to SEE this section - hidden when the backend
    *  hasn't loaded that module (e.g. `'storage'`). Fail-open when the module
    *  signal is unavailable. */

@@ -28,7 +28,7 @@
 import { computed, h, ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import type { AdminMenuItem } from '../../stores/useAdminRouteStore'
 import { TSvgIcon } from '@tnzi/ui'
-import { TMenuToggler } from '@tnzi/ui'
+import TMenuToggler from '../utility/TMenuToggler.vue'
 import { NBadge } from 'naive-ui'
 import { normalizeNavBadge } from '../../utils/nav-badge'
 import { translatePageKey } from '../../i18n/translate'

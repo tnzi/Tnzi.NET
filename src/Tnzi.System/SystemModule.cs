@@ -36,6 +36,9 @@ public class SystemModule : TnziApplicationModule
         // 注册配置加密选项（显式嵌套 section）
         context.Services.AddTnziOptions<SettingEncryptionOptions, SettingEncryptionOptionsValidator>(configuration, "System:Encryption");
 
+        // 设置热链：首次读取失败后的重试间隔与健康检查口径（System:Settings）
+        context.Services.AddTnziOptions<SettingConfigurationOptions, SettingConfigurationOptionsValidator>(configuration);
+
         // 访问日志采集开关（System:AccessLog，默认关闭）
         context.Services.AddTnziOptions<AccessLogOptions, AccessLogOptionsValidator>(configuration);
 
@@ -105,6 +108,14 @@ public class SystemModule : TnziApplicationModule
         if (settingSource != null)
         {
             services.AddSingleton(settingSource);
+
+            // 启动那一刻读不到数据库时，AttachAsync 不打断启动、应用先用 appsettings 的值跑。
+            // 后台重试直到读到，读到即触发 reload token；在那之前健康检查 settings 报告未就绪（/health/ready 503）。
+            // 没有这两样，这种状态会一直持续到下次重启，而应用看上去一切健康。
+            services.AddHostedService<SettingConfigurationInitialLoadService>();
+            services.AddHealthChecks().AddCheck<SettingConfigurationHealthCheck>(
+                "settings",
+                tags: ["settings", "configuration", "database"]);
         }
 
         // 实时推送：SignalR 加载时注册 SettingsRealtimeHub 的按 Hub 推送服务，

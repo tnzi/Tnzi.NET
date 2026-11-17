@@ -20,11 +20,17 @@
  *
  * The words come from each step's description (see `ToolRendererEntry.describe`). One
  * step is a run too, so a reply reads the same however many tools it used, and history
- * looks like a finished live answer.
+ * looks like a finished live answer. A sub-agent the agent dispatched and a command it runs
+ * in the background are steps too, counted by what happened to them ("Finished 6 background
+ * commands", "An agent running"); opened, a sub-agent's row opens its own view.
+ *
+ * At the right end of the line, without opening the run: how many lines its steps added and
+ * removed in files ("+12 -3") and thumbnails of the images they returned (`TRunImages`:
+ * hover for a preview, click for the full-size viewer).
  */
 import { computed, ref } from 'vue'
 import { Icon } from '@iconify/vue'
-import { useAiI18n } from '../../i18n/index'
+import { formatAiMessage, useAiI18n } from '../../i18n/index'
 import type { ToolCallInfo } from '../../headless/useChat'
 import { isAlwaysVisible, useChatRenderContext } from '../chat/chat-render-context'
 import TStreamLoader from '../streaming/TStreamLoader.vue'
@@ -32,8 +38,11 @@ import TToolCall from './TToolCall.vue'
 import TToolStep from './TToolStep.vue'
 import { toolCallState } from './tool-call-status'
 import { resolveToolEntry } from './built-in-tool-renderers'
-import { describeToolStep, runningRunLabel, stepPhrase, summarizeToolRun, type ToolRunStep } from './tool-steps'
+import { describeToolStep, runningRunLabel, shownStepState, stepPhrase, summarizeToolRun, type ToolRunStep } from './tool-steps'
 import { ToolRunScope, type ToolRunContext } from './tool-run-context'
+import { isTaskStep, taskStepDescription, taskStepState } from './task-steps'
+import { runImages, runLineChanges } from './run-extras'
+import TRunImages from './TRunImages.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -64,17 +73,22 @@ interface RunItem {
 const items = computed<RunItem[]>(() =>
   props.toolCalls.map((toolCall, i) => {
     const entry = resolveToolEntry(toolCall.name, context.value.toolRenderers)
+    const task = isTaskStep(toolCall)
     return {
       key: toolCall.id ?? `${toolCall.name}:${i}`,
       toolCall,
-      step: {
-        description: describeToolStep(toolCall, entry.describe, t.value),
-        state: toolCallState(toolCall, props.streaming),
-      },
-      alwaysVisible: isAlwaysVisible(toolCall, entry),
+      step: task
+        ? { description: taskStepDescription(toolCall, t.value), state: taskStepState(toolCall) }
+        : { description: describeToolStep(toolCall, entry.describe, t.value), state: toolCallState(toolCall, props.streaming) },
+      alwaysVisible: !task && isAlwaysVisible(toolCall, entry),
     }
   }),
 )
+
+/* An image is captioned with its step's words as the run lists them, in the interface's language. */
+const images = computed(() => runImages(props.toolCalls, (_, i) => stepPhrase(items.value[i]!.step)))
+const lineChanges = computed(() => runLineChanges(props.toolCalls))
+const hasExtras = computed(() => images.value.length > 0 || lineChanges.value.added > 0 || lineChanges.value.removed > 0)
 
 const kept = computed(() => items.value.filter((item) => item.alwaysVisible))
 /* A run of nothing but steps that stay in view has nothing to fold. */
@@ -98,6 +112,7 @@ function toggle(): void {
 <template>
   <div class="t-tool-run" :class="{ 'is-open': open, 'is-active': active }">
     <template v-if="hasLine">
+      <div class="t-tool-run__head">
       <button type="button" class="t-tool-run__line" :aria-expanded="open" @click="toggle">
         <span v-if="active" class="t-tool-run__mark">
           <slot name="mark"><TStreamLoader :size="14" /></slot>
@@ -115,6 +130,14 @@ function toggle(): void {
         </span>
         <Icon icon="lucide:chevron-right" class="t-tool-run__chevron" aria-hidden="true" />
       </button>
+      <span v-if="hasExtras" class="t-tool-run__extras">
+        <span v-if="lineChanges.added || lineChanges.removed" class="t-tool-run__lines">
+          <span v-if="lineChanges.added" class="t-tool-run__added" :aria-label="formatAiMessage(t.tasks.linesAdded, { count: lineChanges.added })">+{{ lineChanges.added }}</span>
+          <span v-if="lineChanges.removed" class="t-tool-run__removed" :aria-label="formatAiMessage(t.tasks.linesRemoved, { count: lineChanges.removed })">-{{ lineChanges.removed }}</span>
+        </span>
+        <TRunImages v-if="images.length" :images="images" />
+      </span>
+      </div>
 
       <div v-show="open" class="t-tool-run__box">
         <ToolRunScope :context="runContext">
@@ -122,7 +145,7 @@ function toggle(): void {
             <!-- A step shown whole under the line is listed here by its words only. -->
             <TToolStep
               v-if="item.alwaysVisible"
-              :state="item.step.state"
+              :state="shownStepState(item.step)"
               :label="stepPhrase(item.step)"
               :subject="item.step.description.subject"
               :expandable="false"
@@ -174,8 +197,32 @@ function toggle(): void {
   transition: color var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease);
 }
 .t-tool-run__line:hover { color: var(--tnzi-ai-text); }
+/* The line and, at the content's right edge, what the steps changed and the images they returned. */
+.t-tool-run__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  align-self: stretch;
+  min-width: 0;
+}
+.t-tool-run__extras {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.t-tool-run__lines {
+  display: inline-flex;
+  gap: 4px;
+  font-family: var(--tnzi-ai-font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.t-tool-run__added { color: var(--tnzi-ai-success); }
+.t-tool-run__removed { color: var(--tnzi-ai-danger); }
 .t-tool-run__line:focus-visible {
-  outline: 2px solid var(--tnzi-ai-accent);
+  outline: var(--tnzi-ai-focus-outline);
   outline-offset: 2px;
 }
 .t-tool-run__mark {

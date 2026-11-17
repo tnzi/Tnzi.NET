@@ -14,6 +14,8 @@
 import { computed, ref } from 'vue'
 import type { SidebarMode } from '../../headless/useSidebarState'
 import { useBodyScrollLock } from '../../headless/useBodyScrollLock'
+import { useBackLayer } from '../../headless/back-layers'
+import { closestOnPath, trackEventPaths } from '../../headless/event-path'
 
 const props = withDefaults(
   defineProps<{
@@ -42,12 +44,20 @@ const shownMode = computed<SidebarMode>(() =>
 )
 
 const currentWidth = computed(() => {
+  if (props.isMobile) return undefined
   if (shownMode.value === 'hidden') return 0
   if (shownMode.value === 'icon') return props.railWidth
   return props.width
 })
 
 const isDrawer = computed(() => props.isMobile && props.modelValue !== 'hidden')
+
+/* On a narrow screen the sidebar is never part of the page's flow, open or
+   closed: it stays `position: fixed` at its full width and slides in and out
+   with a transform, which moves nothing else. It used to collapse to
+   `width: 0` in the flow and become fixed only while open, so closing it put
+   it back in the row for the length of the width animation: the main column
+   jumped to 110px wide and reflowed its text on every frame back to full width. */
 
 /* Hidden mode collapses the sidebar to `width: 0` + `overflow: hidden`, which
    hides it visually but leaves its buttons in the tab order. `inert` takes
@@ -61,16 +71,26 @@ function closeFromBackdrop(): void {
   }
 }
 
+/* The back button or gesture closes the open drawer, as in a native app,
+   instead of leaving the page (`useBackLayer`). Only the drawer: on a wide
+   screen the sidebar is part of the page. */
+useBackLayer(isDrawer, () => {
+  emit('update:modelValue', 'hidden')
+})
+
 /**
  * In icon (collapsed) mode, clicking an empty area of the rail expands the
  * sidebar - matches Manus's "whole nav is a cursor-e-resize click target"
  * behavior. Clicks that land on an interactive descendant (button / link /
  * input / [role=button]) keep their own semantics and DO NOT expand.
  */
+trackEventPaths()
+
 function handleRailClick(e: MouseEvent): void {
   if (shownMode.value !== 'icon') return
-  const target = e.target as HTMLElement | null
-  if (target?.closest('button,a,input,[role="button"],[data-no-expand]')) return
+  /* The path the click took: a button's handler may have re-rendered it (its
+     icon swapped) before this runs, leaving `target` detached. */
+  if (closestOnPath(e, 'button,a,input,[role="button"],[data-no-expand]', e.currentTarget as Element)) return
   emit('update:modelValue', 'expanded')
 }
 
@@ -95,13 +115,16 @@ useBodyScrollLock(isDrawer)
 </script>
 
 <template>
-  <transition name="t-sidebar-backdrop">
-    <div
-      v-if="isDrawer"
-      class="t-collapsible-sidebar__backdrop"
-      @click="closeFromBackdrop"
-    />
-  </transition>
+  <!-- Always there on a narrow screen, so it fades in and out in the same
+       style change as the drawer's slide (a `<transition>` starts a frame
+       later than a class change). Closed, it lets clicks through. -->
+  <div
+    v-if="isMobile"
+    class="t-collapsible-sidebar__backdrop"
+    :class="{ 'is-open': isDrawer }"
+    aria-hidden="true"
+    @click="closeFromBackdrop"
+  />
 
   <aside
     class="t-collapsible-sidebar"
@@ -109,9 +132,10 @@ useBodyScrollLock(isDrawer)
       't-collapsible-sidebar--expanded': shownMode === 'expanded',
       't-collapsible-sidebar--icon': shownMode === 'icon',
       't-collapsible-sidebar--hidden': modelValue === 'hidden',
+      't-collapsible-sidebar--mobile': isMobile,
       't-collapsible-sidebar--drawer': isDrawer,
     }"
-    :style="{ width: `${currentWidth}px` }"
+    :style="currentWidth === undefined ? undefined : { width: `${currentWidth}px` }"
     :aria-hidden="isFullyHidden"
     :inert="isFullyHidden || undefined"
     @click="handleRailClick"
@@ -185,31 +209,74 @@ useBodyScrollLock(isDrawer)
 .t-collapsible-sidebar--icon [role='button'] {
   cursor: pointer;
 }
-/* The drawer starts below the page's top inset (`--tnzi-overlay-inset-top`,
-   e.g. a frameless window's title bar); its backdrop covers the whole
-   viewport, the inset included, so nothing behind it is left undimmed. */
-.t-collapsible-sidebar--drawer {
+/* Narrow screen: an off-canvas drawer, open or closed. It starts below the
+   page's top inset (`--tnzi-overlay-inset-top`, e.g. a frameless window's
+   title bar); its backdrop covers the whole viewport, the inset included, so
+   nothing behind it is left undimmed.
+   Closed, it sits one width to the left and is `visibility: hidden` once the
+   slide has finished (the visibility change is delayed by the slide's length
+   on the way out and immediate on the way in), so it is neither painted nor
+   reachable; `inert` covers the moment in between. Only `transform` and
+   `opacity` animate, so no frame of the slide lays anything out. */
+.t-collapsible-sidebar--mobile {
   position: fixed;
   top: var(--tnzi-overlay-inset-top, 0px);
   bottom: 0;
   left: 0;
-  width: 280px !important;
-  z-index: 50;
+  width: 280px;
+  max-width: calc(100vw - 48px);
+  height: auto;
+  z-index: var(--tnzi-ai-z-drawer, 50);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition:
+    transform var(--t-drawer-duration) var(--t-drawer-easing),
+    box-shadow var(--t-drawer-duration) var(--t-drawer-easing),
+    visibility 0s linear var(--t-drawer-duration);
+}
+.t-collapsible-sidebar--mobile.t-collapsible-sidebar--hidden {
+  box-shadow: none;
+}
+.t-collapsible-sidebar--drawer {
+  transform: none;
+  visibility: visible;
+  transition:
+    transform var(--t-drawer-duration) var(--t-drawer-easing),
+    box-shadow var(--t-drawer-duration) var(--t-drawer-easing),
+    visibility 0s linear 0s;
 }
 .t-collapsible-sidebar__backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
-  z-index: 49;
-}
-.t-sidebar-backdrop-enter-active,
-.t-sidebar-backdrop-leave-active {
-  transition: opacity 150ms ease;
-}
-.t-sidebar-backdrop-enter-from,
-.t-sidebar-backdrop-leave-to {
+  z-index: calc(var(--tnzi-ai-z-drawer, 50) - 1);
   opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--t-drawer-duration) var(--t-drawer-easing),
+    visibility 0s linear var(--t-drawer-duration);
+}
+.t-collapsible-sidebar__backdrop.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity var(--t-drawer-duration) var(--t-drawer-easing),
+    visibility 0s linear 0s;
+}
+/* One duration and curve for the drawer and its backdrop, so they move as one. */
+.t-collapsible-sidebar--mobile,
+.t-collapsible-sidebar__backdrop {
+  --t-drawer-duration: 240ms;
+  --t-drawer-easing: cubic-bezier(0.32, 0.72, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-collapsible-sidebar--mobile,
+  .t-collapsible-sidebar__backdrop {
+    --t-drawer-duration: 0ms;
+  }
 }
 .t-collapsible-sidebar__inner {
   display: flex;

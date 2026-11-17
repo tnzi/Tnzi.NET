@@ -188,6 +188,28 @@ describe('TCrudSearchAdvanced resolves the schema keys the forms resolve', () =>
     expect(options).toEqual([{ label: '已锁定', value: 'true' }, { label: 'Unlocked', value: 'false' }])
   })
 
+  it("fills an option label's {placeholders} from labelParams: one key serves every value", () => {
+    const w = mount(TCrudSearchAdvanced, {
+      props: {
+        state: makeState() as any,
+        searchFields: [{
+          key: 'range', label: 'Range', type: 'select',
+          options: [
+            { labelKey: 'range.lastDays', label: 'Last {days} days', labelParams: { days: 7 }, value: 7 },
+            { labelKey: 'range.lastDays', label: 'Last {days} days', labelParams: { days: 30 }, value: 30 },
+            { label: 'Last {days} days', labelParams: { days: 90 }, value: 90 },
+          ],
+        }],
+        translate: (k: string) => (k === 'range.lastDays' ? '近 {days} 天' : `?${k}`),
+        labeled: true,
+        hideSubmit: true,
+      },
+      global: { stubs: keyStubs },
+    })
+    const options = w.findComponent({ name: 'Select' }).props('options') as Array<{ label: string }>
+    expect(options.map((o) => o.label)).toEqual(['近 7 天', '近 30 天', 'Last 90 days'])
+  })
+
   it('hides a field whose visible() is false and leaves it out of the filters', async () => {
     // A value it held (here from the filters in effect) would otherwise keep
     // narrowing the list with nothing on screen to show or clear it.

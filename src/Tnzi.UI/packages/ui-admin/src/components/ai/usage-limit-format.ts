@@ -6,7 +6,7 @@
  * providers' list prices, so a turn on a large model and a turn on a small one
  * count by what they would cost rather than by raw tokens.
  */
-import type { SaveUsagePolicyDto, UsageLimitSettingDto, UsagePolicyDto } from '@tnzi/core/services/ai'
+import type { ChatModelEffortsDto, SaveUsagePolicyDto, UsageLimitSettingDto, UsagePolicyDto } from '@tnzi/core/services/ai'
 import { UsageLimitMode } from '@tnzi/core/services/ai'
 
 export type UsageTranslate = (key: string, params?: Record<string, unknown>) => string
@@ -78,8 +78,24 @@ export function toDraft(policy: UsagePolicyDto | null | undefined): SaveUsagePol
     weeklyLimit: copySetting(policy?.weeklyLimit),
     allowedModels: policy?.allowedModels ? [...policy.allowedModels] : null,
     defaultModel: policy?.defaultModel ?? null,
+    modelEfforts: copyEfforts(policy?.modelEfforts),
     note: policy?.note ?? null,
   }
+}
+
+function copyEfforts(efforts: Record<string, ChatModelEffortsDto> | null | undefined): Record<string, ChatModelEffortsDto> | null {
+  if (!efforts || Object.keys(efforts).length === 0) return null
+  return Object.fromEntries(
+    Object.entries(efforts).map(([id, e]) => [id, { efforts: [...(e.efforts ?? [])], defaultEffort: e.defaultEffort ?? null }]),
+  )
+}
+
+/** A stable text of the per-model efforts (model order does not count; effort order does, it is the display order). */
+function effortsKey(efforts: Record<string, ChatModelEffortsDto> | null | undefined): string {
+  return Object.keys(efforts ?? {})
+    .sort()
+    .map((id) => `${id}=${efforts![id]!.efforts.join(',')}/${efforts![id]!.defaultEffort ?? ''}`)
+    .join('|')
 }
 
 function copySetting(setting: UsageLimitSettingDto | null | undefined): UsageLimitSettingDto {
@@ -95,6 +111,7 @@ export function samePolicy(a: SaveUsagePolicyDto, b: SaveUsagePolicyDto): boolea
     && setting(a.weeklyLimit) === setting(b.weeklyLimit)
     && models(a.allowedModels) === models(b.allowedModels)
     && (a.defaultModel || null) === (b.defaultModel || null)
+    && effortsKey(a.modelEfforts) === effortsKey(b.modelEfforts)
     && (a.note || '').trim() === (b.note || '').trim()
   )
 }
@@ -115,6 +132,11 @@ export function policyProblem(draft: SaveUsagePolicyDto, allowedForDefault: stri
   if (draft.defaultModel && allowedForDefault && allowedForDefault.length > 0 && !allowedForDefault.includes(draft.defaultModel)) {
     return 'policy.defaultNotAllowed'
   }
+  for (const e of Object.values(draft.modelEfforts ?? {})) {
+    const values = e.efforts.map((v) => v.trim().toLowerCase())
+    if (values.some((v) => !v || /\s/.test(v)) || new Set(values).size !== values.length) return 'policy.effortsInvalid'
+    if (e.defaultEffort && !e.efforts.includes(e.defaultEffort)) return 'policy.effortDefaultNotListed'
+  }
   return null
 }
 
@@ -129,6 +151,7 @@ export function toPayload(draft: SaveUsagePolicyDto): SaveUsagePolicyDto {
     weeklyLimit: clean(draft.weeklyLimit),
     allowedModels: draft.allowedModels ? [...draft.allowedModels] : null,
     defaultModel: draft.defaultModel || null,
+    modelEfforts: copyEfforts(draft.modelEfforts),
     note: draft.note?.trim() ? draft.note.trim() : null,
   }
 }

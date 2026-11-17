@@ -160,6 +160,40 @@ describe('the usage limit outcome', () => {
   });
 });
 
+describe('a run waiting on background tasks', () => {
+  const waiting = (backgroundTasks: ChatMessage['backgroundTasks']): ChatMessage => ({
+    id: 'a2', role: 'assistant', content: '', createdAt: 'x', isStreaming: false, status: 'waiting', backgroundTasks,
+  });
+
+  it('says what it waits for, with the tasks, and marks the row', () => {
+    const el = mount(() => h(TThreadMessage, {
+      message: waiting([{ id: 'b1', description: 'Build the site' }, { id: 'b2', description: null }]),
+    }));
+    const row = el.querySelector('.t-thread-message')!;
+    expect(row.classList.contains('t-thread-message--waiting')).toBe(true);
+    const line = el.querySelector('.t-thread-message__waiting')!;
+    expect(line.getAttribute('role')).toBe('status');
+    expect(line.textContent).toContain(en.chat.waitingForBackgroundTasks);
+    expect(el.querySelector('.t-thread-message__waiting-tasks')!.textContent).toBe('Build the site, b2');
+    // Quiet: not presented as an answer being written, and no actions on a row with no answer
+    expect(row.getAttribute('aria-busy')).toBeNull();
+    expect(el.querySelector('.t-thread-message__pending')).toBeNull();
+    expect(el.querySelector('.t-thread-message__actions')).toBeNull();
+  });
+
+  it('without tasks named says the wait only; an answer under way is not waiting', () => {
+    const el = mount(() => h(TThreadMessage, { message: waiting([]) }));
+    expect(el.querySelector('.t-thread-message__waiting')!.textContent?.trim()).toBe(en.chat.waitingForBackgroundTasks);
+    expect(el.querySelector('.t-thread-message__waiting-tasks')).toBeNull();
+    app?.unmount();
+    host?.remove();
+
+    const streaming = mount(() => h(TThreadMessage, { message: { ...waiting(null), status: 'streaming' } }));
+    expect(streaming.querySelector('.t-thread-message__waiting')).toBeNull();
+    expect(streaming.querySelector('.t-thread-message--waiting')).toBeNull();
+  });
+});
+
 describe('editing a user message', () => {
   it('emits the new text, and nothing when unchanged', async () => {
     const onEdit = vi.fn();

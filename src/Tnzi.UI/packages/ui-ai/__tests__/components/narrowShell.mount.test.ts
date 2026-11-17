@@ -79,7 +79,7 @@ describe('narrow-screen drawer', () => {
     expect(el.querySelector('.t-chat-rail')).toBeNull();
 
     /* The header's collapse button closes the drawer instead of turning it into the rail. */
-    const collapse = el.querySelector('.t-chat-app__brand-collapse') as HTMLButtonElement;
+    const collapse = el.querySelector('.t-chat-app__brand-toggle') as HTMLButtonElement;
     expect(collapse.getAttribute('aria-label')).toBe('Close sidebar');
     collapse.click();
     await settle();

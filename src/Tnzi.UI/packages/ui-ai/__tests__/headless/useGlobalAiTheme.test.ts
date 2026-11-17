@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useGlobalAiTheme, AI_THEME_SCOPE } from '../../src/headless/useGlobalAiTheme';
 import { buildAiThemeSnapshot } from '../../src/theme/snapshot';
 import { createApp, defineComponent, h } from 'vue';
-import { THEME_CONTEXT_KEY, createThemeContext, mergeThemeSettings } from '@tnzi/ui';
+import { THEME_CONTEXT_KEY, createThemeContext } from '@tnzi/ui/headless';
+import { mergeThemeSettings } from '@tnzi/ui/theme';
 
 function client(overrides: Record<string, unknown> = {}) {
   return {

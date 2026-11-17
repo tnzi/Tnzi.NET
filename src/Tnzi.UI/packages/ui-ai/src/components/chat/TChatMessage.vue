@@ -8,9 +8,10 @@
 
 import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import { TAvatar } from '@tnzi/ui';
+import { TAvatar } from '@tnzi/ui/components';
 import { useAiI18n } from '../../i18n/index';
 import type { ChatMessage } from '../../headless/useChat';
+import { useReasoningActivity } from '../../headless/useReasoningActivity';
 import type { FeedbackValue } from './TMessageFeedback.vue';
 import TMessageResponse from './TMessageResponse.vue';
 import TMessageAttachments from './TMessageAttachments.vue';
@@ -24,10 +25,16 @@ const props = withDefaults(defineProps<{
   showFeedback?: boolean;
   showBranch?: boolean;
   showActions?: boolean;
+  /**
+   * A record to read: no Retry on a failed answer (its failure line stays), no actions and no
+   * feedback, whatever `showActions` and `showFeedback` say. The `actions` slot is not rendered.
+   */
+  readonly?: boolean;
 }>(), {
   showFeedback: false,
   showBranch: false,
   showActions: true,
+  readonly: false,
 });
 
 const emit = defineEmits<{
@@ -54,6 +61,8 @@ const isAssistant = computed(() => props.message.role === 'assistant');
 const isStreaming = computed(() => props.message.isStreaming ?? false);
 
 const hasReasoning = computed(() => !!props.message.reasoning);
+/* The thinking block runs while thinking is what arrives, not for the whole turn. */
+const { isReasoning } = useReasoningActivity(() => props.message);
 const hasToolCalls = computed(
   () => !!props.message.toolCalls && props.message.toolCalls.length > 0,
 );
@@ -107,7 +116,7 @@ const feedbackValue = computed<FeedbackValue>(() => {
       <TReasoning
         v-if="isAssistant && hasReasoning"
         :content="message.reasoning!"
-        :is-streaming="isStreaming"
+        :is-streaming="isReasoning"
         class="w-full"
       />
 
@@ -157,6 +166,7 @@ const feedbackValue = computed<FeedbackValue>(() => {
         <Icon icon="lucide:circle-alert" class="t-chat-message__error-icon" />
         <span>{{ message.error || t.chat.errorGeneric }}</span>
         <button
+          v-if="!readonly"
           type="button"
           class="t-chat-message__error-retry"
           @click="emit('regenerate', message.id)"
@@ -175,7 +185,7 @@ const feedbackValue = computed<FeedbackValue>(() => {
 
       <!-- Actions (assistant only, not while streaming) -->
       <div
-        v-if="isAssistant && !isStreaming"
+        v-if="isAssistant && !isStreaming && !readonly"
         class="flex items-center gap-2"
       >
         <slot name="actions">

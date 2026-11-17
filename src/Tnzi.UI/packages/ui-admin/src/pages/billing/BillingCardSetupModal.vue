@@ -49,7 +49,7 @@
  */
 import { ref, watch } from 'vue'
 import { NAlert, NButton } from 'naive-ui'
-import { TModalShell } from '@tnzi/ui'
+import TModalShell from '../../components/overlay/TModalShell.vue'
 import type { SetupSessionDto, StoredPaymentMethodDto, SubscriptionDto } from '@tnzi/core/services/payment'
 import { useSafeMessage } from '../_shared/safe-message'
 import TStripePaymentForm, { type StripeConfirmResult } from './TStripePaymentForm.vue'

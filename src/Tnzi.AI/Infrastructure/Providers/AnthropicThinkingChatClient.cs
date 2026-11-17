@@ -55,7 +55,7 @@ public sealed class AnthropicThinkingChatClient : DelegatingChatClient
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        options = InjectThinkingIfNeeded(options);
+        options = PrepareOptions(options);
         return base.GetResponseAsync(chatMessages, options, cancellationToken);
     }
 
@@ -64,12 +64,29 @@ public sealed class AnthropicThinkingChatClient : DelegatingChatClient
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        options = InjectThinkingIfNeeded(options);
+        options = PrepareOptions(options);
         return base.GetStreamingResponseAsync(chatMessages, options, cancellationToken);
     }
 
-    private ChatOptions? InjectThinkingIfNeeded(ChatOptions? options)
+    /// <summary>
+    /// 本次调用发出去的选项：先注入 thinking，再按型号去掉它不收的采样参数。
+    /// </summary>
+    /// <remarks>
+    /// 两条规则都会去掉采样参数：①型号本身不收（新一代 Claude 对带 <c>temperature</c> 的请求答 400）；
+    /// ②开了 thinking（Anthropic 要求此时 <c>temperature</c> 不设、不发 <c>top_k</c>、<c>top_p</c> 有下限，
+    /// 一个 Agent 自己配了温度又开了推理，过去就是一次 400）。
+    /// </remarks>
+    private ChatOptions? PrepareOptions(ChatOptions? options)
     {
+        var prepared = InjectThinkingIfNeeded(options, out var thinkingInjected);
+        return thinkingInjected
+            ? SamplingParameterGuard.Without(prepared)
+            : SamplingParameterGuard.Apply(prepared, InnerClient.GetService<ChatClientMetadata>()?.DefaultModelId);
+    }
+
+    private ChatOptions? InjectThinkingIfNeeded(ChatOptions? options, out bool injected)
+    {
+        injected = false;
         var context = ThinkingRequestPolicy.RequestContext.Value;
         if (context?.Thinking is not { Effort: not ReasoningEffort.None } thinking)
             return options;
@@ -88,7 +105,7 @@ public sealed class AnthropicThinkingChatClient : DelegatingChatClient
 
         if (thinking.BudgetTokens is { } explicitBudget && !_adaptiveThinking)
         {
-            ApplyExplicitBudget(newOptions, explicitBudget);
+            injected = ApplyExplicitBudget(newOptions, explicitBudget);
             return newOptions;
         }
 
@@ -99,6 +116,7 @@ public sealed class AnthropicThinkingChatClient : DelegatingChatClient
             // extended 形态下这一项与不设相同（照常返回推理文本）
             Output = ReasoningOutput.Summary
         };
+        injected = true;
         return newOptions;
     }
 
@@ -106,7 +124,7 @@ public sealed class AnthropicThinkingChatClient : DelegatingChatClient
     /// 显式预算走 RawRepresentationFactory。适配器在这条路上不再从 ChatOptions 补 Model / MaxTokens，
     /// 也不再按预算抬高 max_tokens，两者都要在这里定下来。
     /// </summary>
-    private static void ApplyExplicitBudget(ChatOptions options, int budgetTokens)
+    private static bool ApplyExplicitBudget(ChatOptions options, int budgetTokens)
     {
         var budget = Math.Max(budgetTokens, MinBudgetTokens);
         var maxTokens = options.MaxOutputTokens;
@@ -118,7 +136,7 @@ public sealed class AnthropicThinkingChatClient : DelegatingChatClient
         if (budget < MinBudgetTokens)
         {
             // 上限太小装不下最小预算：不发 thinking（与适配器自身的处理一致），保留其余选项
-            return;
+            return false;
         }
 
         var effectiveMaxTokens = maxTokens ?? budget + DefaultMaxOutputTokens;
@@ -137,6 +155,7 @@ public sealed class AnthropicThinkingChatClient : DelegatingChatClient
                 Thinking = new ThinkingConfigParam(new ThinkingConfigEnabled(capturedBudget))
             };
         };
+        return true;
     }
 
     /// <summary>

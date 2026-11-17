@@ -41,6 +41,8 @@ export interface ResolveSectionsDeps {
   t: (key: string) => string
   /** Permission gate for consumer custom sections. */
   can: (permission: string) => boolean
+  /** Role gate for consumer custom sections (any-of, case-insensitive; an empty list passes). */
+  canAnyRole: (roles: readonly string[]) => boolean
   /** Module-availability gate for module-bound built-ins and consumer custom sections. */
   hasModule: (module: string) => boolean
   /** Resolve a group key to its display label. */
@@ -50,7 +52,7 @@ export interface ResolveSectionsDeps {
 /**
  * Pure resolution of the User Center nav: merge the built-in registry with the
  * consumer config, then hide / regroup / reorder / override built-ins, append
- * permission+module-gated custom sections, drop hidden groups, and sort by order.
+ * permission+role+module-gated custom sections, drop hidden groups, and sort by order.
  *
  * Extracted from UserCenter.vue so the extensibility matrix
  * (hide / regroup / override / custom / hideGroups / order) is unit-testable
@@ -86,6 +88,7 @@ export function resolveUserCenterSections(
 
   for (const s of config.sections ?? []) {
     if (s.permission && !deps.can(s.permission)) continue
+    if (s.roles?.length && !deps.canAnyRole(s.roles)) continue
     if (s.module && !deps.hasModule(s.module)) continue
     const groupKey = groupOverride[s.key] ?? s.group ?? 'App'
     out.push({

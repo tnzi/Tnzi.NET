@@ -13,14 +13,17 @@ namespace Tnzi.AI.Cli.Metadata;
 /// <item><term><see cref="EditWorkspace"/></term><description><c>acceptEdits</c>：Write 与 <c>touch</c> 这类文件命令放行，其它命令拒绝</description></item>
 /// <item><term><see cref="ReadOnly"/></term><description><c>default</c>：读文件、查资料照常，要权限的全拒（记在 <c>permission_denials</c>）</description></item>
 /// <item><term><see cref="Ask"/></term><description><c>default</c>，要权限的操作交给批准通道（<c>can_use_tool</c> 等使用方回答）</description></item>
+/// <item><term><see cref="Plan"/></term><description><c>plan</c>：先只读地查资料、出计划，经 <c>ExitPlanMode</c> 交使用方批准后才动手</description></item>
 /// </list>
 /// <para>
 /// ACP 没有统一的模式开关，档位落在对 <c>session/request_permission</c> 的应答上：<see cref="Full"/> 放行，
 /// <see cref="EditWorkspace"/> 只放行读、搜索与文件改动类的工具（<c>kind</c> 为 read / search / think / edit / delete / move），
-/// <see cref="ReadOnly"/> 与 <see cref="Ask"/> 只放行读、搜索类；<see cref="Ask"/> 在有人值守时把其余的交给使用方批准。
+/// <see cref="ReadOnly"/>、<see cref="Ask"/> 与 <see cref="Plan"/> 只放行读、搜索类；<see cref="Ask"/> 在有人值守时把其余的交给使用方批准。
+/// ACP 没有计划步骤，<see cref="Plan"/> 在 ACP 上等于 <see cref="ReadOnly"/>。
 /// </para>
 /// <para>
-/// ★ 刻意不用 <c>plan</c> 当只读：实测它只出计划、什么都不做，连读文件查资料回答问题这类不改东西的事也不做。
+/// ★ <see cref="ReadOnly"/> 刻意不用 <c>plan</c>：实测它只出计划、什么都不做，连读文件查资料回答问题这类不改东西的事也不做。
+/// 要的正是「先出计划」时用 <see cref="Plan"/>。
 /// </para>
 /// </remarks>
 public enum CliPermissionMode
@@ -42,5 +45,21 @@ public enum CliPermissionMode
     /// <c>PermissionRequest</c> 事件，等使用方回答（超时按拒绝，<c>AI:Cli:Approval:Timeout</c>）。没有人值守时没有人能批准，
     /// 效果与 <see cref="ReadOnly"/> 相同。
     /// </remarks>
-    Ask = 3
+    Ask = 3,
+
+    /// <summary>
+    /// 计划：agent 先只读地查资料、写计划，交出计划等批准；批准之后才改东西。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// stream-json 上是 claude 的 <c>--permission-mode plan</c>。有人值守时计划（<c>ExitPlanMode</c>）变成一条
+    /// <c>PermissionRequest</c> 事件（<c>permission.kind = "plan"</c>）：批准后接着做，改动前逐个问（与 <see cref="Ask"/> 相同），
+    /// 或选「批准并自动接受改动」让这个会话里的文件改动不再逐个问；拒绝时附的意见交给 agent，它接着改计划。
+    /// </para>
+    /// <para>
+    /// 没有人值守时没有人能批准：agent 拿不到交出计划的工具，这一轮以计划本身作为回复结束，什么都不改。
+    /// 实测 claude 在这种情况下照常写完计划、在回复里给出全文并说明它没有动手。
+    /// </para>
+    /// </remarks>
+    Plan = 4
 }

@@ -53,6 +53,9 @@ public class IdentityOptionsValidator : OptionsValidatorBase<IdentityOptions>
         if (passkey.AuthenticatorAttachment is not null and not ("platform" or "cross-platform"))
             errors.Add("Passkey.AuthenticatorAttachment must be one of: platform, cross-platform.");
 
+        if (options.Avatar.MaxBytes <= 0)
+            errors.Add("Avatar.MaxBytes must be greater than 0.");
+
         // 验证密码策略
         var pwd = options.PasswordPolicy;
         if (pwd.MinLength < 4)

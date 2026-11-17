@@ -1,11 +1,11 @@
 /**
- * Submenu navigation for `TUserMenu`.
+ * Submenu navigation by path: which level of a menu tree is shown when the
+ * submenus along `path` have been opened in place, each under a back row.
  *
- * A submenu opens in place of the list it belongs to, with a back row at the
- * top, rather than flying out to the side. The account menu rises from the
- * sidebar footer inside a 300px column; a fly-out would cover the
- * conversation, and on a phone there is nowhere to fly out to. Drilling in
- * works the same with a mouse, a finger and a keyboard.
+ * `TUserMenu` drills in place on touch and narrow screens (and inside a
+ * fly-out, below its first level), and flies submenus out beside the menu
+ * with a mouse; `TActionMenu` always drills in place. Both resolve the level
+ * they show here.
  */
 
 /** The shape submenu navigation needs: an id, and optional children. */

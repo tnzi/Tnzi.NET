@@ -2,9 +2,7 @@ import { ref, computed, watch, type Ref, type ComputedRef, type InjectionKey, in
 import type { ThemeSettings, ThemeColors } from '../../theme/types'
 import { mergeThemeSettings } from '../../theme/settings'
 import { buildCssVars, injectCssVars } from '../../theme/vars'
-import { buildNaiveThemeOverrides, resolveThemeMode } from '../../theme/naive-bridge'
-import { applyThemeModeToDocument } from '../../theme/document'
-import type { GlobalThemeOverrides } from 'naive-ui'
+import { applyThemeModeToDocument, resolveThemeMode } from '../../theme/document'
 import type { ThemeMode } from '@tnzi/core/types'
 
 export interface ThemeContext {
@@ -12,7 +10,6 @@ export interface ThemeContext {
   resolvedMode: ComputedRef<'light' | 'dark'>
   /** True when resolvedMode === 'dark'. Convenience for binding UI toggles. */
   isDark: ComputedRef<boolean>
-  naiveOverrides: ComputedRef<GlobalThemeOverrides>
   setMode: (mode: ThemeMode) => void
   setColor: (role: keyof ThemeColors, color: string) => void
   applyPreset: (preset: Partial<ThemeSettings> & { name: string }) => void
@@ -54,17 +51,13 @@ export function createThemeContext(initial: ThemeSettings): ThemeContext {
     return mode === 'auto' ? systemMode.value : mode
   })
 
-  const naiveOverrides = computed<GlobalThemeOverrides>(() => {
-    return buildNaiveThemeOverrides(settings.value)
-  })
-
   function setMode(mode: ThemeMode) {
     settings.value = { ...settings.value, mode }
   }
 
   // Rebuilt through `mergeThemeSettings` so the palettes follow the new colour,
   // but from the CURRENT settings: passing only colours and mode reset the
-  // consumer's raw naive overrides, preset name and flags to the defaults.
+  // preset name and flags to the defaults.
   function setColor(role: keyof ThemeColors, color: string) {
     const { palettes: _palettes, ...current } = settings.value
     settings.value = mergeThemeSettings({ ...current, colors: { ...current.colors, [role]: color } })
@@ -106,7 +99,6 @@ export function createThemeContext(initial: ThemeSettings): ThemeContext {
     settings,
     resolvedMode,
     isDark,
-    naiveOverrides,
     setMode,
     setColor,
     applyPreset,

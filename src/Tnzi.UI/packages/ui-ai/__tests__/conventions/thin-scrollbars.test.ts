@@ -19,7 +19,13 @@
  *   the same class list;
  * - whatever is teleported to `<body>` has `t-ai-scroll-scope` on its root, so
  *   the consumer's own content in its slots matches too;
- * - the stylesheet never styles a bare `*` or `::-webkit-scrollbar` globally.
+ * - the stylesheet never styles a bare `*` or `::-webkit-scrollbar` globally:
+ *   the one page-wide hook is under the app marker `:root[data-tnzi-ai-app]`
+ *   (headless/app-root.ts), which only an app built on ui-ai puts on `<html>`;
+ * - the standard `scrollbar-width` / `scrollbar-color` apply only where the
+ *   `::-webkit-scrollbar` pseudo-elements do not: Chromium ignores the
+ *   pseudo-elements of an element that has either, and draws its native bar
+ *   with arrow buttons instead of the thin one.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -114,19 +120,46 @@ describe('thin scrollbars on every ui-ai scroll container', () => {
 });
 
 describe('the scrollbar rule stays scoped', () => {
-  const sheet = readFileSync(resolve(srcRoot, 'styles/index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const sheet = readFileSync(resolve(srcRoot, 'styles/scrollbars.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   const selectors = [...sheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
     .filter((m) => /scrollbar/.test(m[1]!) || /scrollbar-(?:width|color)/.test(m[2]!))
     .flatMap((m) => m[1]!.split(',').map((s) => s.trim()));
 
-  it('covers the shell, the scope and the per-element hook', () => {
-    for (const hook of ['.t-chat-app *', '.t-ai-scroll-scope *', '.t-ai-scroll', '.t-ai-scroll-scope ::-webkit-scrollbar']) {
+  it('covers the app, the shell, the scope and the per-element hook', () => {
+    for (const hook of [
+      ':root[data-tnzi-ai-app] *',
+      ':root[data-tnzi-ai-app] ::-webkit-scrollbar',
+      '.t-chat-app *',
+      '.t-ai-scroll-scope *',
+      '.t-ai-scroll',
+      '.t-ai-scroll-scope ::-webkit-scrollbar',
+    ]) {
       expect(selectors).toContain(hook);
     }
   });
 
-  it('never targets the consumer page globally', () => {
-    const global = selectors.filter((s) => /^(?:\*|html|body|:root)\b/.test(s) || /^::-webkit-scrollbar/.test(s));
+  it('sets the standard properties only for engines without ::-webkit-scrollbar', () => {
+    const fallbacks: Array<[number, number]> = [];
+    for (const m of sheet.matchAll(/@supports\s+not\s+selector\(::-webkit-scrollbar\)\s*\{/g)) {
+      let depth = 1;
+      let end = m.index! + m[0].length;
+      while (depth > 0 && end < sheet.length) {
+        if (sheet[end] === '{') depth += 1;
+        else if (sheet[end] === '}') depth -= 1;
+        end += 1;
+      }
+      fallbacks.push([m.index!, end]);
+    }
+    const uses = [...sheet.matchAll(/scrollbar-(?:width|color)\s*:/g)].map((m) => m.index!);
+    expect(uses.length).toBeGreaterThan(0);
+    const outside = uses.filter((at) => !fallbacks.some(([start, end]) => at > start && at < end));
+    expect(outside.map((at) => sheet.slice(at, sheet.indexOf(';', at)))).toEqual([]);
+  });
+
+  it('never targets the consumer page globally, only an app that carries the marker', () => {
+    const global = selectors
+      .filter((s) => !s.startsWith(':root[data-tnzi-ai-app] '))
+      .filter((s) => /^(?:\*|html|body|:root)/.test(s) || /^::-webkit-scrollbar/.test(s));
     expect(global).toEqual([]);
   });
 });

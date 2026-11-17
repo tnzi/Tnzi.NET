@@ -10,7 +10,7 @@
 import { EMPTY_DASH } from '../../utils/placeholders'
 import { ref } from 'vue'
 import { NTag } from 'naive-ui'
-import { TRelativeTime } from '@tnzi/ui'
+import TRelativeTime from '../display/TRelativeTime.vue'
 import { TSvgIcon } from '@tnzi/ui'
 import { useAdminClient } from '../../plugin/client'
 import { createAuditBridge } from '../../services/bridges/audit-bridge'

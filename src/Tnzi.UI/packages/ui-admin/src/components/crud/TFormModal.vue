@@ -38,8 +38,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { NButton, NSwitch } from 'naive-ui'
-import { THint, TModalShell } from '@tnzi/ui'
-import { provideFormHost } from '@tnzi/ui/headless'
+import THint from '../display/THint.vue'
+import TModalShell from '../overlay/TModalShell.vue'
+import { provideFormHost } from '../../headless/form-host'
 import { useFormModal, useRetainedFormState, type FormFooterSwitch } from '../../headless/useFormModal'
 
 type FormState = ReturnType<typeof useFormModal<unknown>>

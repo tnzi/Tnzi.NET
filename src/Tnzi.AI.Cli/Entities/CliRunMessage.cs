@@ -31,6 +31,9 @@ public class CliRunMessage : CreationAuditedEntity<Guid>, IMultiTenant
     /// <summary>工具调用 ID。</summary>
     public string? CallId { get; set; }
 
+    /// <summary>这条事件发生在哪个子 agent 里：派出它的那次工具调用的 ID（见 <c>CliAgentEvent.ParentCallId</c>）；主 agent 的事件为 null。</summary>
+    public string? ParentCallId { get; set; }
+
     /// <summary>工具入参 JSON。</summary>
     public string? InputJson { get; set; }
 

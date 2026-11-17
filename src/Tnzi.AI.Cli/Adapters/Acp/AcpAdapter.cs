@@ -5,12 +5,13 @@ namespace Tnzi.AI.Cli.Adapters;
 /// Agent Client Protocol 适配器：stdio 上的双向 JSON-RPC 2.0。
 /// </summary>
 /// <remarks>
-/// <b>一次实现覆盖 6 个 CLI</b>（hermes / kimi / kiro / qoder / trae / grok）——
+/// <b>一次实现覆盖 7 个 CLI</b>（codex 经 codex-acp / hermes / kimi / kiro / qoder / trae / grok）——
 /// 这正是把「协议」和「provider 参数」分开的收益：它们的差异全在
 /// <see cref="CliProviderDescriptor"/> 这张数据表里，代码只有一份。
 /// <para>
 /// 会话生命周期：<c>initialize</c> → <c>session/new</c> | <c>session/resume</c> →
-/// （可选）<c>session/set_model</c> → <c>session/prompt</c>。
+/// （可选）选模型与推理强度 → <c>session/prompt</c>。模型与推理强度优先走会话选项（<c>session/set_config_option</c>，
+/// 按 category 认 <c>model</c> / <c>thought_level</c>），没有模型选项时退回 <c>session/set_model</c>。
 /// 期间 agent 会反向发起 <c>session/request_permission</c>，由
 /// <see cref="AcpJsonRpcClient"/> 自动应答。
 /// </para>
@@ -39,6 +40,8 @@ public class AcpAdapter : ICliProtocolAdapter
     private CliRunFailureReason? _failureReason;
     private bool _resumeRejected;
     private string? _requestedResumeSessionId;
+    private CliAgentCapabilities? _capabilities;
+    private List<AcpConfigOption> _configOptions = [];
     private volatile bool _promptCompleted;
     private AcpJsonRpcClient? _client;
 
@@ -90,15 +93,6 @@ public class AcpAdapter : ICliProtocolAdapter
         Check.NotNull(context);
 
         _requestedResumeSessionId = context.ResumeSessionId;
-
-        // 推理强度只有 stream-json 一路能投递（--effort）；ACP 的会话请求里没有对应的位置，本适配器也不经别的途径传它。
-        // 绑定上填了也照常运行，但要留一条痕迹：管理端对所有运行时都提供这个字段，静默丢掉会让人以为它生效了。
-        if (!string.IsNullOrWhiteSpace(context.ThinkingLevel))
-        {
-            _logger.LogWarning(
-                "[{Provider}] The binding's reasoning effort '{ThinkingLevel}' is not applied: ACP runtimes are not given a reasoning effort",
-                context.Provider.Key, context.ThinkingLevel);
-        }
 
         var events = Channel.CreateUnbounded<CliAgentEvent>(
             new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
@@ -219,7 +213,8 @@ public class AcpAdapter : ICliProtocolAdapter
             DurationMs = (long)outcome.Elapsed.TotalMilliseconds,
             SessionId = _resumeRejected ? null : _sessionId,
             Usage = usage,
-            ResumeRejected = _resumeRejected
+            ResumeRejected = _resumeRejected,
+            Capabilities = _capabilities
         };
     }
 
@@ -240,6 +235,18 @@ public class AcpAdapter : ICliProtocolAdapter
                 }, ct),
                 context.HandshakeTimeout,
                 cancellationToken);
+
+            _capabilities = AcpCapabilities.Read(initializeResult);
+
+            // 带图片却碰上不收图片的运行时：整轮不跑，而不是只发文字（模型照样作答，用户以为它看到了图片）。
+            // PDF 本不该到这里（ACP 的 provider 只收图片，派发时已经拒了），到了也一样拒
+            if (context.Attachments.FirstOrDefault(a => !a.IsImage || !_capabilities.Images) is { } refused)
+            {
+                Fail(CliRunFailureReason.UnsupportedInput, refused.IsImage
+                    ? $"{context.Provider.DisplayName} reported that it does not accept images in a prompt."
+                    : $"{context.Provider.DisplayName} cannot receive PDF documents.");
+                return;
+            }
 
             var mcpServers = AcpMcpServerTranslator.FilterByCapabilities(
                 AcpMcpServerTranslator.Translate(context.McpConfigJson, _logger),
@@ -262,6 +269,7 @@ public class AcpAdapter : ICliProtocolAdapter
                     cancellationToken);
 
                 _sessionId = ExtractSessionId(resumeResult) ?? context.ResumeSessionId;
+                RememberConfigOptions(resumeResult);
                 if (!string.Equals(_sessionId, context.ResumeSessionId, StringComparison.Ordinal))
                 {
                     _logger.LogWarning(
@@ -277,6 +285,7 @@ public class AcpAdapter : ICliProtocolAdapter
                     cancellationToken);
 
                 _sessionId = ExtractSessionId(newResult);
+                RememberConfigOptions(newResult);
                 if (string.IsNullOrWhiteSpace(_sessionId))
                 {
                     Fail(CliRunFailureReason.HandshakeTimeout, "session/new returned no session id.");
@@ -291,19 +300,25 @@ public class AcpAdapter : ICliProtocolAdapter
                 SessionId = _sessionId
             });
 
+            // 先模型后推理强度：推理强度的可选值随模型变（codex 换模型后重报会话选项）
             if (!string.IsNullOrWhiteSpace(context.Model) && !await TrySetModelAsync(client, context, cancellationToken))
             {
                 return;
             }
 
+            if (!string.IsNullOrWhiteSpace(context.ThinkingLevel) && !await TrySetReasoningEffortAsync(client, context, cancellationToken))
+            {
+                return;
+            }
+
             var promptText = string.IsNullOrWhiteSpace(context.InlineSystemPrompt)
-                ? context.Prompt
-                : $"{context.InlineSystemPrompt}\n\n---\n\n{context.Prompt}";
+                ? context.PromptWithTurnContext
+                : $"{context.InlineSystemPrompt}\n\n---\n\n{context.PromptWithTurnContext}";
 
             await client.RequestAsync("session/prompt", new
             {
                 sessionId = _sessionId,
-                prompt = new[] { new { type = "text", text = promptText } }
+                prompt = BuildPrompt(promptText, context.Attachments)
             }, cancellationToken);
             _promptCompleted = true;
 
@@ -371,9 +386,96 @@ public class AcpAdapter : ICliProtocolAdapter
         };
     }
 
+    /// <summary>
+    /// 提示的内容块：图片在前（各家多模态的建议顺序），文字在后；只发了图片时不发空文字块。
+    /// </summary>
+    internal static List<object> BuildPrompt(string text, IReadOnlyList<CliPromptAttachment> attachments)
+    {
+        var blocks = new List<object>(attachments.Count + 1);
+        foreach (var attachment in attachments)
+        {
+            blocks.Add(new { type = "image", mimeType = attachment.MediaType, data = Convert.ToBase64String(attachment.Content) });
+        }
+
+        if (!string.IsNullOrWhiteSpace(text) || blocks.Count == 0)
+        {
+            blocks.Add(new { type = "text", text });
+        }
+
+        return blocks;
+    }
+
+    private void RememberConfigOptions(JsonElement result)
+    {
+        if (AcpConfigOption.ReadAll(result) is { } options)
+        {
+            _configOptions = options;
+            if (_capabilities is not null)
+            {
+                _capabilities = AcpCapabilities.WithSessionOptions(_capabilities, options);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 把一个会话选项设成某个值。值不在选项给出的可选值里时整轮失败：静默回落到运行时的默认值，
+    /// 会让用户以为自己选的生效了，而任务其实跑在别的模型或强度上（成本与质量都对不上）。
+    /// </summary>
+    private async Task<bool> TrySetConfigOptionAsync(
+        AcpJsonRpcClient client, CliAgentLaunchContext context, AcpConfigOption option, string value, string what,
+        CancellationToken cancellationToken)
+    {
+        if (option.Values.Count > 0 && !option.Values.Contains(value, StringComparer.Ordinal))
+        {
+            Fail(CliRunFailureReason.ProviderError,
+                $"The external agent has no {what} '{value}'; it offers: {string.Join(", ", option.Values)}.");
+            return false;
+        }
+
+        try
+        {
+            var result = await client.RequestAsync("session/set_config_option", new
+            {
+                sessionId = _sessionId,
+                configId = option.Id,
+                value
+            }, cancellationToken);
+            RememberConfigOptions(result);
+            return true;
+        }
+        catch (AcpRpcException ex)
+        {
+            _logger.LogWarning(ex, "[{Provider}] Could not set {What} to '{Value}'", context.Provider.Key, what, value);
+            HandlePromptFailure(ex);
+            _failureMessage = $"The external agent could not switch to {what} '{value}': {ex.Message}";
+            return false;
+        }
+    }
+
+    private Task<bool> TrySetReasoningEffortAsync(
+        AcpJsonRpcClient client, CliAgentLaunchContext context, CancellationToken cancellationToken)
+    {
+        if (AcpConfigOption.Find(_configOptions, AcpConfigOption.ThoughtLevelCategory) is { } option)
+        {
+            return TrySetConfigOptionAsync(client, context, option, context.ThinkingLevel!, "reasoning effort", cancellationToken);
+        }
+
+        // 运行时没有推理强度选项：照常运行，但要留一条痕迹，管理端对所有运行时都提供这个字段，静默丢掉会让人以为它生效了。
+        // 不让整轮失败：同一个绑定换到不能调强度的 CLI 上就再也跑不起来，而能力表（Capabilities.ReasoningEfforts 为空）已经说明了这一点
+        _logger.LogWarning(
+            "[{Provider}] The reasoning effort '{ThinkingLevel}' is not applied: the runtime offers no thought_level session option",
+            context.Provider.Key, context.ThinkingLevel);
+        return Task.FromResult(true);
+    }
+
     private async Task<bool> TrySetModelAsync(
         AcpJsonRpcClient client, CliAgentLaunchContext context, CancellationToken cancellationToken)
     {
+        if (AcpConfigOption.Find(_configOptions, AcpConfigOption.ModelCategory) is { } option)
+        {
+            return await TrySetConfigOptionAsync(client, context, option, context.Model!, "model", cancellationToken);
+        }
+
         try
         {
             await client.RequestAsync("session/set_model", new
@@ -407,8 +509,12 @@ public class AcpAdapter : ICliProtocolAdapter
             return;
         }
 
-        Fail(CliRunFailureReason.ProviderError, ex.Message);
+        // ACP 的 -32000 是「需要登录」：CLI 没有可用的凭据，换会话、重试都治不好
+        Fail(ex.Code == AuthRequiredCode ? CliRunFailureReason.AuthenticationFailed : CliRunFailureReason.ProviderError, ex.Message);
     }
+
+    /// <summary>ACP 的「需要登录」错误码。</summary>
+    private const int AuthRequiredCode = -32000;
 
     private static bool IsSessionNotFound(AcpRpcException ex)
     {
@@ -496,7 +602,7 @@ public class AcpAdapter : ICliProtocolAdapter
             InputTokens = _usage.InputTokens + ReadLong(usage, "inputTokens", "input_tokens", "promptTokens"),
             OutputTokens = _usage.OutputTokens + ReadLong(usage, "outputTokens", "output_tokens", "completionTokens"),
             CacheReadTokens = _usage.CacheReadTokens + ReadLong(usage, "cachedReadTokens", "cacheReadTokens", "cache_read_tokens"),
-            CacheWriteTokens = _usage.CacheWriteTokens + ReadLong(usage, "cacheWriteTokens", "cache_write_tokens")
+            CacheWriteTokens = _usage.CacheWriteTokens + ReadLong(usage, "cachedWriteTokens", "cacheWriteTokens", "cache_write_tokens")
         };
     }
 
@@ -548,6 +654,11 @@ public class AcpAdapter : ICliProtocolAdapter
 
             case "turn_end":
                 ExtractPromptResult(payload);
+                break;
+
+            case "config_option_update":
+                // 运行时自己改了会话选项（例如换模型后推理强度的可选值变了），以它为准
+                RememberConfigOptions(payload);
                 break;
 
             default:
@@ -707,6 +818,7 @@ public class AcpAdapter : ICliProtocolAdapter
             "toolcallupdate" => "tool_call_update",
             "usageupdate" => "usage_update",
             "turnend" or "endturn" => "turn_end",
+            "configoptionupdate" => "config_option_update",
             _ => string.Empty
         };
     }

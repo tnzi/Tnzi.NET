@@ -3,23 +3,18 @@
  * TWorkflowControls - Zoom/pan control buttons
  */
 
-import { NButton } from 'naive-ui';
 import { useVueFlow } from '@vue-flow/core';
-import { Icon } from '@iconify/vue';
+import { useAiI18n } from '../../i18n/index';
+import TIconButton from '../controls/TIconButton.vue';
+const t = useAiI18n();
 const { zoomIn, zoomOut, fitView } = useVueFlow();
 </script>
 
 <template>
   <div class="t-wf-controls">
-    <NButton text size="small" @click="zoomIn()">
-      <template #icon><Icon icon="lucide:plus" class="size-4" /></template>
-    </NButton>
-    <NButton text size="small" @click="zoomOut()">
-      <template #icon><Icon icon="lucide:minus" class="size-4" /></template>
-    </NButton>
-    <NButton text size="small" @click="fitView()">
-      <template #icon><Icon icon="lucide:maximize-2" class="size-4" /></template>
-    </NButton>
+    <TIconButton icon="lucide:plus" :label="t.workflow.zoomIn" @click="zoomIn()" />
+    <TIconButton icon="lucide:minus" :label="t.workflow.zoomOut" @click="zoomOut()" />
+    <TIconButton icon="lucide:maximize-2" :label="t.workflow.fitView" @click="fitView()" />
   </div>
 </template>
 
@@ -27,11 +22,11 @@ const { zoomIn, zoomOut, fitView } = useVueFlow();
 .t-wf-controls {
   display: flex;
   align-items: center;
-  gap: 4px;
-  border-radius: 8px;
-  border: 1px solid var(--tnzi-border);
-  background-color: var(--tnzi-container-bg);
-  padding: 4px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--tnzi-ai-border);
+  border-radius: 10px;
+  background: var(--tnzi-ai-surface);
+  box-shadow: var(--tnzi-ai-popover-shadow);
 }
 </style>

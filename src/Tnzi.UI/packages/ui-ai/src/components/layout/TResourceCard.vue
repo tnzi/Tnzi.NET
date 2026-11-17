@@ -6,7 +6,9 @@
  *
  * Icon or thumbnail, name, one line of description, an optional status tag and
  * an overflow menu slot. Pair with the `.t-resource-grid` class exported from
- * the same barrel for the responsive column behaviour.
+ * the same barrel for the responsive column behaviour; in it every card of a
+ * row is as tall as the row. On a phone the card is tighter (10px padding, 6px
+ * between its lines).
  */
 import { Icon } from '@iconify/vue'
 
@@ -140,6 +142,12 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   gap: 4px;
+}
+@media (max-width: 640px) {
+  .t-resource-card {
+    padding: 10px;
+    gap: 6px;
+  }
 }
 .t-resource-card__desc {
   margin: 0;

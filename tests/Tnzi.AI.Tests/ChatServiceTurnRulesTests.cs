@@ -101,7 +101,7 @@ public class ChatServiceTurnRulesTests
     [Fact]
     public async Task AModelTheUserMayNotUse_IsRefusedWith403_AndNothingRuns()
     {
-        var policy = new Mock<IUsagePolicyService>();
+        var policy = new Mock<IUsagePolicyService> { CallBase = true };
         policy.Setup(p => p.ResolveChatModelAsync(UserId, AgentId, null, "claude-opus-5-5", It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<string?>.Failure("The model 'claude-opus-5-5' is not available to you for this assistant.", 403, ErrorCodes.ModelNotAllowed));
         var facade = new RecordingFacade();
@@ -117,7 +117,7 @@ public class ChatServiceTurnRulesTests
     [Fact]
     public async Task TheResolvedModel_IsTheOneThatRuns_IncludingTheUsersDefaultWhenNoneWasPicked()
     {
-        var policy = new Mock<IUsagePolicyService>();
+        var policy = new Mock<IUsagePolicyService> { CallBase = true };
         policy.Setup(p => p.ResolveChatModelAsync(UserId, AgentId, null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<string?>.Success("claude-sonnet-5-5"));
         var facade = new RecordingFacade();
@@ -126,6 +126,105 @@ public class ChatServiceTurnRulesTests
         await service.ChatAsync(new ChatRequestDto { AgentId = AgentId, Message = "hi", UserId = UserId });
 
         facade.Requests.ShouldHaveSingleItem().Model.ShouldBe("claude-sonnet-5-5");
+    }
+
+    [Fact]
+    public async Task TheResolvedEffort_GoesWithTheTurn_AndNamesTheBuiltInEffortWhenItCan()
+    {
+        var policy = new Mock<IUsagePolicyService> { CallBase = true };
+        policy.Setup(p => p.ResolveChatTurnAsync(UserId, AgentId, null, "claude-opus-5-5", "HIGH", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<ChatTurnModel>.Success(new ChatTurnModel("claude-opus-5-5", "high")));
+        var facade = new RecordingFacade();
+        var service = CreateService(facade, usagePolicy: policy.Object);
+
+        await service.ChatAsync(new ChatRequestDto { AgentId = AgentId, Message = "hi", UserId = UserId, Model = "claude-opus-5-5", Effort = "HIGH" });
+
+        var request = facade.Requests.ShouldHaveSingleItem();
+        request.Effort.ShouldBe("high", "the list's spelling, as validated");
+        request.ReasoningEffort.ShouldBe(ReasoningEffort.High);
+    }
+
+    [Fact]
+    public async Task AnExplicitBuiltInEffort_WinsOverTheNamedOne()
+    {
+        var policy = new Mock<IUsagePolicyService> { CallBase = true };
+        policy.Setup(p => p.ResolveChatTurnAsync(UserId, AgentId, null, null, "xhigh", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<ChatTurnModel>.Success(new ChatTurnModel("claude-opus-5-5", "xhigh")));
+        var facade = new RecordingFacade();
+        var service = CreateService(facade, usagePolicy: policy.Object);
+
+        await service.ChatAsync(new ChatRequestDto
+        {
+            AgentId = AgentId, Message = "hi", UserId = UserId, Effort = "xhigh", ReasoningEffort = ReasoningEffort.Low
+        });
+
+        var request = facade.Requests.ShouldHaveSingleItem();
+        request.Effort.ShouldBe("xhigh");
+        request.ReasoningEffort.ShouldBe(ReasoningEffort.Low);
+    }
+
+    [Fact]
+    public async Task AnEffortTheModelDoesNotOffer_IsRefusedWith403_AndNothingRuns()
+    {
+        var policy = new Mock<IUsagePolicyService> { CallBase = true };
+        policy.Setup(p => p.ResolveChatTurnAsync(UserId, AgentId, null, null, "max", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<ChatTurnModel>.Failure("no max here", 403, ErrorCodes.EffortNotAllowed));
+        var facade = new RecordingFacade();
+        var service = CreateService(facade, usagePolicy: policy.Object);
+
+        var result = await service.ChatAsync(new ChatRequestDto { AgentId = AgentId, Message = "hi", UserId = UserId, Effort = "max" });
+
+        result.Code.ShouldBe(403);
+        result.ErrorCode.ShouldBe(ErrorCodes.EffortNotAllowed);
+        facade.Requests.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task TheTurnsMetadata_IsTheSelectionTheModelAndEffortAreCheckedWith()
+    {
+        ChatModelsRequest? seen = null;
+        var policy = new Mock<IUsagePolicyService>();
+        policy.Setup(p => p.ResolveChatTurnAsync(It.IsAny<ChatModelsRequest>(), null, "on", It.IsAny<CancellationToken>()))
+            .Callback((ChatModelsRequest r, string? _, string? _, CancellationToken _) => seen = r)
+            .ReturnsAsync(Result<ChatTurnModel>.Success(new ChatTurnModel("kimi-k2", "on")));
+        var service = CreateService(new RecordingFacade(), usagePolicy: policy.Object);
+
+        await service.ChatAsync(new ChatRequestDto
+        {
+            AgentId = AgentId, Message = "hi", UserId = UserId, Effort = "on",
+            Metadata = new() { ["cliProfile"] = JsonSerializer.SerializeToElement("kimi") }
+        });
+
+        seen.ShouldNotBeNull();
+        seen.Metadata!["cliProfile"].GetString().ShouldBe("kimi");
+    }
+
+    [Fact]
+    public async Task ARegenerateWithoutMetadata_IsCheckedWithTheStoredSelection()
+    {
+        ChatModelsRequest? seen = null;
+        var policy = new Mock<IUsagePolicyService>();
+        policy.Setup(p => p.ResolveChatTurnAsync(It.IsAny<ChatModelsRequest>(), null, "on", It.IsAny<CancellationToken>()))
+            .Callback((ChatModelsRequest r, string? _, string? _, CancellationToken _) => seen = r)
+            .ReturnsAsync(Result<ChatTurnModel>.Success(new ChatTurnModel("kimi-k2", "on")));
+        var threads = new FakeThreads(new ThreadMessageRef(Guid.NewGuid(), 3, "again") { MetadataJson = """{"cliProfile":"kimi"}""" });
+        var service = CreateService(new RecordingFacade(), threads: threads, usagePolicy: policy.Object);
+
+        await service.ChatAsync(new ChatRequestDto { AgentId = AgentId, ThreadId = ThreadId, UserId = UserId, Regenerate = true, Effort = "on" });
+
+        seen!.Metadata!["cliProfile"].GetString().ShouldBe("kimi", "the regenerated turn runs with the stored metadata, so it is checked with it");
+    }
+
+    [Fact]
+    public async Task WithoutAPolicyService_AnEffortIsRefused()
+    {
+        var facade = new RecordingFacade();
+        var service = CreateService(facade);
+
+        var result = await service.ChatAsync(new ChatRequestDto { AgentId = AgentId, Message = "hi", UserId = UserId, Effort = "high" });
+
+        result.ErrorCode.ShouldBe(ErrorCodes.EffortNotAllowed);
+        facade.Requests.ShouldBeEmpty();
     }
 
     // ---------------------------------------------------------------- edit
@@ -379,6 +478,25 @@ public class ChatServiceTurnRulesTests
     }
 
     [Fact]
+    public async Task PendingPermissions_AreOnlyListedForTheThreadsOwner_AndARunTheCallerCannotSeeIsNotFound()
+    {
+        var runId = Guid.NewGuid();
+        var waiting = new ChatPermissionRequestDto { RunId = runId, RequestId = Guid.NewGuid() };
+        var facade = new RecordingFacade { PendingPermissions = [waiting], Run = new ChatRunDto { RunId = runId, ThreadId = ThreadId } };
+        var service = CreateService(facade, threads: new FakeThreads(null));
+
+        (await service.GetPendingPermissionsAsync(ThreadId, UserId)).Data.ShouldHaveSingleItem().RequestId.ShouldBe(waiting.RequestId);
+        var stranger = await service.GetPendingPermissionsAsync(ThreadId, Guid.NewGuid());
+        stranger.Code.ShouldBe(404);
+        stranger.ErrorCode.ShouldBe(ErrorCodes.ThreadNotFound);
+
+        (await service.GetRunPendingPermissionsAsync(runId)).Data.ShouldHaveSingleItem();
+        var unknown = await service.GetRunPendingPermissionsAsync(Guid.NewGuid());
+        unknown.Code.ShouldBe(404);
+        unknown.ErrorCode.ShouldBe(ErrorCodes.ChatRunNotFound);
+    }
+
+    [Fact]
     public async Task Attach_StreamsTheRunAsChatEvents_WithItsRunIdAndThread()
     {
         var runId = Guid.NewGuid();
@@ -502,6 +620,14 @@ public class ChatServiceTurnRulesTests
         public Task<IReadOnlyList<ChatRunDto>> GetActiveRunsAsync(Guid threadId, CancellationToken cancellationToken = default)
             => Task.FromResult(ActiveRuns);
 
+        public IReadOnlyList<ChatPermissionRequestDto> PendingPermissions { get; init; } = [];
+
+        public Task<IReadOnlyList<ChatPermissionRequestDto>> GetPendingPermissionsAsync(Guid threadId, CancellationToken cancellationToken = default)
+            => Task.FromResult(PendingPermissions);
+
+        public Task<IReadOnlyList<ChatPermissionRequestDto>?> GetRunPendingPermissionsAsync(Guid runId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<ChatPermissionRequestDto>?>(Run?.RunId == runId ? PendingPermissions : null);
+
         public async IAsyncEnumerable<AgentStreamChunk> AttachStreamingAsync(
             Guid runId, int fromSequence = 0, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
@@ -552,7 +678,7 @@ public class ChatServiceTurnRulesTests
         public Task<Result<ThreadExportDto>> ExportAsJsonAsync(Guid id) => throw new NotSupportedException();
         public Task<Result<string>> ExportAsMarkdownAsync(Guid id) => throw new NotSupportedException();
 
-        public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default)
+        public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, string? origin, ThreadListing listing = ThreadListing.Listed, CancellationToken ct = default)
             => throw new NotSupportedException();
 
         public Task<Guid> SaveMessageAsync(Guid threadId, string role, string content, string? toolCalls = null, string? usage = null,

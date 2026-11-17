@@ -142,8 +142,18 @@ public class AuthorizationModule : TnziApplicationModule
     /// live in module init, which runs BEFORE migrations and therefore failed silently on
     /// a brand-new empty database, requiring a second boot to take effect.
     /// </summary>
+    /// <remarks>
+    /// Each step runs even when an earlier one failed (they are independent), and every
+    /// failure is collected and thrown at the end as one <see cref="AggregateException"/>:
+    /// the post-migration runner then retries the whole task in the background until it
+    /// completes. All steps are idempotent, so a retry redoes nothing that already took
+    /// effect. Swallowing a failure here (as this method once did) meant a database that
+    /// was unreachable at startup left the catalogue unseeded until the next restart.
+    /// </remarks>
     internal static async Task RunStartupTasksAsync(IServiceProvider serviceProvider)
     {
+        var failures = new List<Exception>();
+
         // The seed is what makes provider-declared codes exist at all: every
         // runtime check reads Auth_ModuleFunction (there is no in-memory
         // snapshot), so a code that did not get seeded cannot be granted and
@@ -177,15 +187,15 @@ public class AuthorizationModule : TnziApplicationModule
                 {
                     // Startup must not block on it, but be honest about the
                     // cost: codes introduced by this deployment have no
-                    // Auth_ModuleFunction row until a later boot seeds them,
-                    // so they cannot be assigned in the admin UI and every
+                    // Auth_ModuleFunction row until a retry seeds them, so
+                    // they cannot be assigned in the admin UI and every
                     // [ApiAuthorize] check on them denies non-super-admins
                     // (deny-by-default). Rows seeded on earlier boots are
                     // untouched; super admins short-circuit before any table
                     // is read.
-                    var seedLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<AuthorizationModule>>();
-                    seedLogger.LogError(ex,
-                        "PermissionDbSeeder failed; permissions declared by this deployment but not yet seeded cannot be assigned or granted until the next successful startup.");
+                    failures.Add(new InvalidOperationException(
+                        "PermissionDbSeeder failed; permissions declared by this deployment but not yet seeded cannot be assigned or granted until it succeeds.",
+                        ex));
                 }
             }
         }
@@ -202,14 +212,21 @@ public class AuthorizationModule : TnziApplicationModule
         // roles. The empty-list guard covers DisableSuperAdminBypass.
         if (optionsSnapshot.SeedBuiltInAdminRoles && optionsSnapshot.SuperAdminRoles.Count > 0)
         {
-            await SeedBuiltInAdminRolesAsync(serviceProvider, optionsSnapshot, logger);
+            try
+            {
+                await SeedBuiltInAdminRolesAsync(serviceProvider, optionsSnapshot, logger);
+            }
+            catch (Exception ex)
+            {
+                failures.Add(new InvalidOperationException("Seeding the built-in admin roles failed.", ex));
+            }
         }
 
         // First-super-admin bootstrap: assign the configured user names to
         // the first existing super-admin role while ALL super-admin roles
         // have zero members (recovery semantics - see SuperAdminBootstrapper).
-        // Non-fatal by design: a failed bootstrap logs and startup continues,
-        // matching the seeding blocks above.
+        // Non-fatal for startup: a failed bootstrap is collected like the
+        // seeding blocks above and retried.
         if (optionsSnapshot.BootstrapSuperAdminUsers.Count > 0 && optionsSnapshot.SuperAdminRoles.Count > 0)
         {
             try
@@ -220,8 +237,8 @@ public class AuthorizationModule : TnziApplicationModule
             }
             catch (Exception ex)
             {
-                logger.LogError(ex,
-                    "Super-admin bootstrap failed; startup continues. Assign a user to a super-admin role manually if needed.");
+                failures.Add(new InvalidOperationException(
+                    "Super-admin bootstrap failed. Assign a user to a super-admin role manually if it keeps failing.", ex));
             }
         }
 
@@ -270,34 +287,59 @@ public class AuthorizationModule : TnziApplicationModule
             .ToList();
         if (configuredRoles.Count > 0)
         {
-            await using var scope = serviceProvider.CreateAsyncScope();
-            var roleRepo = scope.ServiceProvider.GetService<IRepository<Tnzi.Identity.Entities.Role, Guid>>();
-            if (roleRepo != null)
+            try
             {
-                var existingNames = await roleRepo
-                    .Where(r => r.Name != null)
-                    .Select(r => r.Name!)
-                    .ToListAsync();
-                var existingSet = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
-                foreach (var listGroup in configuredRoles
-                             .Where(entry => !existingSet.Contains(entry.name))
-                             .GroupBy(entry => entry.list))
-                {
-                    logger.LogWarning(
-                        "Authorization.{List} contains role names that do not exist in Identity: {Missing}. " +
-                        "Users will never be matched via those entries until a matching Identity role is created.",
-                        listGroup.Key,
-                        string.Join(", ", listGroup.Select(e => e.name)));
-                }
+                await WarnAboutMissingRolesAsync(serviceProvider, configuredRoles, logger);
+            }
+            catch (Exception ex)
+            {
+                failures.Add(new InvalidOperationException("Checking that the configured super-admin roles exist failed.", ex));
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new AggregateException("The authorization startup tasks did not all complete.", failures);
+        }
+    }
+
+    /// <summary>
+    /// Warn about every configured super-admin role that does not exist in
+    /// Identity_Role: a missing role means the configured name never matches.
+    /// </summary>
+    private static async Task WarnAboutMissingRolesAsync(
+        IServiceProvider serviceProvider,
+        List<(string name, string list)> configuredRoles,
+        ILogger logger)
+    {
+        await using var scope = serviceProvider.CreateAsyncScope();
+        var roleRepo = scope.ServiceProvider.GetService<IRepository<Tnzi.Identity.Entities.Role, Guid>>();
+        if (roleRepo != null)
+        {
+            var existingNames = await roleRepo
+                .Where(r => r.Name != null)
+                .Select(r => r.Name!)
+                .ToListAsync();
+            var existingSet = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
+            foreach (var listGroup in configuredRoles
+                         .Where(entry => !existingSet.Contains(entry.name))
+                         .GroupBy(entry => entry.list))
+            {
+                logger.LogWarning(
+                    "Authorization.{List} contains role names that do not exist in Identity: {Missing}. " +
+                    "Users will never be matched via those entries until a matching Identity role is created.",
+                    listGroup.Key,
+                    string.Join(", ", listGroup.Select(e => e.name)));
             }
         }
     }
 
     /// <summary>
     /// Create an <c>IsSystem</c> Identity role for every configured admin-tier
-    /// role name that doesn't exist yet. Additive only; failures are logged
-    /// and never block startup (a startup race across instances is settled by
-    /// the unique index on the normalized role name).
+    /// role name that doesn't exist yet. Additive only. Every name is tried; the
+    /// failures are thrown together afterwards so the post-migration runner retries
+    /// (a startup race across instances is settled by the unique index on the
+    /// normalized role name, and the retry then finds the role in place).
     /// </summary>
     private static async Task SeedBuiltInAdminRolesAsync(
         IServiceProvider serviceProvider,
@@ -331,6 +373,7 @@ public class AuthorizationModule : TnziApplicationModule
             .ToListAsync();
         var existingSet = new HashSet<string>(existingNames, StringComparer.OrdinalIgnoreCase);
 
+        var failures = new List<Exception>();
         foreach (var name in roleNames.Where(n => !existingSet.Contains(n)))
         {
             try
@@ -347,10 +390,18 @@ public class AuthorizationModule : TnziApplicationModule
             catch (Exception ex)
             {
                 // Most likely a startup race with another instance - the
-                // unique index on NormalizedName settles the winner; either
-                // way the role exists afterwards, which is all we need.
-                logger.LogWarning(ex, "Seeding built-in admin role '{Role}' failed; continuing startup.", name);
+                // unique index on NormalizedName settles the winner. Report it
+                // all the same: a retry finds the role in place (and does
+                // nothing) if another instance created it, and creates it if
+                // the insert failed for any other reason.
+                logger.LogWarning(ex, "Seeding built-in admin role '{Role}' failed; it is retried.", name);
+                failures.Add(ex);
             }
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new AggregateException("Seeding one or more built-in admin roles failed.", failures);
         }
     }
 }

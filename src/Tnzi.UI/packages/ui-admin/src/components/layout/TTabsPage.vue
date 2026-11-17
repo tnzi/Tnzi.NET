@@ -14,6 +14,12 @@
         (via useSectionRoute - the consumer does not wire this)
       • card-in-a-card flattening when a tab embeds a TCrudPage / TCardPage
         (the list-card's doubled surface/inset is dropped - see polish.css)
+      • the active tab's list search in THIS header bar: a header-less list
+        that is the only searchable list of its pane teleports its keyword
+        search + Advanced into the header's action column (phones: the 🔍 /
+        Advanced toggles, the form expanding under the bar), so search sits in
+        the header and the list toolbar keeps only filters and list actions
+        (see ./tabs-page-search.ts)
 
     Consumer shape:
       <TTabsPage :title icon :help :translate :sections="[
@@ -21,7 +27,7 @@
         { name: 'status',   label: t('tabs.status'), scroll: true },
         { name: 'analytics', label: t('tabs.analytics') },
       ]" default-section="servers">
-        <template #actions="{ active }">…header search, per-tab…</template>
+        <template #actions="{ active }">…per-tab header actions…</template>
         <template #servers><TCardPage … :show-header="false" /></template>
         <template #status>…mixed scrollable content…</template>
         <template #analytics><TResponsiveTable … /></template>
@@ -36,10 +42,19 @@
     :back="back"
     :translate="translate"
     scroll="fill"
+    :inline-actions="isSm && activeHasSearch"
   >
     <template v-if="$slots.title" #title><slot name="title" /></template>
-    <template v-if="$slots.actions" #actions>
+    <template v-if="$slots.actions || activeHasSearch" #actions>
+      <!-- The active tab's list teleports its search cluster here, ahead of the
+           page's own header actions. `display: contents` keeps its members
+           flex items of the action column. -->
+      <div v-if="activeHasSearch" ref="searchActionsEl" class="t-tabs-page__search" />
       <slot name="actions" :active="active" />
+    </template>
+    <template v-if="activeHasSearch && isSm" #below>
+      <!-- Phone: the list's search panel expands here, inside the header card. -->
+      <div ref="searchPanelEl" class="t-tabs-page__search-panel" />
     </template>
     <template v-if="$slots.extra" #extra><slot name="extra" /></template>
 
@@ -65,9 +80,9 @@
         :disabled="s.disabled"
         :display-directive="s.displayDirective ?? 'if'"
       >
-        <div class="t-table-tabs__pane" :class="{ 't-table-tabs__pane--scroll': s.scroll }">
+        <TTabsPagePane :context="paneContext(s.name)" :scroll="s.scroll">
           <slot :name="s.name" :active="active" />
-        </div>
+        </TTabsPagePane>
       </NTabPane>
     </NTabs>
 
@@ -79,9 +94,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, type VNode, type VNodeChild } from 'vue'
+import { computed, ref, shallowRef, watch, type VNode, type VNodeChild } from 'vue'
 import { NTabPane, NTabs } from 'naive-ui'
 import TContentPage from './TContentPage.vue'
+import TTabsPagePane from './TTabsPagePane.vue'
+import type { TabsPagePaneContext } from './tabs-page-search'
+import { useBreakpoint } from '../../headless/useBreakpoint'
 import type { BackTarget } from './back-target'
 import { useSectionRoute } from '../../headless/useSectionRoute'
 import { useTabBarSync, type TabBarSyncTarget } from '../../headless/useTabBarSync'
@@ -173,6 +191,48 @@ const tabsRef = ref<TabBarSyncTarget | null>(null)
 // naive's panes key on `name`), so re-reading the strip then would be churn.
 useTabBarSync(tabsRef, () => JSON.stringify(props.sections.map((s) => s.name)))
 
+// ── Header search for the active tab's list (see ./tabs-page-search.ts) ──
+const { isSm } = useBreakpoint()
+// Section name → the searchable header-less lists registered in that pane, in
+// registration order. Replaced, never mutated, so every reader re-evaluates.
+const searchLists = ref<Readonly<Record<string, readonly symbol[]>>>({})
+const searchActionsEl = shallowRef<HTMLElement | null>(null)
+const searchPanelEl = shallowRef<HTMLElement | null>(null)
+
+function soleSearchList(name: string): symbol | null {
+  const tokens = searchLists.value[name] ?? []
+  return tokens.length === 1 ? (tokens[0] ?? null) : null
+}
+/** The header shows a search only when the active pane has exactly one searchable list. */
+const activeHasSearch = computed(() => soleSearchList(active.value) !== null)
+
+// One context per section name, kept for the page's lifetime so a pane's
+// provided value never changes identity under the lists that injected it.
+const paneContexts = new Map<string, TabsPagePaneContext>()
+function paneContext(name: string): TabsPagePaneContext {
+  const existing = paneContexts.get(name)
+  if (existing) return existing
+  const context: TabsPagePaneContext = {
+    name,
+    isActive: () => active.value === name,
+    register(token) {
+      const tokens = searchLists.value[name] ?? []
+      if (tokens.includes(token)) return
+      searchLists.value = { ...searchLists.value, [name]: [...tokens, token] }
+    },
+    unregister(token) {
+      const tokens = searchLists.value[name] ?? []
+      if (!tokens.includes(token)) return
+      searchLists.value = { ...searchLists.value, [name]: tokens.filter((t) => t !== token) }
+    },
+    owner: () => soleSearchList(name),
+    actionsTarget: () => searchActionsEl.value,
+    panelTarget: () => searchPanelEl.value,
+  }
+  paneContexts.set(name, context)
+  return context
+}
+
 function onTab(v: string | number): void {
   active.value = String(v)
 }
@@ -183,6 +243,13 @@ function tabLabel(s: TabSection): string | VNode | (() => VNodeChild) {
 </script>
 
 <style scoped>
+/* Teleport targets for the active list's search: no box of their own, so the
+   search members are flex items of the header's action column / header card
+   and an empty target adds no gap. */
+.t-tabs-page__search,
+.t-tabs-page__search-panel {
+  display: contents;
+}
 /* Cross-tab band keeps its natural height; the tab surface below it flex-fills.
    A flex column so a band with several stacked blocks (e.g. a filter card + an
    error banner) spaces them consistently; a single child is unaffected. */

@@ -24,6 +24,8 @@ public class UserDetailService : ApplicationService, IUserDetailService
     private readonly IUserTenantScopeProvider _scope;
     private readonly IFileReadAccessProbe? _fileAccess;
     private readonly IFunctionAuthorizationService? _functionAuthorization;
+    private readonly IFileContentReader? _fileContent;
+    private readonly AvatarOptions _avatarOptions;
 
     public UserDetailService(
         IRepository<UserDetail, Guid> repository,
@@ -31,7 +33,9 @@ public class UserDetailService : ApplicationService, IUserDetailService
         IServiceProvider serviceProvider,
         IUserTenantScopeProvider scope,
         IFileReadAccessProbe? fileAccess = null,
-        IFunctionAuthorizationService? functionAuthorization = null)
+        IFunctionAuthorizationService? functionAuthorization = null,
+        IFileContentReader? fileContent = null,
+        IOptions<IdentityOptions>? options = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
@@ -39,6 +43,8 @@ public class UserDetailService : ApplicationService, IUserDetailService
         _scope = Check.NotNull(scope);
         _fileAccess = fileAccess;
         _functionAuthorization = functionAuthorization;
+        _fileContent = fileContent;
+        _avatarOptions = options?.Value.Avatar ?? new AvatarOptions();
     }
 
     public async Task<Result<UserDetailDto>> GetByUserIdAsync(Guid userId)
@@ -255,6 +261,36 @@ public class UserDetailService : ApplicationService, IUserDetailService
 
         if (!await _fileAccess.CanReadAsync(fileId))
             return Fail<UserDetailDto>("That file cannot be used as an avatar.", 403, ErrorCodes.FORBIDDEN);
+
+        return await RejectNonImageAvatarAsync(fileId);
+    }
+
+    /// <summary>
+    /// 这份文件够不够格被发布成头像：是 PNG / JPEG / WebP（按文件头判定），且不超过 <see cref="AvatarOptions.MaxBytes"/>。
+    /// </summary>
+    /// <remarks>
+    /// ★ 判定在归属之后：先确认这个人读得到它，才去读它的字节 —— 反过来就成了「任意文件 id 的格式探针」。
+    /// ★ 与归属探针同一口径：读取器（随 <c>Tnzi.Storage</c> 注册）缺席时拒绝而不是跳过。
+    /// 上传端点是存储模块的通用端点，不认识「头像」，所以这里是唯一能挡住「把自己的一份 PDF 发布成公开头像」的地方。
+    /// </remarks>
+    private async Task<Result<UserDetailDto>?> RejectNonImageAvatarAsync(Guid fileId)
+    {
+        if (_fileContent == null)
+            return Fail<UserDetailDto>("Setting an avatar file needs the storage module. Load Tnzi.Storage, or use AvatarUrl.", 501);
+
+        await using var stream = await _fileContent.OpenReadAsync(fileId);
+        if (stream == null)
+            return Fail<UserDetailDto>("That file cannot be used as an avatar.", 403, ErrorCodes.FORBIDDEN);
+
+        var (format, tooLarge) = await AvatarImageInspector.InspectAsync(stream, _avatarOptions.MaxBytes);
+        if (format == null)
+            return Fail<UserDetailDto>("The avatar must be a PNG, JPEG, or WebP image.", 400, ErrorCodes.IDENTITY_AVATAR_INVALID);
+
+        if (tooLarge)
+            return Fail<UserDetailDto>(
+                $"The avatar must not be larger than {_avatarOptions.MaxBytes / (1024 * 1024.0):0.#} MB.",
+                400,
+                ErrorCodes.IDENTITY_AVATAR_INVALID);
 
         return null;
     }

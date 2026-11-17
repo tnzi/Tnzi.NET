@@ -23,4 +23,14 @@ public class LockoutProtectionRepairRegistrationTests
             "IdentityModule no longer registers LockoutProtectionRepairStartupTask; accounts left with "
             + "LockoutEnabled = false by the old Enable stay without brute-force protection.");
     }
+
+    [Fact]
+    public void TheLockoutRepair_MustCompleteBeforeTheAppServes()
+    {
+        // Until it has run, accounts left without lockout can be brute-forced: a failed run
+        // (database unreachable at startup) keeps /health/ready at 503 until a retry completes it.
+        IPostMigrationStartupTask task = new LockoutProtectionRepairStartupTask();
+
+        task.RequiredForReadiness.ShouldBeTrue();
+    }
 }

@@ -17,6 +17,7 @@ public class WorkflowServiceUsageAccountingTests : WorkflowServiceSqliteTestBase
 
     private readonly AbortSwitch _abort = new();
     private readonly List<LoggedUsage> _logged = [];
+    private readonly List<Guid?> _loggedFor = [];
     private readonly List<decimal> _settled = [];
     private readonly List<Guid> _reservedFor = [];
 
@@ -27,12 +28,12 @@ public class WorkflowServiceUsageAccountingTests : WorkflowServiceSqliteTestBase
 
     public WorkflowServiceUsageAccountingTests()
     {
-        UsageLog.Setup(u => u.LogUsageAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(),
-                It.IsAny<long>(), It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(),
-                It.IsAny<CancellationToken>()))
-            .Callback((string op, string _, string _, int input, int output, long _, bool success, string? _, Guid? _, Guid? _, CancellationToken _)
-                => _logged.Add(new LoggedUsage(op, input, output, success)))
+        UsageLog.Setup(u => u.LogUsageAsync(It.IsAny<UsageLogEntry>(), It.IsAny<CancellationToken>()))
+            .Callback((UsageLogEntry e, CancellationToken _) =>
+            {
+                _logged.Add(new LoggedUsage(e.OperationType, e.InputTokens, e.OutputTokens, e.IsSuccess));
+                _loggedFor.Add(e.UserId);
+            })
             .Returns(Task.CompletedTask);
 
         UsageLimits.Setup(q => q.BeginAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
@@ -150,6 +151,7 @@ public class WorkflowServiceUsageAccountingTests : WorkflowServiceSqliteTestBase
         resumed.Data!.Status.ShouldBe("Completed");
         _reservedFor.ShouldBe([TestHelper.DefaultTestUserId], "the resume is booked to the user who resumes it");
         _logged.ShouldBe([new LoggedUsage(AIOperationType.WorkflowRun, 100, 50, true)]);
+        _loggedFor.ShouldBe([TestHelper.DefaultTestUserId], "the usage row is metered to the same user");
         _settled.ShouldBe([150m]);
     }
 
@@ -252,6 +254,7 @@ public class WorkflowServiceUsageAccountingTests : WorkflowServiceSqliteTestBase
     private void ClearAccounting()
     {
         _logged.Clear();
+        _loggedFor.Clear();
         _settled.Clear();
         _reservedFor.Clear();
     }

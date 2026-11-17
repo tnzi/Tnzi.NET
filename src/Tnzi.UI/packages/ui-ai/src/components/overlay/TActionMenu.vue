@@ -14,14 +14,16 @@
  *
  * Data, like `TUserMenu`'s: label, icon, a value shown on the right, a check
  * for the current choice, a danger style, a separator above. An item with
- * `children` opens them in place under a back row (the same model as the
- * account menu, for the same reason: a fly-out off a 300px sidebar covers the
- * conversation, and on a phone there is nowhere to fly to). Ids are unique
+ * `children` opens them in place under a back row: the menu is opened from
+ * rows of lists and toolbars anywhere on the page, often on a phone, where
+ * there is nowhere to fly out to. Ids are unique
  * across the tree; `select` carries the chosen item's id.
  *
  * ## Keyboard
  *
- * Opening moves focus into the menu (the checked choice, else the first item).
+ * Opening moves focus into the menu (the checked choice, else the first item);
+ * opened by a finger, to the menu itself, so no item shows a focus ring nobody
+ * asked for (the first arrow key moves onto the items).
  * Up / Down / Home / End move, Enter / Space choose, Right opens a submenu and
  * Left goes back, Escape goes back a level and then closes. Closing by keyboard
  * or by choosing returns focus to the trigger; Tab closes and moves on. Keys go
@@ -37,11 +39,14 @@
  * </TActionMenu>
  * ```
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
-import { useOverlayLayer } from '@tnzi/ui'
+import { useOverlayLayer } from '@tnzi/ui/headless'
 import { formatAiMessage, useAiI18n } from '../../i18n/index'
 import { opensSubmenu, resolveMenuLevel } from './user-menu'
+import { useBackLayer } from '../../headless/back-layers'
+import { enableTouchPress } from '../../headless/touch-press'
+import { useViewportBelow } from '../../headless/useViewportBelow'
 
 export interface ActionMenuItem {
   readonly id: string
@@ -59,6 +64,11 @@ export interface ActionMenuItem {
   readonly disabled?: boolean
   /** A submenu: choosing the item opens these in its place, under a back row. */
   readonly children?: ReadonlyArray<ActionMenuItem>
+  /**
+   * Attributes for the item's row (a page's `data-*` hooks). Bound before the
+   * menu's own, so `role`, `aria-*` state and `data-menu-item` stay the menu's.
+   */
+  readonly attrs?: Readonly<Record<string, string | number | boolean | null | undefined>>
 }
 
 const props = withDefaults(
@@ -87,6 +97,8 @@ const emit = defineEmits<{
 }>()
 
 const t = useAiI18n()
+/* A press on an item shows on iOS too (`styles/touch.css`). */
+onMounted(enableTouchPress)
 
 const localOpen = ref(false)
 const isOpen = computed(() => props.open ?? localOpen.value)
@@ -107,6 +119,8 @@ const parentItem = computed(() => level.value.trail[level.value.trail.length - 1
 const position = ref<{ top: number; left: number } | null>(null)
 const GAP = 4
 const EDGE = 8
+/** Below this width back closes the menu: the shell's phone layout (`sidebarMobileBreakpoint`). */
+const NARROW_BREAKPOINT = 768
 
 function triggerElement(): HTMLElement | null {
   const anchor = anchorRef.value
@@ -158,16 +172,43 @@ function focusInitial(preferId?: string): void {
 }
 
 /* Focus waits for the render that applies the position: until then the menu is
-   `visibility: hidden`, and a hidden element refuses focus. */
+   `visibility: hidden`, and a hidden element refuses focus.
+   Opened by a finger (a touch screen), focus goes to the menu itself, not to
+   an item: no item lights up under a finger that never chose one, and the
+   first arrow key of an attached keyboard still lands on the first (or last)
+   item. Otherwise it goes to the checked choice or the first item, so Up /
+   Down / Enter work at once. */
 async function afterRender(preferId?: string): Promise<void> {
   await nextTick()
   place()
   await nextTick()
-  focusInitial(preferId)
+  if (touchOpened) menuRef.value?.focus({ preventScroll: true })
+  else focusInitial(preferId)
+}
+
+/* Opened with a mouse, the menu still moves focus to its first (or checked)
+   item, but a browser may draw that focus as a keyboard ring, which after a
+   click reads as a stray highlight. The ring is held back until a key is
+   pressed in the menu. Opened with a finger, nothing in it is focused (above);
+   a touch screen applies no `:hover`, so the mouse's rule could not hide it. */
+let lastInputWasPointer = false
+let lastPointerWasTouch = false
+let touchOpened = false
+const pointerOpened = ref(false)
+
+function onAnchorPointer(event: PointerEvent): void {
+  lastInputWasPointer = true
+  lastPointerWasTouch = event.pointerType === 'touch' || event.pointerType === 'pen'
+}
+function onAnchorKey(): void {
+  lastInputWasPointer = false
+  lastPointerWasTouch = false
 }
 
 watch(isOpen, (open) => {
   if (open) {
+    pointerOpened.value = lastInputWasPointer && !lastPointerWasTouch
+    touchOpened = lastInputWasPointer && lastPointerWasTouch
     path.value = []
     void afterRender()
     window.addEventListener('resize', close)
@@ -179,6 +220,11 @@ watch(isOpen, (open) => {
     removeListeners()
   }
 })
+
+/* Back closes the menu on a phone, where back is how a layer is dismissed:
+   the whole menu, from a submenu too (its back row is one tap away). */
+const narrowViewport = useViewportBelow(NARROW_BREAKPOINT)
+useBackLayer(isOpen, () => close(), { enabled: narrowViewport })
 
 function removeListeners(): void {
   if (typeof window === 'undefined') return
@@ -280,7 +326,11 @@ function onKeydown(event: KeyboardEvent): void {
 
 useOverlayLayer(() => isOpen.value, {
   onEscape: () => (parentItem.value ? goBack() : closeAndReturnFocus()),
-  onKeydown,
+  onKeydown: (event: KeyboardEvent) => {
+    pointerOpened.value = false
+    touchOpened = false
+    onKeydown(event)
+  },
   root: () => menuRef.value,
 })
 
@@ -299,7 +349,12 @@ defineExpose({ open: () => setOpen(true), close, toggle })
 </script>
 
 <template>
-  <span ref="anchorRef" class="t-action-menu__anchor">
+  <span
+    ref="anchorRef"
+    class="t-action-menu__anchor"
+    @pointerdown.capture="onAnchorPointer"
+    @keydown.capture="onAnchorKey"
+  >
     <slot name="trigger" :open="isOpen" :toggle="toggle" :attrs="triggerAttrs" />
   </span>
   <Teleport to="body">
@@ -307,7 +362,9 @@ defineExpose({ open: () => setOpen(true), close, toggle })
       v-if="isOpen"
       ref="menuRef"
       class="t-action-menu t-ai-scroll-scope"
+      :class="{ 't-action-menu--pointer': pointerOpened }"
       role="menu"
+      tabindex="-1"
       :aria-label="parentItem ? parentItem.label : label"
       :style="menuStyle"
     >
@@ -328,6 +385,7 @@ defineExpose({ open: () => setOpen(true), close, toggle })
       <template v-for="item in level.items" :key="item.id">
         <div v-if="item.dividerBefore" class="t-action-menu__sep" role="separator" />
         <button
+          v-bind="item.attrs"
           type="button"
           class="t-action-menu__item"
           :class="{ 't-action-menu__item--danger': item.danger }"
@@ -355,13 +413,16 @@ defineExpose({ open: () => setOpen(true), close, toggle })
   display: inline-flex;
   align-items: center;
 }
-/* Above the sidebar drawer (50) and its backdrop: a menu opened from a row in
-   the narrow-screen drawer must not open underneath it. */
+/* The popover layer: above the sidebar drawer and above every dialog, so a
+   menu opened from a row in the drawer or from inside a dialog is drawn over
+   what it was opened from. */
 .t-action-menu {
   position: fixed;
-  z-index: 70;
+  z-index: var(--tnzi-ai-z-popover, 2000);
   max-width: min(320px, calc(100vw - 16px));
   box-sizing: border-box;
+  /* Focused itself when opened by a pointer: that is not a place to mark. */
+  outline: none;
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -401,6 +462,12 @@ defineExpose({ open: () => setOpen(true), close, toggle })
 }
 .t-action-menu__item:focus-visible {
   box-shadow: inset 0 0 0 1px var(--tnzi-ai-border-strong, rgba(0, 0, 0, 0.2));
+}
+/* Opened with a mouse: no keyboard ring until a key is pressed (see
+   `pointerOpened`). Hover still shows where the pointer is. */
+.t-action-menu--pointer .t-action-menu__item:focus-visible:not(:hover) {
+  background: transparent;
+  box-shadow: none;
 }
 .t-action-menu__item:disabled {
   cursor: default;

@@ -5,7 +5,7 @@ import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { SearchFieldItem } from '../../components/crud/TCrudSearchAdvanced.vue'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import TMoney from '../../components/finance/TMoney.vue'
-import { TRelativeTime } from '@tnzi/ui'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 
 import { FinanceDocumentStatus } from '../../services/bridges/finance-bridge'
 import { DOC_STATUS_META, type FinanceDocRow } from '../../components/finance/document-row'

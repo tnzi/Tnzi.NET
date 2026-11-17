@@ -1,34 +1,49 @@
 <script setup lang="ts">
 /**
- * `TWidgetCard` admin wrapper.
+ * `TWidgetCard` - universal frame around a single Workbench widget.
  *
- * The card implementation lives in `@tnzi/ui/components/layout`
- * (sunk in 0.2.x). This wrapper injects the admin-side `translatePageKey`
- * helper plus the localised tooltip strings (`admin.common.reload`,
- * `admin.widgets.dragHandle`, `admin.common.error`) so existing admin
- * widgets pick up i18n resolution without passing the translator
- * explicitly.
+ * Responsibilities:
+ *   - Render the NCard chrome (title + optional icon + refresh button +
+ *     drag handle when the parent layout is `'draggable'`).
+ *   - Provide `WidgetContext` to descendants via `WIDGET_CONTEXT_KEY` so
+ *     widgets can `useWidget()` to imperatively trigger refresh / set
+ *     busy state / surface errors.
+ *   - Show a unified busy / error fallback so individual widgets stay
+ *     small and focused on their happy-path render.
  *
- * New code outside the admin shell should import directly from
- * `@tnzi/ui`:
+ * The card *does not* fetch data - that lives in each widget. The card
+ * just coordinates the UX around the widget's reactive state.
  *
- *   import { TWidgetCard } from '@tnzi/ui'
+ * Titles given as i18n keys resolve through the admin page translator; the
+ * toolbar tooltips and the error title come from the admin chrome strings.
  */
-import { computed } from 'vue'
-import { TWidgetCard as TWidgetCardBase } from '@tnzi/ui'
+import { computed, provide, ref } from 'vue'
 import { translateChromeKey, translatePageKey } from '../../i18n/translate'
+import { NCard, NButton, NSpin, NAlert } from 'naive-ui'
+import { TSvgIcon } from '@tnzi/ui/components'
+import { WIDGET_CONTEXT_KEY, type WidgetContext } from './widget-types'
 
 interface Props {
+  /** Stable widget id, surfaced into the WidgetContext for diagnostics. */
   id: string
+  /** Card title - i18n key (resolved via `translate`) or raw text. */
   title?: string
+  /** Iconify icon shown next to the title (e.g. `mdi:chart-bar`). */
   icon?: string
+  /** Fixed body height in pixels, or omit for content-driven sizing. */
   height?: number | 'auto'
+  /** Show the refresh button on the toolbar. Default `true`. */
   refreshable?: boolean
+  /** Render the body bare without the NCard chrome. Default `false`. */
   bare?: boolean
+  /**
+   * When inside a `'draggable'` workbench layout the card surfaces a
+   * drag handle so the user can grab it. Default `false`.
+   */
   draggable?: boolean
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   title: undefined,
   icon: undefined,
   height: 'auto',
@@ -37,35 +52,218 @@ withDefaults(defineProps<Props>(), {
   draggable: false,
 })
 
-defineEmits<{
-  refresh: []
-}>()
-
-const adminTranslate = (key: string): string => translatePageKey('', key)
-
 const refreshLabel = computed(() => translateChromeKey('admin.common.reload', 'Refresh'))
 const dragLabel = computed(() => translateChromeKey('admin.widgets.dragHandle', 'Drag to reorder'))
 const errorLabel = computed(() => translateChromeKey('admin.common.error', 'Error'))
+
+const emit = defineEmits<{
+  /** Fired when the user clicks the refresh button. */
+  refresh: []
+}>()
+
+// --- WidgetContext ----------------------------------------------------------
+const busy = ref(false)
+const error = ref<unknown>(null)
+const refreshCallbacks = new Set<() => void | Promise<void>>()
+
+// `id` is exposed as a getter so descendants calling `useWidget().id` see
+// the live prop value even when the parent (e.g. a custom workbench
+// layout missing `:key="def.id"`) reuses the same TWidgetCard instance
+// for different widget definitions.
+const context: WidgetContext = {
+  get id() {
+    return props.id
+  },
+  refresh: () => {
+    fireRefreshCallbacks()
+    emit('refresh')
+  },
+  reportError: (err: unknown) => {
+    error.value = err
+  },
+  setBusy: (b: boolean) => {
+    busy.value = b
+  },
+  onRefresh: (cb: () => void | Promise<void>) => {
+    refreshCallbacks.add(cb)
+    return () => {
+      refreshCallbacks.delete(cb)
+    }
+  },
+}
+provide(WIDGET_CONTEXT_KEY, context)
+
+function fireRefreshCallbacks(): void {
+  for (const cb of refreshCallbacks) {
+    try {
+      const ret = cb()
+      // Surface async errors via the standard error channel so the user
+      // sees them in the card's error slot instead of an unhandled
+      // promise warning in the console.
+      if (ret instanceof Promise) {
+        ret.catch((err: unknown) => {
+          error.value = err
+        })
+      }
+    } catch (err) {
+      error.value = err
+    }
+  }
+}
+
+// --- Display helpers --------------------------------------------------------
+// `maybeTranslate` heuristic - treat dotted lower-camel ASCII as an i18n key,
+// everything else as a literal string. Mirrors the convention the admin
+// shell uses so existing widget descriptors keep working unchanged.
+const I18N_KEY_PATTERN = /^[a-z][a-zA-Z0-9]*(\.[a-zA-Z0-9]+)+$/
+
+function maybeTranslate(value: string | undefined | null): string {
+  if (!value) return ''
+  if (!I18N_KEY_PATTERN.test(value)) return value
+  const hit = translatePageKey('', value)
+  return hit || value
+}
+
+const resolvedTitle = computed(() => maybeTranslate(props.title))
+
+const errorMessage = computed(() => {
+  const e = error.value
+  if (!e) return ''
+  if (e instanceof Error) return e.message
+  return String(e)
+})
+
+const bodyStyle = computed(() => ({
+  height: typeof props.height === 'number' ? `${props.height}px` : undefined,
+}))
+
+function handleRefresh(): void {
+  error.value = null
+  fireRefreshCallbacks()
+  emit('refresh')
+}
 </script>
 
 <template>
-  <TWidgetCardBase
-    :id="id"
-    :title="title"
-    :icon="icon"
-    :height="height"
-    :refreshable="refreshable"
-    :bare="bare"
-    :draggable="draggable"
-    :translate="adminTranslate"
-    :refresh-label="refreshLabel"
-    :drag-label="dragLabel"
-    :error-label="errorLabel"
-    @refresh="$emit('refresh')"
-  >
-    <template v-if="$slots['header-extra']" #header-extra>
-      <slot name="header-extra" />
-    </template>
+  <!-- Bare mode: skip the NCard chrome so widgets like the header banner
+       can claim the full card surface without a duplicate title row. The
+       provide() above still runs so children can useWidget() either way. -->
+  <div v-if="bare" class="t-widget-card t-widget-card--bare" :data-widget-id="id">
     <slot />
-  </TWidgetCardBase>
+  </div>
+
+  <NCard
+    v-else
+    class="t-widget-card t-surface-card"
+    :data-widget-id="id"
+    size="small"
+    :bordered="false"
+  >
+    <template #header>
+      <div class="t-widget-card__header">
+        <TSvgIcon v-if="icon" :icon="icon" :size="18" class="t-widget-card__icon" />
+        <span class="t-widget-card__title">{{ resolvedTitle }}</span>
+      </div>
+    </template>
+    <template #header-extra>
+      <div class="t-widget-card__actions">
+        <slot name="header-extra" />
+        <NButton
+          v-if="refreshable"
+          quaternary
+          circle
+          size="small"
+          :title="refreshLabel"
+          :loading="busy"
+          @click="handleRefresh"
+        >
+          <template #icon>
+            <TSvgIcon icon="mdi:refresh" :size="16" />
+          </template>
+        </NButton>
+        <span
+          v-if="draggable"
+          class="t-widget-card__drag-handle"
+          :title="dragLabel"
+        >
+          <TSvgIcon icon="mdi:drag" :size="16" />
+        </span>
+      </div>
+    </template>
+
+    <NAlert v-if="error" type="error" :show-icon="true" :title="errorLabel">
+      {{ errorMessage }}
+    </NAlert>
+    <NSpin v-else :show="busy" :delay="200">
+      <div class="t-widget-card__body" :style="bodyStyle">
+        <slot />
+      </div>
+    </NSpin>
+  </NCard>
 </template>
+
+<style scoped>
+/* Keyed to `t-surface-card` - the marker the template puts on the card branch
+   only - rather than to `.t-widget-card`, which BOTH branches carry. A bare
+   widget is not a card surface, so it never matches here and has no chrome to
+   undo.
+
+   What this replaces was a subtractive `.t-widget-card--bare` reset, and it
+   lost twice over: at (0,2,0) once scoped, it was outranked by
+   `.t-widget-card:hover` three lines above it, and by ui-admin's
+   `:root .t-admin-content .t-widget-card` at (0,3,0). So `bare` - documented
+   as "render the body bare" - painted an opaque panel and grew a card shadow
+   on hover. Subtracting chrome loses that race to any rule that cares to
+   outrank it; not adding it in the first place cannot be outranked. */
+.t-widget-card.t-surface-card {
+  background: var(--tnzi-surface-card-bg);
+  border-radius: var(--tnzi-admin-radius-md, 8px);
+  /* Card tier - the same pair every container on the page canvas takes.
+     See the surface tiers in `styles/variables.css`. */
+  border: var(--tnzi-surface-card-border);
+  box-shadow: var(--tnzi-surface-card-shadow);
+  transition: box-shadow var(--tnzi-admin-motion-duration-fast, 0.15s) ease;
+}
+.t-widget-card.t-surface-card:hover {
+  box-shadow: var(--tnzi-surface-card-shadow-hover);
+}
+.t-widget-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.t-widget-card__icon {
+  color: var(--tnzi-primary);
+  flex-shrink: 0;
+}
+.t-widget-card__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tnzi-base-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.t-widget-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.t-widget-card__drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  cursor: grab;
+  color: var(--tnzi-base-text-muted, #888);
+}
+.t-widget-card__drag-handle:active {
+  cursor: grabbing;
+}
+.t-widget-card__body {
+  display: flex;
+  flex-direction: column;
+}
+</style>

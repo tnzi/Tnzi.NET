@@ -109,7 +109,8 @@ describe('dictionary-backed chrome', () => {
   it('TSettingsDialog title', async () => {
     mountZh(TSettingsDialog, { modelValue: true, sections: [] });
     await settle();
-    expect(document.querySelector('.t-settings-backdrop')?.getAttribute('aria-label')).toBe(zhCn.sidebar.settings);
+    const dialog = document.querySelector('.t-settings-dialog')!;
+    expect(document.getElementById(dialog.getAttribute('aria-labelledby')!)?.textContent).toBe(zhCn.sidebar.settings);
   });
 
   it('TMessageActions copy button', async () => {
@@ -178,9 +179,12 @@ describe('dictionary-backed chrome', () => {
 });
 
 describe('catalogue', () => {
-  const values = (messages: typeof en) =>
-    Object.entries(messages).flatMap(([section, entries]) =>
-      Object.entries(entries as Record<string, string>).map(([key, value]) => [`${section}.${key}`, value] as const),
+  // Walks nested maps too (`composer.effortNames.low`), so every string of the catalogue is checked.
+  const values = (messages: object, prefix = ''): Array<readonly [string, string]> =>
+    Object.entries(messages).flatMap(([key, value]) =>
+      typeof value === 'string'
+        ? [[`${prefix}${key}`, value] as const]
+        : values(value as object, `${prefix}${key}.`),
     );
 
   it('stores no replacement characters (a lossy re-encode once garbled three zh-cn strings)', () => {

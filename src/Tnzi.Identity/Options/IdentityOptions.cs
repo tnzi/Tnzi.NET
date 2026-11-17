@@ -86,6 +86,12 @@ public class IdentityOptions
     /// 配置路径：Identity:Invitation
     /// </summary>
     public InvitationOptions Invitation { get; set; } = new();
+
+    /// <summary>
+    /// 头像文件约束（格式与大小）
+    /// 配置路径：Identity:Avatar
+    /// </summary>
+    public AvatarOptions Avatar { get; set; } = new();
 }
 
 /// <summary>
@@ -210,7 +216,8 @@ public class TnziSignInOptions
     public bool AllowSmsLogin { get; set; } = false;
 
     /// <summary>
-    /// 是否允许免密的验证码登录（<c>POST /auth/code-login</c>）。默认 <c>true</c>。
+    /// 是否允许免密的验证码登录（<c>POST /auth/code-login</c>）。默认 <c>false</c>：
+    /// 要提供它的部署设 <c>Identity:SignIn:AllowCodeLogin = true</c>（或在设置中心打开 "Allow Code Login"）。
     /// </summary>
     /// <remarks>
     /// ★ 这个开关存在的理由是<strong>解耦</strong>：在它之前，想关掉免密验证码登录只能把
@@ -218,8 +225,13 @@ public class TnziSignInOptions
     /// 会连带关掉邮箱/短信两步验证与邮箱/短信找回密码。想少一种登录方式的部署，
     /// 不该被迫连 2FA 一起放弃。
     /// <para>
-    /// 与渠道开关是**与**的关系：关掉任一边，验证码登录都不可用。默认 <c>true</c> 因此不改变
-    /// 既有部署的行为（此前的实际可用性完全由渠道开关决定）。
+    /// 与渠道开关是**与**的关系：关掉任一边，验证码登录都不可用。
+    /// </para>
+    /// <para>
+    /// ★ <strong>默认关闭</strong>：正常的登录方式是密码，开了两步验证就在密码之上再要第二因子。
+    /// 免密验证码登录把「收得到这个邮箱 / 号码上的码」当成全部凭据，是部署方有意选择才该有的方式，
+    /// 不该因为没写配置就对外提供。打开时注意手机号不唯一：号码被多个账号持有时短信验证码登录会被拒绝
+    /// （见 <see cref="Services.PhoneNumberAccountLookup"/>）。
     /// </para>
     /// <para>
     /// ⚠ 判定落在<strong>服务层</strong>（发码与登录两个入口都拒绝），不是只在
@@ -227,8 +239,8 @@ public class TnziSignInOptions
     /// </para>
     /// </remarks>
     [RuntimeSetting(Label = "Allow Code Login", I18n = "admin.modules.system.settings.fields.allowCodeLogin", Type = SettingFieldType.Boolean, Subsection = "Sign-in",
-        Description = "Allow passwordless sign-in with an emailed / texted verification code. Turning this off leaves email & SMS two-factor and code-based password recovery working - those are governed by the OTP channel switches, which this one is independent of. The delivery channel must also be on ('Enable Email Codes' / 'Enable SMS Codes').")]
-    public bool AllowCodeLogin { get; set; } = true;
+        Description = "Allow passwordless sign-in with an emailed / texted verification code. Off by default: password sign-in (plus two-factor when enabled) is the normal way in, so turn this on only if you deliberately offer code sign-in. Turning this off leaves email & SMS two-factor and code-based password recovery working - those are governed by the OTP channel switches, which this one is independent of. The delivery channel must also be on ('Enable Email Codes' / 'Enable SMS Codes').")]
+    public bool AllowCodeLogin { get; set; } = false;
 
     /// <summary>
     /// 是否要求唯一邮箱

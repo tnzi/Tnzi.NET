@@ -139,7 +139,7 @@ public class DispatchFacadeThreadOwnershipTests
     private sealed class RefusingThreadService : IAgentThreadInternalService
     {
         public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
-            Guid? threadId, Guid? agentId, CancellationToken ct = default)
+            Guid? threadId, Guid? agentId, string? origin, ThreadListing listing = ThreadListing.Listed, CancellationToken ct = default)
             => throw new BusinessException("Thread not found", ErrorCodes.ThreadNotFound, 404);
 
         public Task<Guid> SaveMessageAsync(Guid threadId, string role, string content,
@@ -163,7 +163,7 @@ public class DispatchFacadeThreadOwnershipTests
     private sealed class BrokenThreadService : IAgentThreadInternalService
     {
         public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
-            Guid? threadId, Guid? agentId, CancellationToken ct = default)
+            Guid? threadId, Guid? agentId, string? origin, ThreadListing listing = ThreadListing.Listed, CancellationToken ct = default)
             => throw new InvalidOperationException("connection refused");
 
         public Task<Guid> SaveMessageAsync(Guid threadId, string role, string content,

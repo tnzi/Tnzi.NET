@@ -57,7 +57,8 @@
  */
 import { computed, ref } from 'vue'
 import { NButton, NSpin } from 'naive-ui'
-import { TEmpty, useSafeMessage } from '@tnzi/ui'
+import { TEmpty } from '@tnzi/ui'
+import { useSafeMessage } from '../../headless/useSafeMessage'
 import type { SaveUsagePolicyDto, UsageLimitDefaultsDto } from '@tnzi/core/services/ai'
 import TDetailBlock from '../detail/TDetailBlock.vue'
 import TUsageLimitPolicyForm, { type InheritedUsagePolicy } from './TUsageLimitPolicyForm.vue'
@@ -116,6 +117,7 @@ const inherited = computed<InheritedUsagePolicy>(() => {
     weeklyLimitUsd: cfg?.weeklyLimitUsd ?? null,
     allowedModels: cfg?.allowedModels ?? [],
     defaultModel: cfg?.defaultModel ?? null,
+    // The level below the defaults is the model list itself: the form reads each model's efforts from the catalog.
   }
 })
 

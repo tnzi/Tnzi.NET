@@ -12,6 +12,7 @@ public class CliRunMessageConfiguration : EntityTypeConfigurationBase<CliRunMess
 
         builder.Property(e => e.Tool).HasMaxLength(200);
         builder.Property(e => e.CallId).HasMaxLength(200);
+        builder.Property(e => e.ParentCallId).HasMaxLength(200);
         builder.Property(e => e.Status).HasMaxLength(64);
         builder.Property(e => e.Level).HasMaxLength(32);
 

@@ -306,8 +306,9 @@ public class RegistrationService : ApplicationService, IRegistrationService
 
         if (isSmsRequest)
         {
-            var existingUser = await _userManager.FindByPhoneNumberAsync(input.PhoneNumber);
-            if (existingUser != null)
+            // 存在性判断：一个或多个账号持有这个号码都算「已注册」。
+            var existing = await _userManager.ResolveByPhoneNumberAsync(input.PhoneNumber);
+            if (existing.Match != PhoneNumberMatch.None)
             {
                 return Fail<string>("Phone number is already registered", 400);
             }
@@ -409,8 +410,9 @@ public class RegistrationService : ApplicationService, IRegistrationService
 
         if (isSmsRequest)
         {
-            var existingUser = await _userManager.FindByPhoneNumberAsync(input.PhoneNumber);
-            if (existingUser != null)
+            // 存在性判断：一个或多个账号持有这个号码都算「已注册」。
+            var existing = await _userManager.ResolveByPhoneNumberAsync(input.PhoneNumber);
+            if (existing.Match != PhoneNumberMatch.None)
             {
                 return Fail<QuickRegisterResultDto>("Phone number is already registered", 400);
             }

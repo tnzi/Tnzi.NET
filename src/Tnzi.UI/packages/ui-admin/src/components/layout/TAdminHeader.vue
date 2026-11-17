@@ -16,7 +16,7 @@
         <template #trigger>
           <button
             class="t-admin-header__icon-btn t-admin-header__toggler"
-            :aria-label="appStore.siderCollapse ? 'Expand sider' : 'Collapse sider'"
+            :aria-label="appStore.siderCollapse ? tr('expandSider', 'Expand sidebar') : tr('collapseSider', 'Collapse sidebar')"
             @click="appStore.toggleSiderCollapse()"
           >
             <!-- soybean parity: animated `line-md` fold icon whose stroke
@@ -33,7 +33,7 @@
             />
           </button>
         </template>
-        {{ appStore.siderCollapse ? 'Expand' : 'Collapse' }}
+        {{ appStore.siderCollapse ? tr('expandSider', 'Expand sidebar') : tr('collapseSider', 'Collapse sidebar') }}
       </NTooltip>
       <div v-if="$slots.breadcrumb" class="t-admin-header__breadcrumb">
         <slot name="breadcrumb" />
@@ -67,7 +67,7 @@
       >
         <button
           class="t-admin-header__icon-btn t-admin-header__overflow"
-          aria-label="More actions"
+          :aria-label="tr('moreActions', 'More actions')"
         >
           <Icon icon="mdi:dots-vertical" width="20" height="20" />
         </button>
@@ -76,31 +76,31 @@
         <template #trigger>
           <button
             class="t-admin-header__icon-btn t-admin-header__search"
-            aria-label="Search"
+            :aria-label="tr('search', 'Search')"
             @click="emit('openSearch')"
           >
             <Icon icon="mdi:magnify" width="20" height="20" />
           </button>
         </template>
-        Search (Ctrl+K)
+        {{ tr('search', 'Search') }} (Ctrl+K)
       </NTooltip>
       <NTooltip v-if="showReload && inlineActionKeys.has('reload')" placement="bottom" trigger="hover">
         <template #trigger>
           <button
             class="t-admin-header__icon-btn t-admin-header__reload"
-            aria-label="Reload"
+            :aria-label="tr('reload', 'Reload')"
             @click="appStore.reloadPage()"
           >
             <Icon icon="mdi:refresh" width="20" height="20" />
           </button>
         </template>
-        Reload
+        {{ tr('reload', 'Reload') }}
       </NTooltip>
       <NTooltip v-if="fullscreenButtonVisible && inlineActionKeys.has('fullscreen')" placement="bottom" trigger="hover">
         <template #trigger>
           <button
             class="t-admin-header__icon-btn t-admin-header__fullscreen"
-            :aria-label="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'"
+            :aria-label="isFullscreen ? tr('exitFullscreen', 'Exit fullscreen') : tr('enterFullscreen', 'Enter fullscreen')"
             @click="toggleFullscreen()"
           >
             <Icon
@@ -110,31 +110,31 @@
             />
           </button>
         </template>
-        {{ isFullscreen ? 'Exit fullscreen' : 'Fullscreen' }}
+        {{ isFullscreen ? tr('exitFullscreen', 'Exit fullscreen') : tr('fullscreen', 'Fullscreen') }}
       </NTooltip>
       <NTooltip v-if="showThemeSchemaBtn && inlineActionKeys.has('theme-schema')" placement="bottom" trigger="hover">
         <template #trigger>
           <button
             class="t-admin-header__icon-btn t-admin-header__theme-schema"
-            :aria-label="`Theme: ${themeSchemaTooltip}`"
+            :aria-label="themeSchemaLabel"
             @click="cycleThemeSchema"
           >
             <Icon :icon="themeSchemaIcon" width="20" height="20" />
           </button>
         </template>
-        Theme: {{ themeSchemaTooltip }}
+        {{ themeSchemaLabel }}
       </NTooltip>
       <NTooltip v-if="showThemeBtn && inlineActionKeys.has('theme')" placement="bottom" trigger="hover">
         <template #trigger>
           <button
             class="t-admin-header__icon-btn t-admin-header__theme"
-            aria-label="Theme settings"
+            :aria-label="tr('themeSettings', 'Theme settings')"
             @click="emit('openThemeDrawer')"
           >
             <Icon icon="mdi:palette-outline" width="20" height="20" />
           </button>
         </template>
-        Theme settings
+        {{ tr('themeSettings', 'Theme settings') }}
       </NTooltip>
       <NDropdown
         v-if="langSwitchVisible"
@@ -144,7 +144,7 @@
       >
         <button
           class="t-admin-header__icon-btn t-admin-header__lang"
-          aria-label="Language"
+          :aria-label="tr('language', 'Language')"
         >
           <Icon icon="mdi:web" width="20" height="20" />
         </button>
@@ -171,6 +171,7 @@ import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import { useAdminLocale } from '../../headless/useAdminLocale'
+import { interpolate, translateChromeKey } from '../../i18n/translate'
 import type { AdminLocale } from '../../i18n/messages'
 
 interface Props {
@@ -317,17 +318,16 @@ const themeSchemaIcon = computed(() => {
       return 'material-symbols:sunny-rounded'
   }
 })
-const themeSchemaTooltip = computed(() => {
-  switch (themeMode.value) {
-    case 'dark':
-      return 'Dark'
-    case 'auto':
-      return 'Auto'
-    case 'light':
-    default:
-      return 'Light'
-  }
-})
+/** Chrome strings from the admin locale (`admin.header.*`), English when it has none. */
+function tr(key: string, fallback: string): string {
+  return translateChromeKey(`admin.header.${key}`, fallback)
+}
+const THEME_SCHEMA_FALLBACK = { light: 'Light', dark: 'Dark', auto: 'Follow system' } as const
+const themeSchemaLabel = computed(() =>
+  interpolate(tr('themeMode', 'Theme: {mode}'), {
+    mode: translateChromeKey(`admin.themeSchema.${themeMode.value}`, THEME_SCHEMA_FALLBACK[themeMode.value]),
+  }),
+)
 function cycleThemeSchema(): void {
   if (!themeContext) return
   const next: 'light' | 'dark' | 'auto' =
@@ -356,35 +356,35 @@ interface OverflowAction {
 const overflowActions = computed<OverflowAction[]>(() => [
   {
     key: 'search',
-    label: 'Search',
+    label: tr('search', 'Search'),
     icon: 'mdi:magnify',
     show: props.showSearch,
     handler: () => emit('openSearch'),
   },
   {
     key: 'reload',
-    label: 'Reload',
+    label: tr('reload', 'Reload'),
     icon: 'mdi:refresh',
     show: props.showReload,
     handler: () => appStore.reloadPage(),
   },
   {
     key: 'fullscreen',
-    label: isFullscreen.value ? 'Exit fullscreen' : 'Fullscreen',
+    label: isFullscreen.value ? tr('exitFullscreen', 'Exit fullscreen') : tr('fullscreen', 'Fullscreen'),
     icon: isFullscreen.value ? 'mdi:fullscreen-exit' : 'mdi:fullscreen',
     show: fullscreenButtonVisible.value,
     handler: () => toggleFullscreen(),
   },
   {
     key: 'theme-schema',
-    label: `Theme: ${themeSchemaTooltip.value}`,
+    label: themeSchemaLabel.value,
     icon: themeSchemaIcon.value,
     show: props.showThemeSchemaBtn,
     handler: cycleThemeSchema,
   },
   {
     key: 'theme',
-    label: 'Theme settings',
+    label: tr('themeSettings', 'Theme settings'),
     icon: 'mdi:palette-outline',
     show: props.showThemeBtn,
     handler: () => emit('openThemeDrawer'),

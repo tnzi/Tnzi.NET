@@ -44,7 +44,20 @@ public class UserDetailAvatarGuardTests : IntegrationTestBase
     }
 
     /// <summary>UserDetail 对 User 有外键，行得先在；TnziDbContext 只认异步保存，故不能放进构造函数。</summary>
-    private async Task<UserDetailService> BuildAsync(IFileReadAccessProbe? probe)
+    /// <summary>一张最小的 PNG 文件头：形态校验只看魔数与字节数。</summary>
+    private static readonly byte[] PngBytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52];
+
+    private static IFileContentReader Serving(byte[] bytes)
+    {
+        var reader = new Mock<IFileContentReader>();
+        reader.Setup(r => r.OpenReadAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(bytes));
+        return reader.Object;
+    }
+
+    private Task<UserDetailService> BuildAsync(IFileReadAccessProbe? probe) => BuildAsync(probe, Serving(PngBytes));
+
+    private async Task<UserDetailService> BuildAsync(IFileReadAccessProbe? probe, IFileContentReader? content, long? maxBytes = null)
     {
         if (!await DbContext.Users.AnyAsync(u => u.Id == _userId))
         {
@@ -58,7 +71,68 @@ public class UserDetailAvatarGuardTests : IntegrationTestBase
             _userManager.Object,
             ServiceProvider,
             UnscopedUserTenantScope.Create(),
-            probe);
+            probe,
+            fileContent: content,
+            options: Microsoft.Extensions.Options.Options.Create(new Tnzi.Identity.Options.IdentityOptions
+            {
+                Avatar = new AvatarOptions { MaxBytes = maxBytes ?? AvatarOptions.DefaultMaxBytes },
+            }));
+    }
+
+    /// <summary>
+    /// ★★ 头像会被发布成匿名可读，所以一份读得到的文件还不够：它得是一张图。
+    /// 判定看字节不看文件名 —— 改名成 .png 的 PDF 文件头仍是 <c>%PDF</c>。
+    /// </summary>
+    [Fact]
+    public async Task Write_WhenTheFileIsNotAnImage_Rejected400AndWritesNothing()
+    {
+        var pdf = "%PDF-1.7\n%payroll"u8.ToArray();
+
+        var result = await (await BuildAsync(Answering(canRead: true), Serving(pdf)))
+            .CreateOrUpdateAsync(_userId, new CreateUserDetailDto { AvatarId = Guid.NewGuid() });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.ErrorCode.ShouldBe(ErrorCodes.IDENTITY_AVATAR_INVALID);
+        (await StoredDetailAsync()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Write_WhenTheImageIsOverTheLimit_Rejected400()
+    {
+        var big = PngBytes.Concat(new byte[64]).ToArray();
+
+        var result = await (await BuildAsync(Answering(canRead: true), Serving(big), maxBytes: PngBytes.Length))
+            .CreateOrUpdateAsync(_userId, new CreateUserDetailDto { AvatarId = Guid.NewGuid() });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.ErrorCode.ShouldBe(ErrorCodes.IDENTITY_AVATAR_INVALID);
+        (await StoredDetailAsync()).ShouldBeNull();
+    }
+
+    /// <summary>归属先于形态：读不到的文件不能被读字节，否则这条写入路径就成了任意文件 id 的格式探针。</summary>
+    [Fact]
+    public async Task Write_WhenCallerCannotReadTheFile_NeverOpensIt()
+    {
+        var reader = new Mock<IFileContentReader>(MockBehavior.Strict);
+
+        var result = await (await BuildAsync(Answering(canRead: false), reader.Object))
+            .CreateOrUpdateAsync(_userId, new CreateUserDetailDto { AvatarId = Guid.NewGuid() });
+
+        result.Code.ShouldBe(403);
+        reader.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Write_WithoutAContentReader_Rejected501()
+    {
+        var result = await (await BuildAsync(Answering(canRead: true), content: null))
+            .CreateOrUpdateAsync(_userId, new CreateUserDetailDto { AvatarId = Guid.NewGuid() });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(501);
+        (await StoredDetailAsync()).ShouldBeNull();
     }
 
     private static IFileReadAccessProbe Answering(bool canRead)

@@ -461,7 +461,7 @@ describe('TListShell - header off (embedded in a tab)', () => {
     expect(toolbar.find('.t-list-shell__search-icon').exists()).toBe(true)
     expect(toolbar.find('.t-list-shell__adv-toggle').exists()).toBe(true)
     // The desktop row (keyword input + Search + Advanced) would overflow 375px.
-    expect(wrapper.find('.t-list-shell__inline-keyword').exists()).toBe(false)
+    expect(wrapper.find('.t-list-shell__search-input').exists()).toBe(false)
   })
 
   it('phone: Advanced expands the one-column form inside the list card, never the drawer', async () => {
@@ -494,7 +494,7 @@ describe('TListShell - header off (embedded in a tab)', () => {
   it('desktop: keeps the inline keyword row and the right drawer', async () => {
     ;(globalThis as any).__bpNarrow = false
     const wrapper = mountEmbedded()
-    expect(wrapper.find('.t-list-shell__inline-keyword').exists()).toBe(true)
+    expect(wrapper.find('.t-list-shell__toolbar .t-list-shell__search-input').exists()).toBe(true)
     expect(wrapper.find('.t-list-shell__search-icon').exists()).toBe(false)
     const adv = wrapper.findAll('button').find((b) => b.text().includes('admin.crud.advancedSearch'))
     expect(adv, 'toolbar Advanced button').toBeDefined()
@@ -513,10 +513,36 @@ describe('TListShell - header off (embedded in a tab)', () => {
       slots: { renderer: '<div/>' },
       global: { stubs: drawerStubs },
     })
-    expect(wrapper.find('.t-list-shell__inline-keyword').exists()).toBe(false)
+    expect(wrapper.find('.t-list-shell__search-input').exists()).toBe(false)
     const labels = wrapper.findAll('button').map((b) => b.text())
     expect(labels.some((l) => l.includes('admin.crud.advancedSearch'))).toBe(true)
     expect(labels.some((l) => l.trim() === 'admin.crud.search')).toBe(false)
+  })
+
+  // The toolbar search is the header search moved, not a second control: a
+  // tab-embedded list once drew an outlined Search and a different Advanced
+  // icon, so the same entry looked like two products. Both places now render
+  // one definition; this pins that the markup is identical.
+  it.each([
+    ['keyword + Advanced', { searchFields: fields }],
+    ['keyword only', {}],
+    ['Advanced only', { searchFields: fields, showDefaultSearch: false }],
+  ])('desktop: the toolbar search renders exactly as the header search (%s)', (_label, extra) => {
+    ;(globalThis as any).__bpNarrow = false
+    const mountWith = (showHeader: boolean) =>
+      mount(TListShell, {
+        props: { state: makeState() as any, showHeader, ...extra },
+        slots: { renderer: '<div/>' },
+        global: { stubs: drawerStubs },
+      })
+    const header = mountWith(true).find('.t-list-shell__header-card .t-list-shell__search')
+    const toolbar = mountWith(false).find('.t-list-shell__toolbar-left')
+    expect(header.exists()).toBe(true)
+    expect(toolbar.exists()).toBe(true)
+    // Template comments differ by placement and carry no rendering.
+    const markup = (el: Element) => el.innerHTML.replace(/<!--[\s\S]*?-->/g, '').trim()
+    expect(markup(toolbar.element)).toContain('t-list-shell__')
+    expect(markup(toolbar.element)).toBe(markup(header.element))
   })
 
   it('header on: the phone panel stays in the header card, not the list card', async () => {

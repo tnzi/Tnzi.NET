@@ -9,6 +9,10 @@
 // Page chrome - the white header card every in-frame page gets, plus the two
 // page containers (single content surface / tabbed sections).
 export { default as TPageHeader } from './TPageHeader.vue'
+export { default as TAppHeader } from './TAppHeader.vue'
+export { default as TBreadcrumb } from './TBreadcrumb.vue'
+// Declarative widget grid (Workbench); the widget protocol is in `widgets/`.
+export { default as TWorkbenchLayout } from './TWorkbenchLayout.vue'
 export type { BackTarget } from './back-target'
 // The sidebar's menu-group style, chosen once per app via
 // `defineAdminApp({ shell: { menuGroups } })`; the type is what that option takes.

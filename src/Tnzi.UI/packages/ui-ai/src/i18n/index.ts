@@ -5,22 +5,37 @@
  * translator without pulling a language pack in with it - the same split
  * `@tnzi/ui-admin` makes between `i18n/` and `locales/`.
  */
-import { inject, provide, ref, type InjectionKey, type Ref } from 'vue';
+import { computed, inject, provide, ref, toValue, type MaybeRefOrGetter, type Ref } from 'vue';
 import { en, type AiLocaleMessages } from '../locales/en';
+import { AI_I18N_KEY, AI_LOCALE_KEY } from './key';
 
 export type { AiLocaleMessages } from '../locales/en';
-
-
-const AI_I18N_KEY: InjectionKey<Ref<AiLocaleMessages>> = Symbol('ai-i18n');
+export { AI_I18N_KEY, AI_LOCALE_KEY } from './key';
+export { formatAiMessage } from './format';
+export { createAiI18nPlugin, matchAiLocale } from './plugin';
+export type { AiI18nPlugin, AiI18nPluginOptions } from './plugin';
 
 /**
  * Provide AI i18n messages to descendant components.
- * Call in a root component's setup().
+ * Call in a root component's setup(). An app with no root component of its own to call it in
+ * (custom elements) installs `createAiI18nPlugin` instead.
+ *
+ * `locale`, the language tag the messages are in, is provided beside them for what hands the
+ * language on (a widget's host context); a ref or getter keeps it current.
  */
-export function createAiI18n(messages: AiLocaleMessages = en): Ref<AiLocaleMessages> {
+export function createAiI18n(
+  messages: AiLocaleMessages = en,
+  options: { readonly locale?: MaybeRefOrGetter<string | undefined> } = {},
+): Ref<AiLocaleMessages> {
   const messagesRef = ref(messages) as Ref<AiLocaleMessages>;
   provide(AI_I18N_KEY, messagesRef);
+  if (options.locale !== undefined) provide(AI_LOCALE_KEY, computed(() => toValue(options.locale)));
   return messagesRef;
+}
+
+/** The app's language tag as provided (`createAiI18nPlugin`, `createAiI18n`); undefined when none was. */
+export function useAiLocale(): Readonly<Ref<string | undefined>> {
+  return inject(AI_LOCALE_KEY, ref(undefined));
 }
 
 /**
@@ -28,23 +43,4 @@ export function createAiI18n(messages: AiLocaleMessages = en): Ref<AiLocaleMessa
  */
 export function useAiI18n(): Ref<AiLocaleMessages> {
   return inject(AI_I18N_KEY, ref(en) as Ref<AiLocaleMessages>);
-}
-
-/**
- * Substitute `{name}` placeholders in a message.
- *
- * Several catalogue entries carry placeholders (`{count}`, `{seconds}`,
- * `{size}`); this is the one helper that fills them, so components do not each
- * hand-roll a `.replace()`. Unknown placeholders are left untouched, which
- * makes a typo visible instead of silently blanking the string.
- *
- * @example formatAiMessage(t.mcp.toolCount, { count: 12 }) // '12 tools'
- */
-export function formatAiMessage(
-  template: string,
-  values: Readonly<Record<string, string | number>>,
-): string {
-  return template.replace(/\{(\w+)\}/g, (match, key: string) =>
-    key in values ? String(values[key]) : match,
-  );
 }

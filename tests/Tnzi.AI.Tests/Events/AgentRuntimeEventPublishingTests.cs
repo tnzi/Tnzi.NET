@@ -16,7 +16,7 @@ public class AgentRuntimeEventPublishingTests
         var store = runStore ?? Mock.Of<IRunStore>();
         var traces = traceStore ?? CreateDefaultTraceStore();
         var runTracker = new RunTracker(store, traces, Mock.Of<ILogger<RunTracker>>());
-        var eventPublisher = new EventPublisher(eventBus, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>());
+        var eventPublisher = new EventPublisher(eventBus, Mock.Of<ILogger<EventPublisher>>());
 
         return new AgentRuntime(
             agentResolver ?? Mock.Of<IAgentResolver>(),

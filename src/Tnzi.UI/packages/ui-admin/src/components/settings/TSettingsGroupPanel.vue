@@ -87,7 +87,7 @@ import { NAlert, NButton, NCollapse, NCollapseItem, NPopconfirm, NTag } from 'na
 import type { SettingsCenterFieldDto, SettingsCenterGroupDto } from '@tnzi/core/services/system'
 import TDetailSection from '../detail/TDetailSection.vue'
 import TSettingsField from './TSettingsField.vue'
-import { useSafeMessage } from '@tnzi/ui'
+import { useSafeMessage } from '../../headless/useSafeMessage'
 import { interpolate, resolveBackendLabel, translatePageKey } from '../../i18n/translate'
 import { playSoundEffect } from '../../headless/chat-sounds'
 import { lastSettingsChange } from '../../headless/useSettingsRealtime'

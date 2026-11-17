@@ -88,7 +88,8 @@
  */
 import { computed, reactive, ref, watch } from 'vue'
 import { NAlert, NButton, NInput, NSpin, NSwitch, NTag } from 'naive-ui'
-import { TSvgIcon, useSafeMessage } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
+import { useSafeMessage } from '../../headless/useSafeMessage'
 import type { UserSignInPolicyDto } from '@tnzi/core/services/identity'
 import TDetailBlock from '../detail/TDetailBlock.vue'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'

@@ -17,10 +17,14 @@ public class ThreadResolutionMiddlewareTests
 {
     private static readonly Guid AgentId = Guid.NewGuid();
 
-    private static AiMiddlewareContext CreateContext(Guid? threadId, bool ephemeral = false)
+    private static AiMiddlewareContext CreateContext(
+        Guid? threadId, bool ephemeral = false, ThreadListing listing = ThreadListing.Listed, string? origin = null)
         => new()
         {
-            Request = new AgentRunRequest { UserMessage = "hi", ThreadId = threadId, AgentId = AgentId, Ephemeral = ephemeral },
+            Request = new AgentRunRequest
+            {
+                UserMessage = "hi", ThreadId = threadId, AgentId = AgentId, Ephemeral = ephemeral, ThreadListing = listing, ThreadOrigin = origin
+            },
             Agent = AgentResolution.Success(agent: null!, provider: "test", model: "test", agentId: AgentId),
             ServiceProvider = new ServiceCollection().BuildServiceProvider(),
             Messages = []
@@ -29,9 +33,22 @@ public class ThreadResolutionMiddlewareTests
     private static Mock<IAgentThreadInternalService> ThreadServiceResolving(Guid resolved, bool isNew)
     {
         var mock = new Mock<IAgentThreadInternalService>();
-        mock.Setup(s => s.GetOrCreateThreadAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        mock.Setup(s => s.GetOrCreateThreadAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((resolved, isNew));
         return mock;
+    }
+
+    [Fact]
+    public async Task InvokeAsync_NewThread_TakesTheRequestsOriginAndListing()
+    {
+        // Built-in agents: an in-process run that starts a thread can keep it out of its owner's lists, as the external path does
+        var threadService = ThreadServiceResolving(Guid.NewGuid(), isNew: true);
+        var mw = new ThreadResolutionMiddleware(threadService.Object, NullLogger<ThreadResolutionMiddleware>.Instance);
+        var context = CreateContext(threadId: null, listing: ThreadListing.UntilUserMessage, origin: "Schedule");
+
+        await mw.InvokeAsync(context, (_, _) => Task.FromResult(new AgentRunResult { Response = "ok" }));
+
+        threadService.Verify(s => s.GetOrCreateThreadAsync(null, AgentId, "Schedule", ThreadListing.UntilUserMessage, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -86,7 +103,7 @@ public class ThreadResolutionMiddlewareTests
         // 归属校验的唯一所在地是 GetOrCreateThreadAsync：它的拒绝必须原样传播，前移不能变成放行
         var threadService = new Mock<IAgentThreadInternalService>();
         threadService
-            .Setup(s => s.GetOrCreateThreadAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ResourceNotFoundException("Thread not found"));
         var mw = new ThreadResolutionMiddleware(threadService.Object, NullLogger<ThreadResolutionMiddleware>.Instance);
         var nextCalled = false;
@@ -115,7 +132,7 @@ public class ThreadResolutionMiddlewareTests
         var run = pipeline.Build((_, _) => Task.FromResult(new AgentRunResult { Response = "ok" }));
         await run(context, CancellationToken.None);
 
-        threadService.Verify(s => s.GetOrCreateThreadAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+        threadService.Verify(s => s.GetOrCreateThreadAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()), Times.Once);
         context.Request.ThreadId.ShouldBe(resolved);
         context.IsNewThread.ShouldBeTrue("History must keep the IsNewThread flag the resolver set");
     }
@@ -133,7 +150,7 @@ public class ThreadResolutionMiddlewareTests
         await history.InvokeAsync(context, (_, _) => Task.FromResult(new AgentRunResult { Response = "ok" }));
 
         context.Request.ThreadId.ShouldBe(resolved);
-        threadService.Verify(s => s.GetOrCreateThreadAsync(null, AgentId, It.IsAny<CancellationToken>()), Times.Once);
+        threadService.Verify(s => s.GetOrCreateThreadAsync(null, AgentId, It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     /// <summary>

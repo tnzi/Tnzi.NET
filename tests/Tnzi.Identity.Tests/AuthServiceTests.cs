@@ -158,7 +158,7 @@ public class AuthServiceTests
         // Arrange - specific switches + two OAuth providers with full creds, one empty.
         var options = new IdentityOptions
         {
-            SignIn = { AllowUserNameLogin = true, AllowEmailLogin = true, AllowSmsLogin = false, UseEmailAsUserName = true },
+            SignIn = { AllowUserNameLogin = true, AllowEmailLogin = true, AllowSmsLogin = false, UseEmailAsUserName = true, AllowCodeLogin = true },
             Otp = { EnableSms = false, EnableEmail = true },
             Registration = { EnableQuickRegisterEmail = true, EnableQuickRegisterSms = false },
             Recovery = { EnablePasswordResetByEmail = true, EnablePasswordResetBySms = false },
@@ -1161,6 +1161,8 @@ public class AuthServiceTests
     [Fact]
     public async Task CodeLoginAsync_WhenAccountIsLockedOut_RejectsAndIssuesNothing()
     {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions { SignIn = { AllowCodeLogin = true } });
+
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -1202,6 +1204,8 @@ public class AuthServiceTests
     [Fact]
     public async Task CodeLoginAsync_WhenAnotherFactorIsEnabled_ChallengesInsteadOfIssuing()
     {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions { SignIn = { AllowCodeLogin = true } });
+
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -1274,6 +1278,7 @@ public class AuthServiceTests
 
         _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
+            SignIn = { AllowCodeLogin = true },
             Jwt = new JwtOptions { EnableRefreshToken = true, RefreshTokenExpirationDays = 7, AccessTokenExpirationMinutes = 30 }
         });
         _tokenServiceMock
@@ -1309,6 +1314,8 @@ public class AuthServiceTests
     /// </summary>
     private User GivenAnUnverifiedAddressAccount(TwoFactorType type, Action<User>? shape = null)
     {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions { SignIn = { AllowCodeLogin = true } });
+
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -1451,6 +1458,8 @@ public class AuthServiceTests
     /// <summary>An account with <paramref name="enabled"/> two-factor methods that signs in with an email code.</summary>
     private User GivenACodeLoginAccountWith(params TwoFactorType[] enabled)
     {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions { SignIn = { AllowCodeLogin = true } });
+
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -1649,6 +1658,7 @@ public class AuthServiceTests
     {
         _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
+            SignIn = { AllowCodeLogin = true },
             Captcha = new CaptchaOptions { EnableCaptchaOnLogin = true },
             Otp = new OtpOptions { EnableEmail = true }
         });
@@ -1681,6 +1691,7 @@ public class AuthServiceTests
     {
         _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
+            SignIn = { AllowCodeLogin = true },
             Captcha = new CaptchaOptions { EnableCaptchaOnLogin = true },
             Otp = new OtpOptions { EnableEmail = true },
             Registration = new RegistrationOptions { EnableQuickRegisterEmail = true }
@@ -1708,6 +1719,7 @@ public class AuthServiceTests
     {
         _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
         {
+            SignIn = { AllowCodeLogin = true },
             Captcha = new CaptchaOptions { EnableCaptchaOnLogin = true },
             Otp = new OtpOptions { EnableEmail = true },
             // 地址是未知的，所以快速注册必须开着才会真的发出去 —— 关着时这条路径
@@ -2663,6 +2675,295 @@ public class AuthServiceTests
         Assert.True(result.Succeeded);
         _twoFactorServiceMock.Verify(
             x => x.SendCodeByAddressAsync(It.IsAny<string>(), TwoFactorType.Sms, VerificationCodePurpose.PasswordRecovery, owner.Id), Times.Once);
+    }
+
+    #endregion
+
+    #region 免密验证码登录默认关闭
+
+    /// <summary>
+    /// 免密验证码登录是部署方有意打开才有的方式：没写配置时 <c>AllowCodeLogin</c> 为 false。
+    /// </summary>
+    [Fact]
+    public void AllowCodeLogin_IsOffByDefault()
+    {
+        Assert.False(new TnziSignInOptions().AllowCodeLogin);
+        Assert.False(new IdentityOptions().SignIn.AllowCodeLogin);
+    }
+
+    /// <summary>
+    /// 默认配置下 <c>/auth/config</c> 不报告验证码登录，即使渠道开着；发码端点本身也拒绝。
+    /// </summary>
+    [Fact]
+    public async Task WithDefaultSignInOptions_CodeLoginIsNeitherReportedNorServed()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Otp = new OtpOptions { EnableEmail = true, EnableSms = true },
+        });
+
+        var config = _authService.GetAuthConfig().Data!;
+        Assert.False(config.EnableCodeLogin);
+        Assert.False(config.CodeLoginViaEmail);
+        Assert.False(config.CodeLoginViaSms);
+
+        var send = await _authService.SendCodeLoginCodeAsync(new SendCodeLoginCodeDto { Email = "someone@example.com", Type = TwoFactorType.Email });
+        Assert.False(send.Succeeded);
+        Assert.Equal(400, send.Code);
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    #endregion
+
+    #region 按手机号认账号：号码被多个账号共用时拒绝
+
+    private const string SharedPhone = "+15550188";
+
+    /// <summary>Two live accounts that both hold <see cref="SharedPhone"/> as a verified number (the older one is the admin).</summary>
+    private (User Admin, User NewHire) GivenTwoAccountsShareAVerifiedNumber()
+    {
+        var admin = new User
+        {
+            Id = Guid.NewGuid(), UserName = "admin", Email = "admin@example.com", EmailConfirmed = true,
+            PhoneNumber = SharedPhone, PhoneNumberConfirmed = true, PasswordHash = "hash", CreationTime = DateTime.UtcNow.AddYears(-3),
+        };
+        var newHire = new User
+        {
+            Id = Guid.NewGuid(), UserName = "new-hire", Email = "new-hire@example.com", EmailConfirmed = true,
+            PhoneNumber = SharedPhone, PhoneNumberConfirmed = true, PasswordHash = "hash", CreationTime = DateTime.UtcNow,
+        };
+        _userManagerMock.Setup(x => x.Users).Returns(new List<User> { admin, newHire }.BuildMock());
+        return (admin, newHire);
+    }
+
+    /// <summary>
+    /// 只有一个账号<b>验证过</b>这个号码；另一个账号把同一个号码填了进去但从没验证。
+    /// 未验证的那一行不算数：否则谁能给某个账号写一个未验证号码，谁就能让真号主的短信登录失效。
+    /// </summary>
+    private User GivenOneVerifiedHolderAndAnUnverifiedDuplicate()
+    {
+        var owner = new User
+        {
+            Id = Guid.NewGuid(), UserName = "owner", Email = "owner@example.com", EmailConfirmed = true,
+            PhoneNumber = SharedPhone, PhoneNumberConfirmed = true, PasswordHash = "hash", CreationTime = DateTime.UtcNow,
+        };
+        var squatter = new User
+        {
+            Id = Guid.NewGuid(), UserName = "squatter", Email = "squatter@example.com", EmailConfirmed = true,
+            PhoneNumber = SharedPhone, PhoneNumberConfirmed = false, PasswordHash = "hash", CreationTime = DateTime.UtcNow.AddYears(-1),
+        };
+        _userManagerMock.Setup(x => x.Users).Returns(new List<User> { squatter, owner }.BuildMock());
+        return owner;
+    }
+
+    private void GivenSmsCodeLoginIsOn()
+        => _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            SignIn = { AllowCodeLogin = true },
+            Otp = new OtpOptions { EnableSms = true },
+            Jwt = new JwtOptions { EnableRefreshToken = true, RefreshTokenExpirationDays = 7, AccessTokenExpirationMinutes = 30 },
+        });
+
+    private void AssertRefusedAsAmbiguous<T>(Result<T> result)
+    {
+        Assert.False(result.Succeeded);
+        Assert.Equal(409, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_PHONE_NUMBER_AMBIGUOUS, result.ErrorCode);
+        Assert.Equal(PhoneNumberAccountLookup.AmbiguousMessage, result.Message);
+    }
+
+    [Fact]
+    public async Task Resolver_CountsOnlyTheTierThatDecides()
+    {
+        var verified = new User { Id = Guid.NewGuid(), PhoneNumber = SharedPhone, PhoneNumberConfirmed = true };
+        var unverifiedA = new User { Id = Guid.NewGuid(), PhoneNumber = SharedPhone };
+        var unverifiedB = new User { Id = Guid.NewGuid(), PhoneNumber = SharedPhone };
+
+        var oneVerified = await PhoneNumberAccountLookup.ResolveAsync(new List<User> { unverifiedA, verified, unverifiedB }.BuildMock(), SharedPhone, requireConfirmed: false);
+        Assert.Equal(PhoneNumberMatch.Unique, oneVerified.Match);
+        Assert.Same(verified, oneVerified.User);
+
+        var twoUnverified = await PhoneNumberAccountLookup.ResolveAsync(new List<User> { unverifiedA, unverifiedB }.BuildMock(), SharedPhone, requireConfirmed: false);
+        Assert.Equal(PhoneNumberMatch.Ambiguous, twoUnverified.Match);
+        Assert.Null(twoUnverified.User);
+
+        var verifiedOnly = await PhoneNumberAccountLookup.ResolveAsync(new List<User> { unverifiedA, unverifiedB }.BuildMock(), SharedPhone, requireConfirmed: true);
+        Assert.Equal(PhoneNumberMatch.None, verifiedOnly.Match);
+
+        var oneUnverified = await PhoneNumberAccountLookup.ResolveAsync(new List<User> { unverifiedA }.BuildMock(), SharedPhone, requireConfirmed: false);
+        Assert.Same(unverifiedA, oneUnverified.User);
+
+        var nobody = await PhoneNumberAccountLookup.ResolveAsync(new List<User> { unverifiedA }.BuildMock(), "+15550000", requireConfirmed: false);
+        Assert.Equal(PhoneNumberMatch.None, nobody.Match);
+    }
+
+    /// <summary>
+    /// ★★★ 新员工的号码也登记在管理员账号上：用这个号码发验证码登录的码，此前会把码记在最早建的账号（管理员）名下。
+    /// </summary>
+    [Fact]
+    public async Task SendCodeLoginCode_BySms_ToASharedNumber_IsRefusedAndSendsNothing()
+    {
+        GivenSmsCodeLoginIsOn();
+        GivenTwoAccountsShareAVerifiedNumber();
+
+        var result = await _authService.SendCodeLoginCodeAsync(new SendCodeLoginCodeDto { PhoneNumber = SharedPhone, Type = TwoFactorType.Sms });
+
+        AssertRefusedAsAmbiguous(result);
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SendCodeLoginCode_BySms_ToANumberWithOneVerifiedHolder_SendsForThatAccount()
+    {
+        GivenSmsCodeLoginIsOn();
+        var owner = GivenOneVerifiedHolderAndAnUnverifiedDuplicate();
+        _twoFactorServiceMock
+            .Setup(x => x.SendCodeByAddressAsync(It.IsAny<string>(), TwoFactorType.Sms, VerificationCodePurpose.CodeLogin, owner.Id))
+            .ReturnsAsync(Result.Success());
+
+        var result = await _authService.SendCodeLoginCodeAsync(new SendCodeLoginCodeDto { PhoneNumber = SharedPhone, Type = TwoFactorType.Sms });
+
+        Assert.True(result.Succeeded);
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync(SharedPhone, TwoFactorType.Sms, VerificationCodePurpose.CodeLogin, owner.Id), Times.Once);
+    }
+
+    /// <summary>
+    /// 登录端也要挡：手里那枚码只证明收得到这个号码上的短信，证明不了是哪个账号的主人。
+    /// </summary>
+    [Fact]
+    public async Task CodeLogin_BySms_WithASharedNumber_IsRefusedAndIssuesNothing()
+    {
+        GivenSmsCodeLoginIsOn();
+        GivenTwoAccountsShareAVerifiedNumber();
+        _twoFactorServiceMock
+            .Setup(x => x.VerifyCodeByAddressAndMarkUsedAsync(SharedPhone, "123456", TwoFactorType.Sms, VerificationCodePurpose.CodeLogin))
+            .ReturnsAsync(Result<Guid?>.Success(null));
+
+        var result = await _authService.CodeLoginAsync(new CodeLoginDto { PhoneNumber = SharedPhone, Code = "123456", Type = TwoFactorType.Sms });
+
+        AssertRefusedAsAmbiguous(result);
+        AssertNothingWasIssued();
+    }
+
+    [Fact]
+    public async Task CodeLogin_BySms_WithANumberHeldByOneAccount_SignsInThatAccount()
+    {
+        var owner = GivenOneVerifiedHolderAndAnUnverifiedDuplicate();
+        ArrangeSuccessfulIssuance(owner);
+        GivenSmsCodeLoginIsOn();
+        _userManagerMock.Setup(x => x.GetTwoFactorEnabledAsync(owner)).ReturnsAsync(false);
+        _twoFactorServiceMock
+            .Setup(x => x.VerifyCodeByAddressAndMarkUsedAsync(SharedPhone, "123456", TwoFactorType.Sms, VerificationCodePurpose.CodeLogin))
+            .ReturnsAsync(Result<Guid?>.Success(owner.Id));
+        _authTokenServiceMock
+            .Setup(x => x.SaveTokenAsync(owner.Id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<Guid>()))
+            .ReturnsAsync(Guid.NewGuid());
+        _sessionServiceMock.Setup(x => x.CreateSessionAsync(owner.Id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(Guid.NewGuid());
+
+        var result = await _authService.CodeLoginAsync(new CodeLoginDto { PhoneNumber = SharedPhone, Code = "123456", Type = TwoFactorType.Sms });
+
+        Assert.True(result.Succeeded);
+        _tokenServiceMock.Verify(
+            x => x.GenerateToken(owner, It.IsAny<IList<string>>(), It.IsAny<IEnumerable<Claim>>(), It.IsAny<Guid?>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 密码表单里把手机号当账号名：号码共用时不挑账号，也不去试密码（试了就等于逐个账号猜密码）。
+    /// </summary>
+    [Fact]
+    public async Task PasswordLogin_WithASharedPhoneAsIdentifier_IsRefusedWithoutCheckingAPassword()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions { SignIn = { AllowSmsLogin = true } });
+        GivenTwoAccountsShareAVerifiedNumber();
+
+        var result = await _authService.LoginWithRefreshTokenAsync(new LoginDto { UserName = SharedPhone, Password = "Password123!" });
+
+        AssertRefusedAsAmbiguous(result);
+        _signInManagerMock.Verify(x => x.CheckPasswordSignInAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        AssertNothingWasIssued();
+    }
+
+    [Fact]
+    public async Task PasswordLogin_WithAPhoneHeldByOneAccount_ChecksThatAccountsPassword()
+    {
+        var owner = GivenOneVerifiedHolderAndAnUnverifiedDuplicate();
+        ArrangeSuccessfulIssuance(owner);
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            SignIn = { AllowSmsLogin = true },
+            Jwt = new JwtOptions { EnableRefreshToken = true, RefreshTokenExpirationDays = 7, AccessTokenExpirationMinutes = 30 },
+        });
+        _signInManagerMock.Setup(x => x.CheckPasswordSignInAsync(owner, "Password123!", It.IsAny<bool>()))
+            .ReturnsAsync(Microsoft.AspNetCore.Identity.SignInResult.Success);
+        _passwordPolicyServiceMock.Setup(x => x.CheckPasswordExpirationAsync(owner.Id))
+            .ReturnsAsync(new PasswordExpirationResult { IsExpired = false });
+        _userManagerMock.Setup(x => x.GetTwoFactorEnabledAsync(owner)).ReturnsAsync(false);
+
+        var result = await _authService.LoginWithRefreshTokenAsync(new LoginDto { UserName = SharedPhone, Password = "Password123!" });
+
+        Assert.True(result.Succeeded);
+        _signInManagerMock.Verify(x => x.CheckPasswordSignInAsync(owner, "Password123!", It.IsAny<bool>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SendRecoveryCode_BySms_ToASharedNumber_IsRefusedAndSendsNothing()
+    {
+        GivenRecoverySwitches(byEmail: false, bySms: true);
+        GivenTwoAccountsShareAVerifiedNumber();
+
+        var result = await _authService.SendPasswordRecoveryCodeAsync(new SendPasswordRecoveryCodeDto { Type = TwoFactorType.Sms, PhoneNumber = SharedPhone });
+
+        AssertRefusedAsAmbiguous(result);
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// 重置端：码里没有记下账号（发码时账号还不存在等情况）时按号码去认，号码共用就拒绝，不替用户挑一个去改密码。
+    /// </summary>
+    [Fact]
+    public async Task ResetByCode_BySms_WithASharedNumber_IsRefused()
+    {
+        GivenRecoverySwitches(byEmail: false, bySms: true);
+        GivenTwoAccountsShareAVerifiedNumber();
+        _twoFactorServiceMock
+            .Setup(x => x.VerifyCodeByAddressAndMarkUsedAsync(SharedPhone, "123456", TwoFactorType.Sms, VerificationCodePurpose.PasswordRecovery))
+            .ReturnsAsync(Result<Guid?>.Success(null));
+
+        var result = await _authService.ResetPasswordByCodeAsync(new ResetPasswordByCodeDto
+        {
+            Type = TwoFactorType.Sms, PhoneNumber = SharedPhone, Code = "123456", NewPassword = "N3w-Passw0rd!",
+        });
+
+        AssertRefusedAsAmbiguous(result);
+    }
+
+    /// <summary>
+    /// 对照：两步验证码寄往<b>已经认出来的</b>账号自己登记的号码，号码共用与否无关 —— 那正是共用号码存在的用途。
+    /// </summary>
+    [Fact]
+    public async Task TwoFactorSmsCode_ToTheSignedInAccountsOwnSharedNumber_IsStillSent()
+    {
+        var (_, newHire) = GivenTwoAccountsShareAVerifiedNumber();
+        var tempToken = ChallengeToken(TwoFactorType.Sms);
+        _authTokenServiceMock.Setup(x => x.FindTokenByValueAsync(It.IsAny<string>(), It.IsAny<string>(), tempToken))
+            .ReturnsAsync(new AuthToken { UserId = newHire.Id, Value = tempToken });
+        _userManagerMock.Setup(x => x.FindByIdAsync(newHire.Id.ToString())).ReturnsAsync(newHire);
+        _twoFactorServiceMock.Setup(x => x.GetEnabledTwoFactorTypesAsync(newHire)).ReturnsAsync([TwoFactorType.Sms]);
+        _twoFactorServiceMock.Setup(x => x.SendSmsCodeAsync(newHire.Id, SharedPhone, VerificationCodePurpose.TwoFactor))
+            .ReturnsAsync(Result.Success());
+
+        var result = await _authService.SendTwoFactorCodeAsync(new SendTwoFactorCodeDto { TempToken = tempToken, Type = TwoFactorType.Sms });
+
+        Assert.True(result.Succeeded);
+        _twoFactorServiceMock.Verify(x => x.SendSmsCodeAsync(newHire.Id, SharedPhone, VerificationCodePurpose.TwoFactor), Times.Once);
     }
 
     #endregion

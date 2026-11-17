@@ -18,8 +18,10 @@ export * from './useRealtimeHub'
 export * from './useTabContext'
 export * from './useTabTitle'
 export * from './use-breadcrumb'
-// Moved to `@tnzi/ui` on 2026-08-02 (see the login stack note below).
-export { useFormRules, type Translate, type FormRules } from '@tnzi/ui'
+// The login stack's rules live in `@tnzi/ui` as library-neutral `IFormRule`s;
+// this package binds them to Naive UI's NForm.
+export type { Translate, FormRules } from '@tnzi/ui'
+export * from './useNaiveFormRules'
 export * from './useNaiveForm'
 export * from './useEcharts'
 export * from './useRouteProgress'
@@ -56,6 +58,27 @@ export * from './useSectionRoute'
 // after mount (a lazily-loaded count / status badge). `TTabsPage` rides it;
 // exposed because any page that hand-rolls `NTabs` has the same gap.
 export * from './useTabBarSync'
+
+// Feedback through naive's message API that never throws when no provider is
+// mounted (falls back to the console).
+export * from './useSafeMessage'
+
+// Form hosts: a parent that validates the forms rendered inside it
+// (`TSchemaForm` registers with the nearest one), and the address-field model
+// for hosts that draw their own address inputs.
+export {
+  FORM_HOST_KEY,
+  createFormHost,
+  provideFormHost,
+  useFormHost,
+  useFormHostRegistration,
+} from './form-host'
+export type { FormHost, FormHostParticipant } from './form-host'
+export { useAddressFields } from './useAddressFields'
+export type { AddressField, AddressFieldKey, UseAddressFieldsOptions } from './useAddressFields'
+
+// Drag-and-keyboard reordering (attachments, workbench cards, card grids).
+export * from './useReorderable'
 
 // Overlay theming - the hook behind `TOverlayTheme`. Needed by anyone who has
 // to hand-roll an NModal/NDrawer instead of using TModalShell/TDrawerShell,
@@ -105,9 +128,7 @@ export {
   mergeFeatures,
   isModuleAvailable,
   firstReachableModule,
-  useLoginAccountField,
   type CodeChannels,
-  type LoginAccountField,
   useCaptcha,
   type UseCaptchaOptions,
   type UseCaptchaReturn,
@@ -135,8 +156,10 @@ export * from './useAdminMenuContext'
 export * from './code-label'
 // Tab-title flash for background activity (the web-IM "you have a message" cue).
 export * from './useTitleFlash'
-// Declarative widget grid behind `TWorkbenchLayout` (re-exported from @tnzi/ui).
+// Declarative widget grid behind `TWorkbenchLayout`, and the card context a
+// widget reads through `useWidget`.
 export * from './useWorkbenchLayout'
+export { useWidget } from './useWidget'
 // Data hook every business widget rides: fires the loader on mount, surfaces
 // busy/error through the surrounding card's context, re-runs on refresh.
 export * from './useWidgetData'

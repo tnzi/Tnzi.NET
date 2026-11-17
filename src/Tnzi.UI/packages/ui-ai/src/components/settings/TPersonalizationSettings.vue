@@ -14,10 +14,11 @@
  * first, and pinning them to their own fields keeps them out of the prose
  * where they would be re-stated in every deployment's own words.
  */
-import { computed, onMounted } from 'vue'
-import { NInput, NButton } from 'naive-ui'
+import { computed, onMounted, ref } from 'vue'
 import TSettingGroup from '../layout/TSettingGroup.vue'
 import TSettingRow from '../layout/TSettingRow.vue'
+import TButton from '../controls/TButton.vue'
+import { useAutoGrowTextarea } from '../../headless/useAutoGrowTextarea'
 import type { UseAiPersonalizationReturn } from '../../headless/useAiPersonalization'
 import { useAiI18n } from '../../i18n'
 
@@ -40,6 +41,12 @@ const draft = computed(() => props.controller.draft.value)
 onMounted(() => {
   void props.controller.load()
 })
+
+/* The free-text box grows with what is written, from five rows to about
+   fourteen, then scrolls. */
+const CONTENT_MAX_HEIGHT = 290
+const contentBox = ref<HTMLTextAreaElement | null>(null)
+useAutoGrowTextarea(contentBox, computed(() => draft.value.content), CONTENT_MAX_HEIGHT)
 </script>
 
 <template>
@@ -48,22 +55,24 @@ onMounted(() => {
       :label="t.personalizationSettings.name"
       :description="t.personalizationSettings.nameHint"
     >
-      <NInput
-        v-model:value="draft.displayName"
-        class="t-settings-field__control"
-        size="small"
-        :maxlength="64"
+      <input
+        v-model="draft.displayName"
+        class="t-input t-settings-field__control"
+        type="text"
+        maxlength="64"
         :placeholder="t.personalizationSettings.namePlaceholder"
+        :aria-label="t.personalizationSettings.name"
       />
     </TSettingRow>
 
     <TSettingRow :label="t.personalizationSettings.role" :description="t.personalizationSettings.roleHint">
-      <NInput
-        v-model:value="draft.role"
-        class="t-settings-field__control"
-        size="small"
-        :maxlength="120"
+      <input
+        v-model="draft.role"
+        class="t-input t-settings-field__control"
+        type="text"
+        maxlength="120"
         :placeholder="t.personalizationSettings.rolePlaceholder"
+        :aria-label="t.personalizationSettings.role"
       />
     </TSettingRow>
 
@@ -71,12 +80,13 @@ onMounted(() => {
       :label="t.personalizationSettings.language"
       :description="t.personalizationSettings.languageHint"
     >
-      <NInput
-        v-model:value="draft.preferredLanguage"
-        class="t-settings-field__control"
-        size="small"
-        :maxlength="40"
+      <input
+        v-model="draft.preferredLanguage"
+        class="t-input t-settings-field__control"
+        type="text"
+        maxlength="40"
         :placeholder="t.personalizationSettings.languagePlaceholder"
+        :aria-label="t.personalizationSettings.language"
       />
     </TSettingRow>
 
@@ -85,11 +95,13 @@ onMounted(() => {
       :description="t.personalizationSettings.contentHint"
       stacked
     >
-      <NInput
-        v-model:value="draft.content"
-        type="textarea"
-        :autosize="{ minRows: 5, maxRows: 14 }"
+      <textarea
+        ref="contentBox"
+        v-model="draft.content"
+        class="t-input t-personalization__content"
+        rows="5"
         :placeholder="t.personalizationSettings.contentPlaceholder"
+        :aria-label="t.personalizationSettings.content"
       />
     </TSettingRow>
 
@@ -100,22 +112,27 @@ onMounted(() => {
     </p>
 
     <div class="t-settings-field__actions">
-      <NButton
-        size="small"
+      <TButton
         :disabled="!controller.dirty.value || controller.saving.value"
         @click="controller.reset()"
       >
         {{ t.personalizationSettings.reset }}
-      </NButton>
-      <NButton
-        size="small"
-        type="primary"
+      </TButton>
+      <TButton
+        variant="primary"
         :loading="controller.saving.value"
         :disabled="!controller.dirty.value"
         @click="controller.save()"
       >
         {{ t.personalizationSettings.save }}
-      </NButton>
+      </TButton>
     </div>
   </TSettingGroup>
 </template>
+
+<style scoped>
+.t-personalization__content {
+  display: block;
+  resize: none;
+}
+</style>

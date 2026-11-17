@@ -15,6 +15,9 @@ public sealed class SettingConfigurationSource : IConfigurationSource
 {
     internal SettingConfigurationProvider? Provider { get; private set; }
 
+    /// <summary>从数据库填充到哪一步了（provider 尚未 Build 时为 <see cref="SettingConfigurationLoadState.NotAttached"/>）。</summary>
+    internal SettingConfigurationLoadState LoadState => Provider?.LoadState ?? SettingConfigurationLoadState.NotAttached;
+
     /// <summary>
     /// 永不进 IConfiguration 的 key 集合（OrdinalIgnoreCase）。每一项同时排除它下面的整棵子树：
     /// <c>Appearance:Theme</c>（或 <c>Appearance:Theme:</c>）挡住 <c>Appearance:Theme:admin</c>。
@@ -40,7 +43,8 @@ public sealed class SettingConfigurationSource : IConfigurationSource
         if (Provider == null)
             return;    // Source 未 Build (理论上 host build 后一定有), no-op
         Provider.AttachServiceProvider(rootServiceProvider);
-        // 启动期：读库失败只记日志、沿用 appsettings 的值，不打断启动。
+        // 启动期：读库失败只记日志、沿用 appsettings 的值，不打断启动。之后由
+        // SettingConfigurationInitialLoadService 在后台重试直到读到，健康检查 settings 在此之前报告未就绪。
         await Provider.ReloadFromDatabaseAsync(propagateFailure: false, cancellationToken);
     }
 
@@ -51,6 +55,7 @@ public sealed class SettingConfigurationSource : IConfigurationSource
     /// <remarks>
     /// 读库失败时<b>抛出</b>，配置保持上一次成功读到的值：调用方是配置变更事件的处理器，异常交给事件总线重试。
     /// 吞掉的话，一次瞬时的数据库故障就让 <c>IOptionsMonitor</c> 停在旧值，直到下一次任意设置变更或重启。
+    /// 首次填充失败之后的后台重试也走这里：成功即替换 appsettings 的值并触发 reload token。
     /// </remarks>
     public async Task ReloadAsync(CancellationToken cancellationToken = default)
     {

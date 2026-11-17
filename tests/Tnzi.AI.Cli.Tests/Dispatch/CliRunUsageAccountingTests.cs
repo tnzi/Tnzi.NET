@@ -96,6 +96,71 @@ public class CliRunUsageAccountingTests : IntegratedTestBase<CliBudgetDbContext>
     }
 
     [Fact]
+    public async Task UsageRows_AreMeteredToTheRunsOwner()
+    {
+        // 运行在后台作用域里跑，没有登录用户：每一行用量都要计在发起这次运行的人名下，个人用量页才找得到它
+        await SeedBindingAsync();
+        var run = await SeedClaimedRunAsync();
+        var usageLog = new CapturingUsageLog();
+        var fixture = new ExecutorFixture(this, Totals(At0706())) { UsageLimits = Allowing().Object, UsageLog = usageLog };
+
+        await fixture.Build().ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        var owner = (await ReloadAsync(run.Id)).CreatorId;
+        owner.ShouldNotBeNull();
+        usageLog.UserIds.Count.ShouldBe(2);
+        usageLog.UserIds.ShouldAllBe(id => id == owner);
+    }
+
+    [Fact]
+    public async Task UsageMeteredElsewhere_IsShownOnTheRun_ButNeitherChargedNorLogged()
+    {
+        // 使用方的模型网关已经按上游的应答记过账：CLI 报的这一份再计一次就是两倍
+        await SeedBindingAsync();
+        var run = await SeedClaimedRunAsync();
+        var limits = Allowing();
+        var usageLog = new CapturingUsageLog();
+        var composer = new Mock<ICliLaunchEnvironmentComposer>();
+        composer.Setup(c => c.ComposeAsync(It.IsAny<CliProviderDescriptor>(), It.IsAny<string>(), It.IsAny<CliWorkspace>(), It.IsAny<ICliHostTarget>(),
+                It.IsAny<CliAgentOptions>(), It.IsAny<CliLaunchProfile>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CliLaunchEnvironment { UsageMeteredElsewhere = true });
+
+        await new ExecutorFixture(this, Totals(At0704()) with { UsageIsSessionTotal = false })
+            {
+                UsageLimits = limits.Object, UsageLog = usageLog, LaunchEnvironment = composer.Object
+            }
+            .Build().ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        var persisted = await ReloadAsync(run.Id);
+        persisted.UsageMeteredElsewhere.ShouldBeTrue();
+        ReadUsage(persisted.UsageJson)[Sonnet].OutputTokens.ShouldBe(13509, "the run still shows what the CLI reported");
+        limits.Verify(l => l.SettleAsync(It.IsAny<UsageLimitReservation>(), It.Is<decimal>(c => c > 0), It.IsAny<CancellationToken>()), Times.Never);
+        usageLog.Rows.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task CapabilitiesTheCliReported_AreRecordedOnTheRuntime()
+    {
+        await SeedBindingAsync();
+        var run = await SeedClaimedRunAsync();
+        var capabilities = new CliAgentCapabilities
+        {
+            AgentName = "@agentclientprotocol/codex-acp", AgentVersion = "2.5.0", Images = true, ResumeSession = true,
+            ReasoningEfforts = ["low", "medium", "high"], Models = ["gpt-5.5"]
+        };
+
+        await new ExecutorFixture(this, Totals(At0704()) with { UsageIsSessionTotal = false, Capabilities = capabilities })
+            .Build().ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        var runtime = await DbContext.Set<CliRuntime>().AsNoTracking().SingleAsync(r => r.Id == RuntimeId);
+        runtime.CapabilitiesReportedAt.ShouldNotBeNull();
+        var recorded = JsonSerializer.Deserialize<CliAgentCapabilities>(runtime.CapabilitiesJson!, TnziJsonDefaults.Options)!;
+        recorded.AgentVersion.ShouldBe("2.5.0");
+        recorded.Images.ShouldBeTrue();
+        recorded.ReasoningEfforts.ShouldBe(["low", "medium", "high"]);
+    }
+
+    [Fact]
     public async Task ThreeTurnsInARow_TheThirdTurnIsTheDifferenceFromTheSecond()
     {
         await SeedBindingAsync();
@@ -211,6 +276,30 @@ public class CliRunUsageAccountingTests : IntegratedTestBase<CliBudgetDbContext>
     }
 
     [Fact]
+    public async Task SelectedEffort_OverridesTheBindingsThinkingLevel()
+    {
+        await SeedBindingAsync(thinkingLevel: "high");
+        var run = await SeedClaimedRunAsync(effort: "low");
+        var fixture = new ExecutorFixture(this, Totals(At0704()));
+
+        await fixture.Build().ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        fixture.Launches.Single().ThinkingLevel.ShouldBe("low");
+    }
+
+    [Fact]
+    public async Task NoSelectedEffort_TheBindingsThinkingLevelIsUsed()
+    {
+        await SeedBindingAsync(thinkingLevel: "high");
+        var run = await SeedClaimedRunAsync();
+        var fixture = new ExecutorFixture(this, Totals(At0704()));
+
+        await fixture.Build().ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        fixture.Launches.Single().ThinkingLevel.ShouldBe("high");
+    }
+
+    [Fact]
     public async Task NoSelectedModel_TheBindingDecides()
     {
         await SeedBindingAsync(customArgsJson: """["--model","claude-sonnet-5-5"]""");
@@ -237,7 +326,7 @@ public class CliRunUsageAccountingTests : IntegratedTestBase<CliBudgetDbContext>
     private static Dictionary<string, CliAgentTokenUsage> ReadUsage(string? json)
         => JsonSerializer.Deserialize<Dictionary<string, CliAgentTokenUsage>>(json.ShouldNotBeNull(), TnziJsonDefaults.Options)!;
 
-    private async Task SeedBindingAsync(string? customArgsJson = null)
+    private async Task SeedBindingAsync(string? customArgsJson = null, string? thinkingLevel = null)
     {
         DbContext.Set<CliAgentBinding>().Add(new CliAgentBinding
         {
@@ -245,7 +334,8 @@ public class CliRunUsageAccountingTests : IntegratedTestBase<CliBudgetDbContext>
             CliRuntimeId = RuntimeId,
             MaterializeSkills = false,
             InjectAgentInstructions = false,
-            CustomArgsJson = customArgsJson
+            CustomArgsJson = customArgsJson,
+            ThinkingLevel = thinkingLevel
         });
         DbContext.Set<CliRuntime>().Add(new CliRuntime
         {
@@ -282,7 +372,7 @@ public class CliRunUsageAccountingTests : IntegratedTestBase<CliBudgetDbContext>
         DbContext.ChangeTracker.Clear();
     }
 
-    private async Task<CliRun> SeedClaimedRunAsync(string? model = null)
+    private async Task<CliRun> SeedClaimedRunAsync(string? model = null, string? effort = null)
     {
         var run = new CliRun
         {
@@ -294,7 +384,8 @@ public class CliRunUsageAccountingTests : IntegratedTestBase<CliBudgetDbContext>
             DispatchedAt = DateTime.UtcNow,
             LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
             Prompt = "do the thing",
-            Model = model
+            Model = model,
+            Effort = effort
         };
         DbContext.Set<CliRun>().Add(run);
         await DbContext.SaveChangesAsync();
@@ -322,6 +413,8 @@ public class CliRunUsageAccountingTests : IntegratedTestBase<CliBudgetDbContext>
         public ICostCalculator? CostCalculator { get; init; }
 
         public IUsageLogService? UsageLog { get; init; }
+
+        public ICliLaunchEnvironmentComposer? LaunchEnvironment { get; init; }
 
         public List<CliAgentLaunchContext> Launches { get; } = [];
 
@@ -374,7 +467,7 @@ public class CliRunUsageAccountingTests : IntegratedTestBase<CliBudgetDbContext>
                 Mock.Of<ICliBriefComposer>(),
                 Mock.Of<ICliMcpConfigComposer>(),
                 new CliRunTokenService(runs, NullLogger<CliRunTokenService>.Instance),
-                new CliLaunchEnvironmentComposer(Mock.Of<ICliAuthStatusProbe>(), NullLogger<CliLaunchEnvironmentComposer>.Instance),
+                LaunchEnvironment ?? new CliLaunchEnvironmentComposer(Mock.Of<ICliAuthStatusProbe>(), NullLogger<CliLaunchEnvironmentComposer>.Instance),
                 Mock.Of<IAgentGrantService>(),
                 Mock.Of<ISkillService>(),
                 new CliRunSignalHub(),
@@ -430,10 +523,20 @@ public class CliRunUsageAccountingTests : IntegratedTestBase<CliBudgetDbContext>
 
     private sealed record LoggedRow(string Model, int InputTokens, int OutputTokens, int CachedInputTokens, int CacheCreationTokens, decimal? Cost);
 
-    /// <summary>记下每一行用量（带成本与缓存指标的那个重载）。</summary>
+    /// <summary>记下每一行用量与它计在谁名下（CLI 路径写完整的一行，带用户）。</summary>
     private sealed class CapturingUsageLog : IUsageLogService
     {
         public List<LoggedRow> Rows { get; } = [];
+
+        public List<Guid?> UserIds { get; } = [];
+
+        public Task LogUsageAsync(UsageLogEntry entry, CancellationToken ct = default)
+        {
+            Rows.Add(new LoggedRow(entry.Model, entry.InputTokens, entry.OutputTokens, entry.CachedInputTokens,
+                entry.CacheCreationTokens, entry.EstimatedCostUsd));
+            UserIds.Add(entry.UserId);
+            return Task.CompletedTask;
+        }
 
         public Task LogUsageAsync(
             string operationType, string provider, string model, int inputTokens, int outputTokens,
@@ -445,9 +548,6 @@ public class CliRunUsageAccountingTests : IntegratedTestBase<CliBudgetDbContext>
             string operationType, string provider, string model, int inputTokens, int outputTokens,
             long durationMs, bool isSuccess, string? errorMessage, Guid? agentId, Guid? threadId,
             decimal? estimatedCostUsd, int cachedInputTokens, int cacheCreationTokens, CancellationToken ct = default)
-        {
-            Rows.Add(new LoggedRow(model, inputTokens, outputTokens, cachedInputTokens, cacheCreationTokens, estimatedCostUsd));
-            return Task.CompletedTask;
-        }
+            => throw new InvalidOperationException("the CLI path names the user the usage is metered to");
     }
 }

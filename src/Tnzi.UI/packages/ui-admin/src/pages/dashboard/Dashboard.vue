@@ -12,13 +12,13 @@
  *     route at `/admin/dashboard` and ui-admin auto-detects the override.
  */
 import { computed } from 'vue'
-import TWorkbenchLayout from '../../components/pages/TWorkbenchLayout.vue'
+import TWorkbenchLayout from '../../components/layout/TWorkbenchLayout.vue'
 import TContentPage from '../../components/layout/TContentPage.vue'
 import { useAdminDashboardConfig } from '../../plugin/dashboard-config'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { useModuleAvailability } from '../../headless/useModuleAvailability'
 import { defaultWorkbenchWidgets } from '../../components/widgets/presets'
-import type { WidgetDef } from '@tnzi/ui'
+import type { WidgetDef } from '../../components/widgets/widget-types'
 
 const config = useAdminDashboardConfig()
 const authStore = useAdminAuthStore()

@@ -53,17 +53,29 @@ describe('useAccountSettings', () => {
     expect(a.twoFactor.value).toBeNull();
   });
 
-  it('saves only the nickname', async () => {
+  it('saves the nickname without touching contact details or the rest of the profile', async () => {
     /* Email and phone are verify-code flows, not field edits. Sending them
-       here would let a user type a new address and believe it took effect. */
-    const put = vi.fn(async () => ({ succeeded: true, data: USER }));
-    const a = useAccountSettings({ client: makeClient({ put }) });
+       here would let a user type a new address and believe it took effect.
+       And PUT /users/profile REPLACES the profile: a body with only the
+       nickname clears the name, the photo, the bio. */
+    const full = { ...USER, firstName: 'Ada', lastName: 'Lovelace', avatarId: 'f1', bio: 'Analyst', gender: 2 };
+    const put = vi.fn(async () => ({ succeeded: true, data: full }));
+    const client = makeClient({
+      put,
+      get: vi.fn(async (url: string) =>
+        url.endsWith('/two-factor/status') ? { succeeded: true, data: TWO_FACTOR } : { succeeded: true, data: full },
+      ),
+    });
+    const a = useAccountSettings({ client });
     await a.load();
 
     a.draft.value = { nickname: '  Ada L.  ', email: 'evil@x.y', phoneNumber: '999' };
     await a.saveProfile();
 
-    expect(put).toHaveBeenCalledWith('/users/profile', { nickname: 'Ada L.' });
+    const body = (put.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    expect(body).toMatchObject({ nickname: 'Ada L.', firstName: 'Ada', lastName: 'Lovelace', avatarId: 'f1', bio: 'Analyst', gender: 2 });
+    expect(body).not.toHaveProperty('email');
+    expect(body).not.toHaveProperty('phoneNumber');
   });
 
   it('sends the TOTP field name the API declares', async () => {

@@ -55,7 +55,7 @@ import { TAdminAppRoot } from '@tnzi/ui-admin'
 `NNotificationProvider` + `NDialogProvider`), wires it to the admin
 theme context, registers the `window.$message` / `$dialog` /
 `$notification` / `$loadingBar` global handles (so `useCrudPage` error
-toasts and the `@tnzi/ui` window-handle adapters work out of the box),
+toasts and the window-handle adapters `createTnziUiAdmin` registers work out of the box),
 and renders `<router-view />`. Pass `theme` / `themeOverrides` props to
 override; pass a default slot (or `router-view="false"`) to host
 non-router content.
@@ -199,7 +199,8 @@ defineAdminApp({ client, passwordPolicy: { minLength: 12, requireUppercase: true
 ```
 
 Fields left out keep the server's defaults. It applies to every
-`useFormRules().password()` rule in the app; an app built without
+`password()` rule built in the app (`useNaiveFormRules` here,
+`useFormRules` in `@tnzi/ui`); an app built without
 `defineAdminApp` provides `PASSWORD_POLICY_KEY` from `@tnzi/ui` itself.
 
 ### Override sidebar ordering
@@ -348,9 +349,9 @@ The theme drawer offers a fifth layout, `desktop`: an icon grid (one tile per to
 
 | Subpath | Exports |
 |---|---|
-| `@tnzi/ui-admin` | `defineAdminApp`, `createTnziUiAdmin`, `useAdminClient`, `vPermission`, `installDirectives`, `fetchAdminManifest`, `TAdminAppRoot` |
-| `@tnzi/ui-admin/components` | `TAdminLoginCard`, `TStepUpModal`, `TIconPicker`, `TJsonEditor`, layout primitives (`TAdminAppRoot`, `TAdminAutoBreadcrumb`, `TAdminUserAvatar`, `TDarkModeContainer`, `TAdminRouterView`, `TSystemLogo`), display + utility re-exports from `@tnzi/ui` |
-| `@tnzi/ui-admin/headless` | `useCrudPage`, `useFormRules`, `useNaiveForm`, `useModuleAvailability`, `useColumnSettings`, `useBatchActions`, `useFormModal`, `usePermissionGuard`, `useAdminMenuContext`, `useBreakpoint`, ... |
+| `@tnzi/ui-admin` | `defineAdminApp`, `createTnziUiAdmin`, `useAdminClient`, `vPermission`, `installDirectives`, `fetchAdminManifest`, `TAdminAppRoot`; the Naive UI bridge (`buildNaiveThemeOverrides`, `useNaiveThemeOverrides`, `resolveNaiveOverrides`, `COMPACT_NAIVE_OVERRIDES`, `getNaiveLocale`; types `NaiveOverridesSource`, `NaiveOverridesContext`), the naive message / dialog / notification / loading-bar adapters and `createUiAdapter`, `convertToMenuOptions`, `convertFormRule(s)`; everything below |
+| `@tnzi/ui-admin/components` | `TAdminLoginCard`, `TStepUpModal`, `TIconPicker`, `TJsonEditor`, layout primitives (`TAdminAppRoot`, `TAdminAutoBreadcrumb`, `TAdminUserAvatar`, `TDarkModeContainer`, `TAdminRouterView`, `TSystemLogo`, `TAppHeader`, `TBreadcrumb`, `TWorkbenchLayout`); the naive-rendered general components: `TTable`, `TDataList`, `TForm`, `TSearchForm`, `TSchemaForm`, `TImageUpload`, `TCaptcha`, `TImageCaptcha`, `TMoneyInput`, `TComboSelect`, `TAddressFields`, `TStatCard`, `TUserCard`, `TStatusBadge`, `TRelativeTime`, `TButtonIcon`, `THint`, `TSourceBadge`, `TStatToCards`, `TAttachmentWall`, `TModalShell`, `TDrawerShell`, `TOverlayTheme`, `TMenu`, `TNavBar`, `TTabBar`, `TThemeSchemaSwitch`, `TLangSwitch`, `TFullScreen`, `TReloadButton`, `TPinToggler`, `TMenuToggler` |
+| `@tnzi/ui-admin/headless` | `useCrudPage`, `useNaiveFormRules`, `useNaiveForm`, `useModuleAvailability`, `useColumnSettings`, `useBatchActions`, `useFormModal`, `usePermissionGuard`, `useAdminMenuContext`, `useBreakpoint`, `useSafeMessage`, `useOverlayTheme`, `useEcharts`, `useReorderable`, `useWorkbenchLayout`, `useWidget`, `useAddressFields`, `provideFormHost`, ... |
 | `@tnzi/ui-admin/stores` | `useAdminThemeStore`, `useAdminAuthStore`, `useAdminAppStore`, `useAdminRouteStore`, `useAdminTabStore`, `useAdminBreadcrumbStore` |
 | `@tnzi/ui-admin/router` | `defaultAdminRoutes` (filtered/overridable via `defineAdminApp`) |
 | `@tnzi/ui-admin/pages` | 预置页面（`defaultAdminRoutes` 当前挂 102 个懒加载路由组件；以 `src/router/routes.ts` 为准，不在本表维护计数） |
@@ -478,9 +479,9 @@ crud.refresh().catch(() => undefined)
 ## Form rules
 
 ```ts
-import { useFormRules } from '@tnzi/ui-admin/headless'
+import { useNaiveFormRules } from '@tnzi/ui-admin/headless'
 
-const { rules } = useFormRules() // optional translate fn for i18n
+const { rules } = useNaiveFormRules() // optional translate fn for i18n
 const formRules = {
   userName: rules.userName,
   email: rules.email,
@@ -490,7 +491,15 @@ const formRules = {
 ```
 
 Available: `required`, `text`, `userName`, `email`, `phone`, `password`,
-`matches`, `url`, `json`, `integer`.
+`account`, `emailOrPhone`, `matches`, `url`, `json`, `integer`.
+
+The rules themselves come from `@tnzi/ui`'s `useFormRules`, which builds them
+as the library-neutral `IFormRule` (`@tnzi/core/types`): a validator there
+takes the value alone and answers `true` or the message to fail with.
+`useNaiveFormRules` converts each one with `convertFormRule` for `NForm`.
+The email / phone account field of the code-login, register and reset pages
+is `useNaiveLoginAccountField(t, channels)`, its rules tagged
+`key: 'account'`.
 
 `password()` defaults to 6-128 characters with a letter and a digit, which
 never refuses a password the backend's default policy (minimum 6, no
@@ -506,6 +515,45 @@ pickers), **Layout** (6 mode cards + sizing sliders + visibility
 toggles), **General** (page transitions), **Watermark** (text +
 opacity + auto-username + auto-date), **Preset** (copy / download /
 import JSON config).
+
+### Colour mode
+
+The admin starts on `auto`: until someone picks a mode (the header button, the
+login page's switch, the theme drawer) it follows the operating system. The
+choice is kept in the browser and wins from then on; a mode set in the global
+theme is the default for users who have not chosen. For another starting mode:
+
+```ts
+createTnziUiAdmin(app, { defaultMode: 'light' })
+// or defineAdminApp({ pluginOptions: { defaultMode: 'light' } })
+```
+
+The header's buttons and the mode switch take their names from the admin
+locale (`admin.header.*`, `admin.themeSchema.*`), so they read in the
+interface language.
+
+## Naive UI theme overrides
+
+`TAdminAppRoot` gives every naive component the overrides the bridge builds
+from the theme context's palette, with the app's own merged over them section
+by section (an app key wins, the generated keys it does not name stay). The
+app gives its own once, to `createTnziUiAdmin` (or
+`defineAdminApp({ pluginOptions: { naiveOverrides } })`), as an object, a
+`Ref`, or a function of `{ isDark, settings }`:
+
+```ts
+createTnziUiAdmin({
+  // One set for each mode. Called again when the mode or the theme settings
+  // change, so naive follows a switch of mode with nothing passed to the root.
+  naiveOverrides: ({ isDark }) => (isDark ? DARK_OVERRIDES : LIGHT_OVERRIDES),
+})
+```
+
+`useNaiveThemeOverrides(themeContext)` returns the merged result for a
+component of your own; `resolveNaiveOverrides(source, { isDark, settings })`
+reads a source. Passing `theme-overrides` to `TAdminAppRoot` replaces the whole
+result, palette included; use it only to take the overrides over entirely.
+`COMPACT_NAIVE_OVERRIDES` is the compact density.
 
 ## Backend module availability
 
@@ -541,7 +589,19 @@ linked `@tnzi/ui-admin` package holds its own. Two copies →
 `Vue.provide` from one copy and `Vue.inject` from the other see
 different `Symbol` keys.
 
-**Fix** — add Vite `resolve.alias` (or `resolve.dedupe`) entries in
+**Fix** — `tnziSingletons` from `@tnzi/core/vite` (also re-exported as `@tnzi/ui/vite`) dedupes `vue`, and
+`vue-router`, `pinia` and `naive-ui` wherever the app has them installed,
+which an admin app does:
+
+```ts
+import { tnziSingletons } from '@tnzi/core/vite'
+
+export default defineConfig({
+  plugins: [vue(), tnziSingletons()],
+})
+```
+
+Or add Vite `resolve.alias` (or `resolve.dedupe`) entries by hand in
 the consumer's `vite.config.ts`:
 
 ```ts

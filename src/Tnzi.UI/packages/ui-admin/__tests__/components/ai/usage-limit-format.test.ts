@@ -18,7 +18,7 @@ const limited = (amountUsd: number | null) => ({ mode: UsageLimitMode.Limited, a
 const inherit = { mode: UsageLimitMode.Inherit, amountUsd: null }
 
 function draft(overrides: Partial<SaveUsagePolicyDto> = {}): SaveUsagePolicyDto {
-  return { sessionLimit: inherit, weeklyLimit: inherit, allowedModels: null, defaultModel: null, note: null, ...overrides }
+  return { sessionLimit: inherit, weeklyLimit: inherit, allowedModels: null, defaultModel: null, modelEfforts: null, note: null, ...overrides }
 }
 
 describe('usage-limit-format', () => {
@@ -71,11 +71,41 @@ describe('usage-limit-format', () => {
       weeklyLimit: { mode: UsageLimitMode.Unlimited, amountUsd: null },
       allowedModels: null,
       defaultModel: null,
+      modelEfforts: null,
       note: null,
     })
   })
 
   it('a missing policy drafts as "follow" on every item', () => {
     expect(toDraft(null)).toEqual(draft())
+  })
+})
+
+describe('per-model efforts in a draft', () => {
+  const efforts = { opus: { efforts: ['low', 'high'], defaultEffort: 'high' } }
+
+  it('round-trips through the draft and the payload, dropping an empty map', () => {
+    const d = toDraft({ sessionLimit: inherit, weeklyLimit: inherit, modelEfforts: efforts })
+    expect(d.modelEfforts).toEqual(efforts)
+    expect(d.modelEfforts).not.toBe(efforts)
+    expect(toPayload(d).modelEfforts).toEqual(efforts)
+    expect(toPayload(draft({ modelEfforts: {} })).modelEfforts).toBeNull()
+  })
+
+  it('counts a change of efforts, their order or the default, but not the order of models', () => {
+    const a = draft({ modelEfforts: { opus: { efforts: ['low', 'high'], defaultEffort: 'high' }, sonnet: { efforts: [] } } })
+    const b = draft({ modelEfforts: { sonnet: { efforts: [] }, opus: { efforts: ['low', 'high'], defaultEffort: 'high' } } })
+    expect(samePolicy(a, b)).toBe(true)
+    expect(samePolicy(a, draft({ modelEfforts: { ...b.modelEfforts, opus: { efforts: ['high', 'low'], defaultEffort: 'high' } } }))).toBe(false)
+    expect(samePolicy(a, draft({ modelEfforts: { ...b.modelEfforts, opus: { efforts: ['low', 'high'], defaultEffort: 'low' } } }))).toBe(false)
+    expect(samePolicy(draft(), draft({ modelEfforts: efforts }))).toBe(false)
+  })
+
+  it('refuses a default outside the list, duplicates and spaces', () => {
+    expect(policyProblem(draft({ modelEfforts: { opus: { efforts: ['low'], defaultEffort: 'max' } } }), null)).toBe('policy.effortDefaultNotListed')
+    expect(policyProblem(draft({ modelEfforts: { opus: { efforts: ['low', 'LOW'] } } }), null)).toBe('policy.effortsInvalid')
+    expect(policyProblem(draft({ modelEfforts: { opus: { efforts: ['very high'] } } }), null)).toBe('policy.effortsInvalid')
+    expect(policyProblem(draft({ modelEfforts: { opus: { efforts: [] } } }), null)).toBeNull()
+    expect(policyProblem(draft({ modelEfforts: efforts }), null)).toBeNull()
   })
 })

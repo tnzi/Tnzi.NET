@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import type { FieldRule, UploaderFileListItem } from 'vant';
 import { useI18n } from '@tnzi/core/adapters/i18n';
-import type { IDynamicFormField, IFormRule } from '@tnzi/core/types/shared-ui';
+import type { FormRuleTrigger, IDynamicFormField, IFormRule } from '@tnzi/core/types/shared-ui';
 import { useDynamicForm } from '../../headless/useDynamicForm';
 import { requiredRule } from './required-rule';
 
@@ -91,7 +91,14 @@ const handleReset = () => form.handleReset();
 
 // --- Validation -------------------------------------------------------------
 
-const toVantTrigger = (trigger?: IFormRule['trigger']) => (trigger === 'blur' ? 'onBlur' : 'onChange');
+/** Vant has no per-keystroke trigger: `input` and `change` both mean "when the value changes". */
+const VANT_TRIGGER: Record<FormRuleTrigger, 'onBlur' | 'onChange'> = { blur: 'onBlur', change: 'onChange', input: 'onChange' };
+
+const toVantTrigger = (trigger?: IFormRule['trigger']): FieldRule['trigger'] => {
+  if (trigger === undefined) return 'onChange';
+  const triggers = [...new Set((Array.isArray(trigger) ? trigger : [trigger]).map((t) => VANT_TRIGGER[t]))];
+  return triggers.length === 1 ? triggers[0] : triggers;
+};
 
 /** Expand one contract rule into the Vant rules that express it. */
 const toVantRules = (rule: IFormRule): FieldRule[] => {

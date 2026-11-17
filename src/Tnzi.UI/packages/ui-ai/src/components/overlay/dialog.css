@@ -1,0 +1,179 @@
+/* ===========================================================================
+ * Dialog chrome: the pieces every dialog of this package is drawn from.
+ *
+ * `TDialog` is built on these classes, and the package's own special overlays
+ * (`TSettingsDialog`, `TCommandPalette`, the full view of `TWidgetCall`) use
+ * the same backdrop and close button, so a plain dialog and the settings
+ * dialog read as one family. They are global (not scoped) on purpose: a
+ * consumer's own special overlay puts them on its own elements and matches
+ * without re-implementing them. Sizes come from the `--tnzi-ai-dialog-*`
+ * tokens in `styles/index.css`.
+ *
+ *   .t-dialog-backdrop    fixed, covers the whole viewport (the page's top
+ *                         inset included) and dims it; its top padding is the
+ *                         inset, so what it centres stays below that strip.
+ *                         The element that places the panel (flex alignment,
+ *                         z-index) is the overlay's own business.
+ *   .t-dialog             the panel: surface, border, radius, shadow, a column.
+ *   .t-dialog__header     title row; the close button sits at
+ *                         `--tnzi-ai-dialog-close-inset` from the top and right.
+ *   .t-dialog__title / .t-dialog__description
+ *   .t-dialog__close      the close button (ghost, focus ring on keyboard only).
+ *   .t-dialog__body       the part that scrolls, with the thin scrollbar.
+ *   .t-dialog__footer     actions, right-aligned; put the primary one last.
+ *
+ * `is-divided` on the header (footer) draws its hairline once the body has
+ * content scrolled under it, so a short dialog shows no lines at all.
+ * ======================================================================== */
+
+.t-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  padding-top: var(--tnzi-overlay-inset-top, 0px);
+  background: var(--tnzi-ai-backdrop, rgba(0, 0, 0, 0.6));
+  backdrop-filter: blur(var(--tnzi-ai-backdrop-blur, 4px));
+  -webkit-backdrop-filter: blur(var(--tnzi-ai-backdrop-blur, 4px));
+}
+
+.t-dialog {
+  --t-dialog-pad: var(--tnzi-ai-dialog-padding, 24px);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--tnzi-ai-surface, #fff);
+  color: var(--tnzi-ai-text, inherit);
+  border: var(--tnzi-ai-modal-border, 1px solid rgba(0, 0, 0, 0.06));
+  border-radius: var(--tnzi-ai-modal-radius, 20px);
+  box-shadow: var(--tnzi-ai-dialog-shadow, 0 24px 64px rgba(0, 0, 0, 0.18));
+  font-family: var(--tnzi-ai-font-body, inherit);
+  outline: none;
+}
+.t-dialog:focus,
+.t-dialog:focus-visible {
+  outline: none;
+}
+/* A phone: a narrower inset and a close button sized for a thumb. */
+.t-dialog--narrow {
+  --t-dialog-pad: var(--tnzi-ai-dialog-padding-narrow, 16px);
+  --tnzi-ai-dialog-close-size: var(--tnzi-ai-dialog-close-size-narrow, 40px);
+  --tnzi-ai-dialog-close-inset: 12px;
+}
+
+.t-dialog__header {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: var(--tnzi-ai-dialog-close-inset, 16px) var(--tnzi-ai-dialog-close-inset, 16px) 8px var(--t-dialog-pad);
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease);
+}
+.t-dialog__header--plain {
+  padding-right: var(--t-dialog-pad);
+}
+.t-dialog__header.is-divided {
+  border-bottom-color: var(--tnzi-ai-divider, #ebebeb);
+}
+/* The title's first line is centred on the close button. */
+.t-dialog__heading {
+  flex: 1;
+  min-width: 0;
+  padding-top: calc((var(--tnzi-ai-dialog-close-size, 32px) - 24px) / 2);
+}
+.t-dialog__title {
+  margin: 0;
+  font-size: var(--tnzi-ai-dialog-title-size, 18px);
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--tnzi-ai-text, inherit);
+  overflow-wrap: anywhere;
+}
+.t-dialog__description {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--tnzi-ai-text-secondary, rgba(0, 0, 0, 0.55));
+}
+
+.t-dialog__close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--tnzi-ai-dialog-close-size, 32px);
+  height: var(--tnzi-ai-dialog-close-size, 32px);
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tnzi-ai-text-secondary, rgba(0, 0, 0, 0.55));
+  font-size: 18px;
+  cursor: pointer;
+  transition: background var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease),
+    color var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease);
+}
+.t-dialog__close:hover:not(:disabled) {
+  background: var(--tnzi-ai-hover, rgba(0, 0, 0, 0.04));
+  color: var(--tnzi-ai-text, #000);
+}
+/* A ring for keyboard focus only. A dialog does not move focus to this button
+   when it opens (TDialog focuses the first field or the panel), so the ring
+   does not light up the moment a dialog appears. */
+.t-dialog__close:focus {
+  outline: none;
+}
+.t-dialog__close:focus-visible {
+  outline: var(--tnzi-ai-focus-outline);
+  outline-offset: 2px;
+}
+.t-dialog__close:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.t-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  position: relative;
+  padding: 8px var(--t-dialog-pad) var(--t-dialog-pad);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+.t-dialog__body--headless {
+  padding-top: var(--t-dialog-pad);
+}
+/* Edge-to-edge content (a preview, an image, a list that draws its own rows). */
+.t-dialog__body--flush {
+  padding: 0;
+}
+
+.t-dialog__footer {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px var(--t-dialog-pad) var(--t-dialog-pad);
+  border-top: 1px solid transparent;
+  transition: border-color var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease);
+}
+.t-dialog__footer.is-divided {
+  border-top-color: var(--tnzi-ai-divider, #ebebeb);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-dialog__header,
+  .t-dialog__footer,
+  .t-dialog__close {
+    transition: none;
+  }
+}

@@ -12,6 +12,9 @@ public class UsagePolicyService : ApplicationService, IUsagePolicyService
     private readonly IOptionsMonitor<AIOptions> _aiOptions;
     private readonly IRepository<Agent, Guid>? _agentRepository;
     private readonly ICliAgentBindingService? _bindingService;
+    private readonly ICliRuntimeService? _runtimeService;
+    private readonly IChatModelTargetResolver? _targetResolver;
+    private readonly IAgentThreadService? _threads;
     private readonly ICurrentTenant? _currentTenant;
 
     public UsagePolicyService(
@@ -22,7 +25,10 @@ public class UsagePolicyService : ApplicationService, IUsagePolicyService
         IServiceProvider serviceProvider,
         IRepository<Agent, Guid>? agentRepository = null,
         ICliAgentBindingService? bindingService = null,
-        ICurrentTenant? currentTenant = null)
+        ICurrentTenant? currentTenant = null,
+        ICliRuntimeService? runtimeService = null,
+        IChatModelTargetResolver? targetResolver = null,
+        IAgentThreadService? threads = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
@@ -32,6 +38,9 @@ public class UsagePolicyService : ApplicationService, IUsagePolicyService
         _agentRepository = agentRepository;
         _bindingService = bindingService;
         _currentTenant = currentTenant;
+        _runtimeService = runtimeService;
+        _targetResolver = targetResolver;
+        _threads = threads;
     }
 
     /// <inheritdoc />
@@ -179,59 +188,207 @@ public class UsagePolicyService : ApplicationService, IUsagePolicyService
                 Id = m.Id.Trim(),
                 DisplayName = string.IsNullOrWhiteSpace(m.DisplayName) ? m.Id.Trim() : m.DisplayName.Trim(),
                 Provider = string.IsNullOrWhiteSpace(m.Provider) ? null : m.Provider.Trim(),
-                Description = string.IsNullOrWhiteSpace(m.Description) ? null : m.Description.Trim()
+                Description = string.IsNullOrWhiteSpace(m.Description) ? null : m.Description.Trim(),
+                Efforts = ChatModelEfforts.Normalize(m.Efforts),
+                DefaultEffort = ChatModelEfforts.Find(m.Efforts, m.DefaultEffort),
+                EffortsDeclared = m.Efforts is { Count: > 0 }
             })
             .ToList();
 
     /// <inheritdoc />
-    public async Task<Result<ChatModelsDto>> GetChatModelsAsync(Guid? userId, Guid? agentId, string? provider = null, CancellationToken ct = default)
+    public Task<Result<ChatModelsDto>> GetChatModelsAsync(Guid? userId, Guid? agentId, string? provider = null, CancellationToken ct = default)
+        => GetChatModelsAsync(new ChatModelsRequest(userId, agentId, provider), ct);
+
+    /// <inheritdoc />
+    public async Task<Result<ChatModelsDto>> GetChatModelsAsync(ChatModelsRequest request, CancellationToken ct = default)
     {
+        Check.NotNull(request);
         if (GetCatalog().Count == 0)
         {
             return Ok(new ChatModelsDto());
         }
 
-        var effective = await ResolveAsync(userId, ct);
-        var agentProvider = await ResolveAgentProviderAsync(agentId, provider, ct);
-        var models = effective.AllowedModels.Where(m => Belongs(m, agentProvider)).ToList();
+        var effective = await ResolveAsync(request.UserId, ct);
+        var (agentProvider, binding) = await ResolveAgentProviderAsync(request.AgentId, request.Provider, ct);
+        var target = await ResolveTargetAsync(request, binding, ct);
+
+        // 对话实际落在别家 CLI 上时按那家列：模型属于那家，握手档位取那家的运行时，绑定上按 claude 写的 ThinkingLevel 不作默认档
+        var provider = target?.ProviderKey ?? agentProvider;
+        var sameProviderAsBinding = binding is not null && string.Equals(provider, binding.ProviderKey, StringComparison.OrdinalIgnoreCase);
+        var runtimeId = target?.RuntimeId ?? (sameProviderAsBinding ? binding!.CliRuntimeId : null);
+        var bindingEffort = sameProviderAsBinding ? binding!.ThinkingLevel : null;
+
+        var models = effective.AllowedModels.Where(m => Belongs(m, provider)).ToList();
+        if (target?.Model is { } fixedModel)
+        {
+            // 这段对话固定用这个模型：只列它（清单里有就用清单那一项，带它的档位；没有就按使用方给的名字列出）
+            var listed = effective.AllowedModels.FirstOrDefault(m => string.Equals(m.Id, fixedModel, StringComparison.OrdinalIgnoreCase))
+                         ?? GetCatalog().FirstOrDefault(m => string.Equals(m.Id, fixedModel, StringComparison.OrdinalIgnoreCase));
+            models =
+            [
+                listed ?? new ChatModelDto
+                {
+                    Id = fixedModel,
+                    DisplayName = string.IsNullOrWhiteSpace(target.ModelDisplayName) ? fixedModel : target.ModelDisplayName.Trim(),
+                    Provider = provider
+                }
+            ];
+        }
+
+        if (runtimeId is { } runtime)
+        {
+            models = await WithRuntimeEffortsAsync(models, runtime, bindingEffort, ct);
+        }
 
         return Ok(new ChatModelsDto
         {
             Models = models,
-            DefaultModel = PickDefault(models, effective.DefaultModel)
+            DefaultModel = target?.Model is not null ? models[0].Id : PickDefault(models, effective.DefaultModel)
         });
+    }
+
+    /// <summary>
+    /// 使用方说的这段对话的落点（<see cref="IChatModelTargetResolver"/>）；没注册、不带 Agent、或说了「按绑定」时为 null。
+    /// 不是这个用户的线程按没给线程处理。
+    /// </summary>
+    private async Task<ChatModelTarget?> ResolveTargetAsync(ChatModelsRequest request, CliAgentBindingDto? binding, CancellationToken ct)
+    {
+        if (_targetResolver is null || request.AgentId is not { } agentId || agentId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var threadId = request.ThreadId;
+        if (threadId is { } thread && (request.UserId is not { } user || _threads is null || !await _threads.IsOwnerAsync(thread, user)))
+        {
+            threadId = null;
+        }
+
+        var targetRequest = new ChatModelTargetRequest
+        {
+            UserId = request.UserId,
+            AgentId = agentId,
+            ThreadId = threadId,
+            BindingProviderKey = binding?.ProviderKey
+        };
+        if (request.Metadata is { } metadata)
+        {
+            targetRequest = targetRequest with { Metadata = metadata };
+        }
+
+        var target = await _targetResolver.ResolveAsync(targetRequest, ct);
+        if (target is null)
+        {
+            return null;
+        }
+
+        var normalized = target with
+        {
+            ProviderKey = string.IsNullOrWhiteSpace(target.ProviderKey) ? null : target.ProviderKey.Trim(),
+            Model = string.IsNullOrWhiteSpace(target.Model) ? null : target.Model.Trim()
+        };
+        return normalized is { ProviderKey: null, Model: null, RuntimeId: null } ? null : normalized;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>?> GetModelEffortsAsync(
+        Guid? userId, string providerKey, string? modelId, Guid? runtimeId, CancellationToken ct = default)
+    {
+        Check.NotNullOrWhiteSpace(providerKey);
+        var effective = await ResolveAsync(userId, ct);
+        var model = string.IsNullOrWhiteSpace(modelId)
+            ? null
+            : effective.AllowedModels.FirstOrDefault(m => string.Equals(m.Id, modelId.Trim(), StringComparison.OrdinalIgnoreCase)
+                                                         && Belongs(m, providerKey));
+        if (model is { EffortsDeclared: true })
+        {
+            return model.Efforts;
+        }
+
+        if (runtimeId is null || _runtimeService is null)
+        {
+            return [];
+        }
+
+        var runtime = await _runtimeService.GetAsync(runtimeId.Value, ct);
+        return ChatModelEfforts.Normalize(runtime.Succeeded ? runtime.Data?.Capabilities?.ReasoningEfforts : null);
     }
 
     /// <inheritdoc />
     public async Task<Result<string?>> ResolveChatModelAsync(
         Guid? userId, Guid? agentId, string? provider, string? requestedModel, CancellationToken ct = default)
     {
+        var turn = await ResolveChatTurnAsync(userId, agentId, provider, requestedModel, null, ct);
+        return turn.Succeeded
+            ? Ok<string?>(turn.Data!.Model)
+            : Fail<string?>(turn.Message!, turn.Code ?? 403, turn.ErrorCode ?? ErrorCodes.ModelNotAllowed);
+    }
+
+    /// <inheritdoc />
+    public Task<Result<ChatTurnModel>> ResolveChatTurnAsync(
+        Guid? userId, Guid? agentId, string? provider, string? requestedModel, string? requestedEffort, CancellationToken ct = default)
+        => ResolveChatTurnAsync(new ChatModelsRequest(userId, agentId, provider), requestedModel, requestedEffort, ct);
+
+    /// <inheritdoc />
+    public async Task<Result<ChatTurnModel>> ResolveChatTurnAsync(
+        ChatModelsRequest request, string? requestedModel, string? requestedEffort, CancellationToken ct = default)
+    {
+        Check.NotNull(request);
+        var (userId, agentId) = (request.UserId, request.AgentId);
+        var effort = string.IsNullOrWhiteSpace(requestedEffort) ? null : requestedEffort.Trim();
         var catalog = GetCatalog();
         if (catalog.Count == 0)
         {
-            return Ok<string?>(requestedModel);
+            return effort is null
+                ? Ok(new ChatTurnModel(requestedModel, null))
+                : RefuseEffort(effort, null, userId, agentId);
         }
 
-        var available = await GetChatModelsAsync(userId, agentId, provider, ct);
+        var available = await GetChatModelsAsync(request, ct);
         var models = available.Data!.Models;
 
+        ChatModelDto? model;
         if (string.IsNullOrWhiteSpace(requestedModel))
         {
-            return Ok<string?>(available.Data.DefaultModel);
+            model = models.FirstOrDefault(m => string.Equals(m.Id, available.Data.DefaultModel, StringComparison.OrdinalIgnoreCase));
         }
-
-        var requested = requestedModel.Trim();
-        var match = models.FirstOrDefault(m => string.Equals(m.Id, requested, StringComparison.OrdinalIgnoreCase));
-        if (match is not null)
+        else
         {
-            return Ok<string?>(match.Id);
+            var requested = requestedModel.Trim();
+            model = models.FirstOrDefault(m => string.Equals(m.Id, requested, StringComparison.OrdinalIgnoreCase));
+            if (model is null)
+            {
+                Logger.LogInformation(
+                    "Refused model {Model} for user {UserId} on agent {AgentId}: not among the {Count} models this user may use there",
+                    requested, userId, agentId, models.Count);
+                return Fail<ChatTurnModel>(
+                    $"The model '{requested}' is not available to you for this assistant.", 403, ErrorCodes.ModelNotAllowed);
+            }
         }
 
+        if (effort is null)
+        {
+            return Ok(new ChatTurnModel(model?.Id, null));
+        }
+
+        // 强度属于模型：按这一轮最终用的那个模型的档位校验（请求没带模型时是默认模型）
+        var matched = ChatModelEfforts.Find(model?.Efforts, effort);
+        return matched is not null
+            ? Ok(new ChatTurnModel(model!.Id, matched))
+            : RefuseEffort(effort, model, userId, agentId);
+    }
+
+    private Result<ChatTurnModel> RefuseEffort(string effort, ChatModelDto? model, Guid? userId, Guid? agentId)
+    {
         Logger.LogInformation(
-            "Refused model {Model} for user {UserId} on agent {AgentId}: not among the {Count} models this user may use there",
-            requested, userId, agentId, models.Count);
-        return Fail<string?>(
-            $"The model '{requested}' is not available to you for this assistant.", 403, ErrorCodes.ModelNotAllowed);
+            "Refused reasoning effort {Effort} for user {UserId} on agent {AgentId}: model {Model} offers {Efforts}",
+            effort, userId, agentId, model?.Id ?? "(none)", model is { Efforts.Count: > 0 } ? string.Join(", ", model.Efforts) : "no effort choice");
+        var message = model is { Efforts.Count: > 0 }
+            ? $"The reasoning effort '{effort}' is not available for the model '{model.Id}' (it offers {string.Join(", ", model.Efforts)})."
+            : model is null
+                ? $"The reasoning effort '{effort}' cannot be chosen: no model list is configured."
+                : $"The model '{model.Id}' offers no choice of reasoning effort.";
+        return Fail<ChatTurnModel>(message, 403, ErrorCodes.EffortNotAllowed);
     }
 
     #region 取值
@@ -239,7 +396,12 @@ public class UsagePolicyService : ApplicationService, IUsagePolicyService
     /// <summary>
     /// 一层策略的值：每一项 null = 这一层没设（跟随下一层）。限额那两项里「不限」用 <see cref="Unlimited"/> 表示。
     /// </summary>
-    private sealed record Layer(LimitValue? Session, LimitValue? Weekly, IReadOnlyList<string>? AllowedModels, string? DefaultModel)
+    private sealed record Layer(
+        LimitValue? Session,
+        LimitValue? Weekly,
+        IReadOnlyList<string>? AllowedModels,
+        string? DefaultModel,
+        IReadOnlyDictionary<string, ChatModelEffortsDto>? ModelEfforts = null)
     {
         public decimal? SessionLimitUsd => Session?.AmountUsd;
 
@@ -277,14 +439,39 @@ public class UsagePolicyService : ApplicationService, IUsagePolicyService
                 upper.Session ?? lower.Session,
                 upper.Weekly ?? lower.Weekly,
                 upper.AllowedModels ?? lower.AllowedModels,
-                upper.DefaultModel ?? lower.DefaultModel);
+                upper.DefaultModel ?? lower.DefaultModel,
+                MergeEfforts(upper.ModelEfforts, lower.ModelEfforts));
+
+    /// <summary>按模型逐个往下找：上一层列出的模型用上一层的，其余取下一层的。</summary>
+    private static IReadOnlyDictionary<string, ChatModelEffortsDto>? MergeEfforts(
+        IReadOnlyDictionary<string, ChatModelEffortsDto>? upper, IReadOnlyDictionary<string, ChatModelEffortsDto>? lower)
+    {
+        if (upper is not { Count: > 0 })
+        {
+            return lower;
+        }
+
+        if (lower is not { Count: > 0 })
+        {
+            return upper;
+        }
+
+        var merged = new Dictionary<string, ChatModelEffortsDto>(lower, StringComparer.OrdinalIgnoreCase);
+        foreach (var (model, efforts) in upper)
+        {
+            merged[model] = efforts;
+        }
+
+        return merged;
+    }
 
     private static Layer ToLayer(AiUsagePolicy row)
         => new(
             ToLimit(row.SessionLimitMode, row.SessionLimitUsd),
             ToLimit(row.WeeklyLimitMode, row.WeeklyLimitUsd),
             ReadModels(row.AllowedModelsJson),
-            string.IsNullOrWhiteSpace(row.DefaultModel) ? null : row.DefaultModel);
+            string.IsNullOrWhiteSpace(row.DefaultModel) ? null : row.DefaultModel,
+            ReadModelEfforts(row.ModelEffortsJson));
 
     private static LimitValue? ToLimit(UsageLimitMode mode, decimal? amount) => mode switch
     {
@@ -299,6 +486,7 @@ public class UsagePolicyService : ApplicationService, IUsagePolicyService
         var allowed = layer.AllowedModels ?? [];
         var models = GetCatalog()
             .Where(m => allowed.Contains(m.Id, StringComparer.OrdinalIgnoreCase))
+            .Select(m => WithPolicyEfforts(m, layer.ModelEfforts))
             .ToList();
 
         return new EffectiveUsagePolicyDto
@@ -308,6 +496,59 @@ public class UsagePolicyService : ApplicationService, IUsagePolicyService
             AllowedModels = models,
             DefaultModel = PickDefault(models, layer.DefaultModel)
         };
+    }
+
+    /// <summary>策略里给这个模型设了强度时用策略的，否则留着模型清单那一层的。</summary>
+    private static ChatModelDto WithPolicyEfforts(ChatModelDto model, IReadOnlyDictionary<string, ChatModelEffortsDto>? efforts)
+    {
+        if (efforts is null || !efforts.TryGetValue(model.Id, out var set))
+        {
+            return model;
+        }
+
+        var list = ChatModelEfforts.Normalize(set.Efforts);
+        return Copy(model, list, ChatModelEfforts.Find(list, set.DefaultEffort), declared: true);
+    }
+
+    private static ChatModelDto Copy(ChatModelDto model, List<string> efforts, string? defaultEffort, bool declared)
+        => new()
+        {
+            EffortsDeclared = declared,
+            Id = model.Id,
+            DisplayName = model.DisplayName,
+            Provider = model.Provider,
+            Description = model.Description,
+            Efforts = efforts,
+            DefaultEffort = defaultEffort
+        };
+
+    /// <summary>
+    /// 策略与模型清单都没声明档位的模型，取这段对话实际运行时（绑定的，或使用方说的落点）握手时报的。
+    /// 默认档是绑定上的推理强度（只在落点与绑定同一家、且它在报的档位里时），否则不预先选。
+    /// </summary>
+    /// <remarks>
+    /// 策略里给了空列表的模型是明确不提供，不取握手报的。stream-json 运行时（Claude Code 等）握手不报档位，只能来自配置。
+    /// 落点可能把一轮放到别的运行时上，这里按绑定的运行时说。
+    /// </remarks>
+    private async Task<List<ChatModelDto>> WithRuntimeEffortsAsync(
+        List<ChatModelDto> models, Guid runtimeId, string? bindingEffort, CancellationToken ct)
+    {
+        if (_runtimeService is null || models.All(m => m.EffortsDeclared))
+        {
+            return models;
+        }
+
+        var runtime = await _runtimeService.GetAsync(runtimeId, ct);
+        var reported = ChatModelEfforts.Normalize(runtime.Succeeded ? runtime.Data?.Capabilities?.ReasoningEfforts : null);
+        if (reported.Count == 0)
+        {
+            return models;
+        }
+
+        var defaultEffort = ChatModelEfforts.Find(reported, bindingEffort);
+        return models
+            .Select(m => m.EffortsDeclared ? m : Copy(m, reported, defaultEffort, declared: false))
+            .ToList();
     }
 
     private static string? PickDefault(IReadOnlyList<ChatModelDto> models, string? preferred)
@@ -323,30 +564,31 @@ public class UsagePolicyService : ApplicationService, IUsagePolicyService
     /// 这个 Agent 跑在哪个 provider 上：绑了外部 CLI 运行时的取运行时的 provider 键，否则取 Agent 自己的 provider（空 = 默认 provider）。
     /// 不带 Agent 的聊天取请求里的 provider（空 = 默认 provider）。
     /// </summary>
-    private async Task<string?> ResolveAgentProviderAsync(Guid? agentId, string? requestProvider, CancellationToken ct)
+    private async Task<(string? Provider, CliAgentBindingDto? Binding)> ResolveAgentProviderAsync(
+        Guid? agentId, string? requestProvider, CancellationToken ct)
     {
         var defaultProvider = _aiOptions.CurrentValue.DefaultProvider;
 
         if (agentId is not { } id || id == Guid.Empty)
         {
-            return string.IsNullOrWhiteSpace(requestProvider) ? defaultProvider : requestProvider;
+            return (string.IsNullOrWhiteSpace(requestProvider) ? defaultProvider : requestProvider, null);
         }
 
         if (_bindingService is not null && await _bindingService.GetByAgentIdAsync(id, ct) is { } binding)
         {
-            return binding.ProviderKey;
+            return (binding.ProviderKey, binding);
         }
 
         if (_agentRepository is null)
         {
-            return null;
+            return (null, null);
         }
 
         var agentProvider = await _agentRepository.AsQueryable()
             .Where(a => a.Id == id)
             .Select(a => a.Provider)
             .FirstOrDefaultAsync(ct);
-        return string.IsNullOrWhiteSpace(agentProvider) ? defaultProvider : agentProvider;
+        return (string.IsNullOrWhiteSpace(agentProvider) ? defaultProvider : agentProvider, null);
     }
 
     #endregion
@@ -402,7 +644,37 @@ public class UsagePolicyService : ApplicationService, IUsagePolicyService
             ? null
             : JsonSerializer.Serialize(input.AllowedModels.Select(m => m.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
         row.DefaultModel = string.IsNullOrWhiteSpace(input.DefaultModel) ? null : input.DefaultModel.Trim();
+        row.ModelEffortsJson = input.ModelEfforts is not { Count: > 0 } efforts
+            ? null
+            : JsonSerializer.Serialize(efforts.ToDictionary(
+                e => e.Key.Trim(),
+                e =>
+                {
+                    var list = ChatModelEfforts.Normalize(e.Value.Efforts);
+                    return new ChatModelEffortsDto { Efforts = list, DefaultEffort = ChatModelEfforts.Find(list, e.Value.DefaultEffort) };
+                },
+                StringComparer.OrdinalIgnoreCase), ModelEffortsJsonOptions);
         row.Note = string.IsNullOrWhiteSpace(input.Note) ? null : input.Note.Trim();
+    }
+
+    private static readonly JsonSerializerOptions ModelEffortsJsonOptions = new(JsonSerializerDefaults.Web);
+
+    private static Dictionary<string, ChatModelEffortsDto>? ReadModelEfforts(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            var read = JsonSerializer.Deserialize<Dictionary<string, ChatModelEffortsDto>>(json, ModelEffortsJsonOptions);
+            return read is null ? null : new Dictionary<string, ChatModelEffortsDto>(read, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static List<string>? ReadModels(string? json)
@@ -459,6 +731,24 @@ public class UsagePolicyService : ApplicationService, IUsagePolicyService
             if (unknown.Count > 0)
             {
                 return $"These models are not in the model list (AI:Chat:Models): {string.Join(", ", unknown)}.";
+            }
+        }
+
+        foreach (var (modelId, efforts) in input.ModelEfforts ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(modelId) || !catalog.Any(c => string.Equals(c.Id, modelId.Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                return $"Reasoning efforts are set for '{modelId}', which is not in the model list (AI:Chat:Models).";
+            }
+
+            if (efforts is null)
+            {
+                return $"The reasoning efforts of '{modelId}' are missing. Leave the model out to follow the default.";
+            }
+
+            if (ChatModelEfforts.Validate(efforts.Efforts, efforts.DefaultEffort) is { } invalid)
+            {
+                return $"The reasoning efforts of '{modelId}': {invalid}";
             }
         }
 
@@ -522,6 +812,7 @@ public class UsagePolicyService : ApplicationService, IUsagePolicyService
                 WeeklyLimit = new UsageLimitSettingDto { Mode = row.WeeklyLimitMode, AmountUsd = row.WeeklyLimitUsd },
                 AllowedModels = ReadModels(row.AllowedModelsJson),
                 DefaultModel = row.DefaultModel,
+                ModelEfforts = ReadModelEfforts(row.ModelEffortsJson),
                 Note = row.Note,
                 LastModificationTime = row.LastModificationTime ?? row.CreationTime
             };

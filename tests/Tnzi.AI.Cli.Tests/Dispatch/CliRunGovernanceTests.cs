@@ -372,6 +372,23 @@ public class CliRunGovernanceTests : IntegratedTestBase<CliBudgetDbContext>
     }
 
     [Fact]
+    public async Task Execute_ARunMeteredElsewhere_OpensNoWindow_EvenWithTheLimitReached()
+    {
+        var run = await SeedClaimedRunAsync();
+        await DbContext.Set<CliRun>().Where(r => r.Id == run.Id).ExecuteUpdateAsync(s => s.SetProperty(r => r.UsageMeteredElsewhere, true));
+        var limits = UsageLimitBeginning(Result<UsageLimitReservation>.Failure(
+            "You have reached your weekly usage limit.", 429, ErrorCodes.UsageLimitReached, new UsageLimitDenialDto { Window = UsageLimitWindow.Weekly }));
+        var fixture = new ExecutorFixture(this) { UsageLimits = limits.Object };
+
+        await fixture.Build().ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        (await ReloadAsync(run.Id)).Status.ShouldBe(CliRunStatus.Completed);
+        fixture.ProcessStarts.ShouldBe(1);
+        limits.Verify(l => l.BeginAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        limits.Verify(l => l.SettleAsync(It.IsAny<UsageLimitReservation>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task Execute_WhenTheMeterItselfFails_FailsClosed_ButIsNotLabelledAUsageLimit()
     {
         // 计量子系统失败不是「到上限了」：照样不跑（失败关闭），但不能贴成上限把排查引到上限配置上去

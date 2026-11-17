@@ -273,8 +273,9 @@ public class BudgetService : ApplicationService, IBudgetService
         if (tenantId.HasValue)
             q = q.Where(l => l.TenantId == tenantId.Value);
 
-        // Note: UsageLog (CreationAuditedEntity) 没有 UserId 字段，
-        // 预算管控在租户+Agent 维度生效。用户维度在缓存键中区分仅用于隔离，不过滤查询。
+        // 刻意不按 UsageLog.UserId 过滤：DefaultMonthlyBudgetUsd 一直是租户（单租户时即整个部署）的月度总额，
+        // 改成按用户过滤等于把它悄悄变成「每人各一份」，上限放大到人数倍。按用户的花费上限归 IUsageLimitService。
+        // 用户维度在缓存键中区分仅用于隔离，不过滤查询。
 
         var spend = await AggregateSpendAsync(q, ct);
 

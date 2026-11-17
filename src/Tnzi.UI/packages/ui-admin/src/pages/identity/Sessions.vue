@@ -25,7 +25,7 @@
     <!-- Toolbar: the user picker is an OPTIONAL filter - the page lists all
          active sessions globally; picking a user narrows the list to them. -->
     <NCard size="small" :bordered="false" class="t-session-page__toolbar">
-      <NSpace align="center" :wrap-item="false">
+      <div class="flex flex-wrap items-center gap-x-12px gap-y-8px">
         <!-- Active-users picker (optional filter): lets admins narrow to one
              user without pasting a userId. Falls back gracefully when the
              list is empty (e.g. KeepDatabaseAuditLog disabled). The select's
@@ -49,7 +49,7 @@
         <NButton type="primary" size="small" :loading="loading" @click="onFilterChanged">
           {{ t('toolbar.fetch') }}
         </NButton>
-      </NSpace>
+      </div>
     </NCard>
 
     <!-- Session list - global by default, narrowed when a user is picked -->
@@ -104,7 +104,7 @@ import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, ref, onMounted } from 'vue'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import {
-  NCard, NSpace, NButton, NSelect, NPagination,
+  NCard, NButton, NSelect, NPagination,
   NCheckbox, NPopconfirm, NTag,
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'

@@ -51,6 +51,20 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
 
     public async Task<Result<AgentThreadDto>> CreateAsync(CreateAgentThreadDto input)
     {
+        Check.NotNull(input);
+
+        var origin = ThreadOrigin.Normalize(input.Origin);
+        if (!origin.Succeeded)
+        {
+            return Fail<AgentThreadDto>(origin.Message!, origin.Code ?? 400, origin.ErrorCode);
+        }
+
+        // Listing 不从请求体读（[JsonIgnore]），只有服务端代码给：不认识的值是调用方的缺陷
+        if (!Enum.IsDefined(input.Listing))
+        {
+            throw new ArgumentOutOfRangeException(nameof(input), input.Listing, "Unknown thread listing.");
+        }
+
         // 仅当提供 AgentId 时验证 Agent 存在
         Agent? agent = null;
         if (input.AgentId.HasValue)
@@ -66,6 +80,8 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         {
             AgentId = input.AgentId,
             Title = input.Title ?? $"Thread {DateTime.UtcNow:yyyy-MM-dd HH:mm}",
+            Origin = origin.Data,
+            Listing = input.Listing,
             LastActivityTime = DateTime.UtcNow
         };
 
@@ -91,8 +107,10 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             return Fail<AgentThreadDto>("Thread not found", 404, ErrorCodes.ThreadNotFound);
         }
 
-        var dto = entity.MapTo<AgentThreadDto>();
+        var dto = ToThreadDto(entity);
         dto.MessageCount = await _messageRepository.Where(m => m.ThreadId == id).CountAsync();
+        dto.Running = await IsRunningAsync(id);
+        dto.AwaitingOwner = await IsAwaitingOwnerAsync(id, entity.CreatorId);
 
         if (entity.AgentId.HasValue)
         {
@@ -132,11 +150,18 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             AgentId = entity.AgentId,
             AgentName = entity.Agent?.Name,
             Title = entity.Title,
+            TitlePending = entity.TitleSource == ThreadTitleSource.Generating,
+            Origin = entity.Origin,
             Metadata = entity.Metadata,
             MessageCount = totalMessageCount,
             LastActivityTime = entity.LastActivityTime,
+            LastUserMessageTime = entity.LastUserMessageTime,
             CreationTime = entity.CreationTime,
             ArchivedTime = entity.ArchivedTime,
+            Listing = entity.Listing,
+            Running = await IsRunningAsync(id),
+            AwaitingOwner = await IsAwaitingOwnerAsync(id, entity.CreatorId),
+            Unread = IsUnread(entity.ReplyTime, entity.ReadTime),
             Messages = ToMessageDtos(recentMessages)
         };
 
@@ -305,12 +330,19 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
 
         if (query.StartTime.HasValue)
         {
-            q = q.Where(t => t.LastActivityTime >= query.StartTime.Value);
+            q = q.Where(t => (t.LastUserMessageTime ?? t.CreationTime) >= query.StartTime.Value);
         }
 
         if (query.EndTime.HasValue)
         {
-            q = q.Where(t => t.LastActivityTime <= query.EndTime.Value);
+            q = q.Where(t => (t.LastUserMessageTime ?? t.CreationTime) <= query.EndTime.Value);
+        }
+
+        // 用户端列表只有在列表里的线程；服务端建的、还没等到主人说话的线程（以及永远不进列表的）只按 id 可用。
+        // 管理端列表置 IncludeUnlisted 看全部
+        if (!query.IncludeUnlisted)
+        {
+            q = q.Where(t => t.Listing == ThreadListing.Listed);
         }
 
         q = query.Status switch
@@ -320,14 +352,11 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             _ => q
         };
 
-        // 每种排序都以 Id 收尾：同一时刻 / 同名的行在两页之间不漂移
-        IOrderedQueryable<AgentThreadEntity> ordered = query.Sort switch
-        {
-            ThreadListSort.CreationTime => q.OrderByDescending(t => t.CreationTime).ThenByDescending(t => t.Id),
-            ThreadListSort.Title => q.OrderBy(t => t.Title == null ? null : t.Title.ToLower()).ThenByDescending(t => t.Id),
-            _ => q.OrderByDescending(t => t.LastActivityTime).ThenByDescending(t => t.Id)
-        };
-
+        // 先分层（在等主人 → 在跑 → 其余），排序在数据库里做：在等主人与在跑的线程整体排在最前，翻页不会把它们漏到后面的页上。
+        // 两个集合都只是此刻还没了结的那一小撮（等回答的请求、活着的运行），作为参数集合带进查询
+        var awaiting = await GetAwaitingOwnerThreadIdsAsync(query.CreatorId, null);
+        var running = await GetRunningThreadIdsAsync(null);
+        var ordered = OrderAsList(q, awaiting, running, query.Sort);
         // Project explicitly so AgentName resolves through the Agent navigation
         // (LEFT JOIN; null when the agent was deleted or the thread is agent-less).
         var pagedList = await ordered
@@ -337,9 +366,14 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
                 AgentId = t.AgentId,
                 AgentName = t.Agent != null ? t.Agent.Name : null,
                 Title = t.Title,
+                TitlePending = t.TitleSource == ThreadTitleSource.Generating,
+                Origin = t.Origin,
                 LastActivityTime = t.LastActivityTime,
+                LastUserMessageTime = t.LastUserMessageTime,
                 CreationTime = t.CreationTime,
-                ArchivedTime = t.ArchivedTime
+                ArchivedTime = t.ArchivedTime,
+                Listing = t.Listing,
+                Unread = t.ReplyTime != null && (t.ReadTime == null || t.ReadTime < t.ReplyTime)
             })
             .CreateAsync(query);
 
@@ -358,6 +392,9 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             foreach (var dto in pagedList.Items)
             {
                 dto.MessageCount = countByThreadId.GetValueOrDefault(dto.Id);
+                // 与排序用的是同一份答案：行上的标记与它所在的层不会对不上
+                dto.Running = running.Contains(dto.Id);
+                dto.AwaitingOwner = awaiting.Contains(dto.Id);
             }
         }
 
@@ -372,12 +409,15 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             return Fail<AgentThreadDto>("Thread not found", 404, ErrorCodes.ThreadNotFound);
         }
 
+        // 用户起的名字钉住：之后的自动标题（回退 / AI）都不再替换它。
+        // 只写这两列（不走整行 UpdateAsync）：后台起标题与本请求各自持有一份实体，整行写会互相覆盖
         entity.Title = title;
-        await _repository.UpdateAsync(entity);
+        entity.TitleSource = ThreadTitleSource.User;
+        await _repository.SaveChangesAsync();
 
         Logger.LogInformation("Agent thread title updated: {ThreadId}, Title: {Title}", id, title);
 
-        return Ok(entity.MapTo<AgentThreadDto>());
+        return Ok(ToThreadDto(entity));
     }
 
     public async Task<Result<AgentThreadDto>> SetArchivedAsync(Guid id, bool archived)
@@ -392,11 +432,251 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         if (archivedTime != entity.ArchivedTime)
         {
             entity.ArchivedTime = archivedTime;
-            await _repository.UpdateAsync(entity);
+            // 只写改了的列：整行写会把后台刚起好的标题改回这份实体读到时的样子
+            await _repository.SaveChangesAsync();
             Logger.LogInformation("Agent thread {Action}: {ThreadId}", archived ? "archived" : "unarchived", id);
         }
 
-        return Ok(entity.MapTo<AgentThreadDto>());
+        return Ok(ToThreadDto(entity));
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> MarkReadAsync(Guid id)
+    {
+        var now = DateTime.UtcNow;
+        await _repository.EnsureTransactionStartedAsync();
+        // 只写这一列、只往后走：两个标签页同时标记，晚到的那个旧时间不会把已读往回拨
+        var written = await _repository.AsQueryable()
+            .Where(t => t.Id == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.ReadTime, t => t.ReadTime == null || t.ReadTime < now ? now : t.ReadTime));
+        return written == 0 ? Fail("Thread not found", 404, ErrorCodes.ThreadNotFound) : Ok();
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<ThreadAttentionDto>> GetAttentionAsync(ThreadAttentionQueryDto query)
+    {
+        Check.NotNull(query);
+
+        // 与用户端列表同一个范围：不在列表里的线程不计（在跑也好、未读也好），否则计数指向列表里找不到的对话
+        var q = _repository.AsQueryable().Where(t => t.Listing == ThreadListing.Listed);
+        if (query.CreatorId.HasValue)
+        {
+            q = q.Where(t => t.CreatorId == query.CreatorId.Value);
+        }
+
+        if (query.AgentIds is { Count: > 0 })
+        {
+            var agentIds = query.AgentIds.Distinct().ToList();
+            q = q.Where(t => t.AgentId != null && agentIds.Contains(t.AgentId.Value));
+        }
+
+        var unread = q.Where(t => t.ReplyTime != null && (t.ReadTime == null || t.ReadTime < t.ReplyTime));
+        var unreadCount = await unread.CountAsync();
+        var unreadIds = unreadCount == 0
+            ? []
+            : await unread
+                .OrderByDescending(t => t.ReplyTime)
+                .ThenByDescending(t => t.Id)
+                .Select(t => t.Id)
+                .Take(ThreadAttentionDto.MaxThreadIds)
+                .ToListAsync();
+
+        // 在等主人与在跑的线程都没几条：先问提供者与调度器有哪些，再按主人与 Agent 筛，按列表的顺序给出
+        var awaiting = await GetAwaitingOwnerThreadIdsAsync(query.CreatorId, null);
+        var awaitingIds = awaiting.Count == 0
+            ? []
+            : await OrderWithinTier(q.Where(t => awaiting.Contains(t.Id)), ThreadListSort.LastUserMessage)
+                .Select(t => t.Id)
+                .ToListAsync();
+
+        var running = await GetRunningThreadIdsAsync(null);
+        var runningIds = running.Count == 0
+            ? []
+            : await OrderWithinTier(q.Where(t => running.Contains(t.Id)), ThreadListSort.LastUserMessage)
+                .Select(t => t.Id)
+                .ToListAsync();
+
+        return Ok(new ThreadAttentionDto
+        {
+            AwaitingOwnerCount = awaitingIds.Count,
+            RunningCount = runningIds.Count,
+            UnreadCount = unreadCount,
+            AwaitingOwnerThreadIds = awaitingIds.Take(ThreadAttentionDto.MaxThreadIds).ToList(),
+            RunningThreadIds = runningIds.Take(ThreadAttentionDto.MaxThreadIds).ToList(),
+            UnreadThreadIds = unreadIds
+        });
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> SetListingAsync(Guid threadId, ThreadListing listing, CancellationToken ct = default)
+    {
+        // 只有服务端代码给这个值：不认识的值是调用方的缺陷，不是请求错误
+        if (!Enum.IsDefined(listing))
+        {
+            throw new ArgumentOutOfRangeException(nameof(listing), listing, "Unknown thread listing.");
+        }
+
+        await _repository.EnsureTransactionStartedAsync(ct);
+        // 只写这一列：整行写会把后台刚起好的标题改回这份实体读到时的样子
+        var written = await _repository.AsQueryable()
+            .Where(t => t.Id == threadId)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.Listing, listing), ct);
+        if (written == 0)
+        {
+            return Fail("Thread not found", 404, ErrorCodes.ThreadNotFound);
+        }
+
+        Logger.LogInformation("Agent thread {ThreadId} listing set to {Listing}", threadId, listing);
+        return Ok();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 一条带条件的 <c>UPDATE</c>：只动这位主人的、还在等主人说话的线程。并发的两轮只有一轮写下它，事件也只发一次；
+    /// 别人的线程 id 在这里什么都不改（归属在条件里，不靠调用方先查）。
+    /// </remarks>
+    public async Task<bool> ListOnUserMessageAsync(Guid threadId, Guid userId, CancellationToken ct = default)
+    {
+        await _repository.EnsureTransactionStartedAsync(ct);
+        var written = await _repository.AsQueryable()
+            .Where(t => t.Id == threadId && t.CreatorId == userId && t.Listing == ThreadListing.UntilUserMessage)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.Listing, ThreadListing.Listed), ct);
+        if (written == 0)
+        {
+            return false;
+        }
+
+        Logger.LogInformation("Agent thread {ThreadId} listed: its owner wrote in it", threadId);
+        try
+        {
+            if (EventBus is { } eventBus)
+            {
+                await eventBus.PublishAsync(new ThreadListedEvent { ThreadId = threadId, UserId = userId });
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Failed to publish ThreadListedEvent for thread {ThreadId}", threadId);
+        }
+
+        return true;
+    }
+
+    /// <inheritdoc />
+    public async Task MarkRepliedAsync(Guid threadId, DateTime repliedAt, CancellationToken ct = default)
+    {
+        await _repository.EnsureTransactionStartedAsync(ct);
+        await _repository.AsQueryable()
+            .IgnoreQueryFilters()
+            .Where(t => t.Id == threadId && (t.ReplyTime == null || t.ReplyTime < repliedAt))
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.ReplyTime, (DateTime?)repliedAt), ct);
+    }
+
+    /// <summary>实体 → 线程 DTO，带上未读（在跑要问调度器，由调用方需要时补）。</summary>
+    private static AgentThreadDto ToThreadDto(AgentThreadEntity entity)
+    {
+        var dto = entity.MapTo<AgentThreadDto>();
+        dto.Unread = IsUnread(entity.ReplyTime, entity.ReadTime);
+        return dto;
+    }
+
+    /// <summary>服务端写下的回答晚于主人最近一次看过这条线程。与列表与关注状态里的查询谓词是同一条判定。</summary>
+    private static bool IsUnread(DateTime? replyTime, DateTime? readTime)
+        => replyTime is { } replied && (readTime is not { } read || read < replied);
+
+    private async Task<bool> IsRunningAsync(Guid threadId)
+        => (await GetRunningThreadIdsAsync([threadId])).Contains(threadId);
+
+    private async Task<bool> IsAwaitingOwnerAsync(Guid threadId, Guid? ownerId)
+        => (await GetAwaitingOwnerThreadIdsAsync(ownerId, [threadId])).Contains(threadId);
+
+    /// <summary>
+    /// 列表的顺序：先分层 —— 在等主人的（0）、有一轮在跑的（1）、其余的（2）—— 再按 <paramref name="sort"/> 排层内。
+    /// 客户端（<c>@tnzi/ui-ai</c> 的 <c>compareThreads</c>）按同一条规则排它手里的行，乐观更新因此落在下一次读取会放的位置。
+    /// </summary>
+    private static IOrderedQueryable<AgentThreadEntity> OrderAsList(
+        IQueryable<AgentThreadEntity> query, IReadOnlySet<Guid> awaiting, IReadOnlySet<Guid> running, ThreadListSort sort)
+    {
+        if (awaiting.Count == 0 && running.Count == 0)
+        {
+            return OrderWithinTier(query, sort);
+        }
+
+        var awaitingIds = awaiting.ToList();
+        var runningIds = running.Where(id => !awaiting.Contains(id)).ToList();
+        var tiered = query.OrderBy(t => awaitingIds.Contains(t.Id) ? 0 : runningIds.Contains(t.Id) ? 1 : 2);
+        return sort switch
+        {
+            ThreadListSort.CreationTime => tiered.ThenByDescending(t => t.CreationTime).ThenByDescending(t => t.Id),
+            ThreadListSort.Title => tiered.ThenBy(t => t.Title == null ? null : t.Title.ToLower())
+                .ThenByDescending(t => t.CreationTime).ThenByDescending(t => t.Id),
+            _ => tiered.ThenByDescending(t => t.LastUserMessageTime ?? t.CreationTime)
+                .ThenByDescending(t => t.CreationTime).ThenByDescending(t => t.Id)
+        };
+    }
+
+    /// <summary>一层之内的顺序；同值时新建的在前，再以 Id 收尾，同一时刻 / 同名的行在两页之间不漂移。</summary>
+    private static IOrderedQueryable<AgentThreadEntity> OrderWithinTier(IQueryable<AgentThreadEntity> query, ThreadListSort sort)
+        => sort switch
+        {
+            ThreadListSort.CreationTime => query.OrderByDescending(t => t.CreationTime).ThenByDescending(t => t.Id),
+            ThreadListSort.Title => query.OrderBy(t => t.Title == null ? null : t.Title.ToLower())
+                .ThenByDescending(t => t.CreationTime).ThenByDescending(t => t.Id),
+            _ => query.OrderByDescending(t => t.LastUserMessageTime ?? t.CreationTime)
+                .ThenByDescending(t => t.CreationTime).ThenByDescending(t => t.Id)
+        };
+
+    /// <summary>
+    /// 哪些线程此刻在等主人：所有 <see cref="IThreadAwaitingOwnerProvider"/> 的答案的并集。
+    /// 用时才解析：应用的提供者可能依赖线程服务，构造时注入会成环。一个提供者读不出来时按它什么也没报处理。
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>> GetAwaitingOwnerThreadIdsAsync(Guid? ownerId, IReadOnlyCollection<Guid>? threadIds)
+    {
+        var result = new HashSet<Guid>();
+        if (threadIds is { Count: 0 })
+        {
+            return result;
+        }
+
+        var query = new ThreadAwaitingOwnerQuery(ownerId, threadIds);
+        foreach (var provider in ServiceProvider.GetServices<IThreadAwaitingOwnerProvider>())
+        {
+            try
+            {
+                result.UnionWith(await provider.GetThreadIdsAsync(query) ?? []);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // 在等主人只是一个排序与提示：读不出来时列表照常返回，只是不标
+                Logger.LogWarning(ex, "Could not read which threads await their owner from {Provider}", provider.GetType().Name);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 哪些线程上有一轮在服务端跑；调度器说不出来（没加载外部执行、或自定义调度器没实现）时为空。
+    /// 用时才解析调度器：它的实现依赖线程服务，构造时注入会成环。
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>> GetRunningThreadIdsAsync(IReadOnlyCollection<Guid>? threadIds)
+    {
+        var dispatcher = ServiceProvider.GetService<ICliAgentDispatcher>();
+        if (dispatcher is null)
+        {
+            return new HashSet<Guid>();
+        }
+
+        try
+        {
+            return await dispatcher.GetRunningThreadIdsAsSystemAsync(threadIds) ?? new HashSet<Guid>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 在跑只是一个提示：读不出来时列表照常返回，只是不标
+            Logger.LogWarning(ex, "Could not read which threads have a run going on");
+            return new HashSet<Guid>();
+        }
     }
 
     public async Task<Result> DeleteAsync(Guid id)
@@ -435,7 +715,8 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         return Ok();
     }
 
-    public async Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default)
+    public async Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
+        Guid? threadId, Guid? agentId, string? origin, ThreadListing listing = ThreadListing.Listed, CancellationToken ct = default)
     {
         // 仅当提供 agentId 时验证 Agent 存在
         if (agentId.HasValue)
@@ -491,7 +772,18 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             return (threadEntity.Id, false);
         }
 
-        // 无 threadId，创建新的线程
+        // 无 threadId，创建新的线程。来源先校验：形状不合规的值不该留下一条空线程
+        var validOrigin = ThreadOrigin.Normalize(origin);
+        if (!validOrigin.Succeeded)
+        {
+            throw new BusinessException(validOrigin.Message!, validOrigin.ErrorCode!, validOrigin.Code ?? 400);
+        }
+
+        if (!Enum.IsDefined(listing))
+        {
+            throw new ArgumentOutOfRangeException(nameof(listing), listing, "Unknown thread listing.");
+        }
+
         // ★ CreatorId 显式按运行发起人写，不交给审计钩子：钩子只在为 null 时填环境用户，而后台子运行
         //   （spawn_agent）在父请求返回后建线程时作用域里没有环境用户，线程会落成无主；
         //   上面的读路径与续跑前置的 IsOwnerAsync 都按发起人比对，无主线程对它们永远不满足。
@@ -500,6 +792,8 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             AgentId = agentId,
             CreatorId = ResolveRunOriginatorId(),
             Title = $"Thread {DateTime.UtcNow:yyyy-MM-dd HH:mm}",
+            Origin = validOrigin.Data,
+            Listing = listing,
             LastActivityTime = DateTime.UtcNow
         };
 
@@ -526,12 +820,26 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         => SaveMessageCoreAsync(threadId, role, content, toolCalls, usage, messageId, metadataJson: null, ct);
 
     /// <inheritdoc />
-    public Task<Guid> SaveUserMessageAsync(Guid threadId, string content, IReadOnlyDictionary<string, JsonElement>? metadata, Guid? messageId = null, CancellationToken ct = default)
+    public Task<Guid> SaveUserMessageAsync(
+        Guid threadId, string content, IReadOnlyDictionary<string, JsonElement>? metadata, Guid? messageId = null, DateTime? sentAt = null, CancellationToken ct = default)
         => SaveMessageCoreAsync(threadId, MessageRole.User, content, toolCalls: null, usage: null, messageId,
-            ChatTurnMetadata.Serialize(metadata), ct);
+            ChatTurnMetadata.Serialize(metadata), ct, sentAt);
+
+    /// <inheritdoc />
+    public async Task MarkUserMessageAsync(Guid threadId, DateTime sentAt, CancellationToken ct = default)
+    {
+        await _repository.EnsureTransactionStartedAsync(ct);
+        await _repository.AsQueryable()
+            .IgnoreQueryFilters()
+            .Where(t => t.Id == threadId)
+            .ExecuteUpdateAsync(s => s.SetProperty(
+                t => t.LastUserMessageTime,
+                t => t.LastUserMessageTime == null || t.LastUserMessageTime < sentAt ? sentAt : t.LastUserMessageTime), ct);
+    }
 
     private async Task<Guid> SaveMessageCoreAsync(
-        Guid threadId, string role, string content, string? toolCalls, string? usage, Guid? messageId, string? metadataJson, CancellationToken ct)
+        Guid threadId, string role, string content, string? toolCalls, string? usage, Guid? messageId, string? metadataJson, CancellationToken ct,
+        DateTime? sentAt = null)
     {
         // Existence probe via GetAsync (DbSet.FindAsync). FindAsync consults the
         // ChangeTracker first - a ChangeTracker hit returns the entity without issuing a
@@ -583,13 +891,18 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         // 更新线程最后活动时间 - 同样跳过 query filter（见上方注释）。
         // 用户在已归档的线程里接着说话 = 这段对话又在进行，取消归档；否则它是屏幕上开着的会话，却不在「最近对话」里。
         // 只认用户消息：归档时还在写的回复落库不应把它拉回来。
+        // 主人最近发消息的时间同样只认用户消息、只往后走（排队消息按排下的时间写，排下时已经记过一次）
         var now = DateTime.UtcNow;
+        var sent = sentAt ?? now;
         var thread = _repository.AsQueryable().IgnoreQueryFilters().Where(t => t.Id == threadId);
         if (role == MessageRole.User)
         {
             await thread.ExecuteUpdateAsync(s => s
                 .SetProperty(t => t.LastActivityTime, now)
-                .SetProperty(t => t.ArchivedTime, (DateTime?)null), ct);
+                .SetProperty(t => t.ArchivedTime, (DateTime?)null)
+                .SetProperty(
+                    t => t.LastUserMessageTime,
+                    t => t.LastUserMessageTime == null || t.LastUserMessageTime < sent ? sent : t.LastUserMessageTime), ct);
         }
         else
         {
@@ -662,6 +975,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             AgentId = entity.AgentId,
             AgentName = entity.Agent?.Name,
             Title = entity.Title,
+            Origin = entity.Origin,
             Metadata = entity.Metadata,
             MessageCount = allMessages.Count,
             LastActivityTime = entity.LastActivityTime,
@@ -723,16 +1037,6 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         return Ok<string>(sb.ToString());
     }
 
-    /// <summary>
-    /// 从用户消息生成 fallback 标题（截取前 N 个文本元素）
-    /// </summary>
-    public static string? GenerateFallbackTitle(string? userMessage, int maxLength)
-    {
-        if (string.IsNullOrWhiteSpace(userMessage))
-            return null;
-
-        return userMessage.TruncateByTextElements(maxLength);
-    }
 
     /// <inheritdoc />
     public async Task<string?> GetMetadataValueAsync(Guid threadId, string key, CancellationToken ct = default)
@@ -771,7 +1075,8 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         }
 
         threadEntity.Metadata = metadata.Count == 0 ? null : JsonSerializer.Serialize(metadata);
-        await _repository.UpdateAsync(threadEntity);
+        // 只写 Metadata 一列：同一作用域里这份实体建线程时就被跟踪着，整行写会把后台起好的标题改回占位标题
+        await _repository.SaveChangesAsync(ct);
     }
 
     /// <summary>

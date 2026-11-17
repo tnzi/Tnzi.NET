@@ -12,6 +12,7 @@ public class ExceptionHandlingMiddlewareTests
     private readonly Mock<ILogger<ExceptionHandlingMiddleware>> _loggerMock;
     private readonly Mock<IWebHostEnvironment> _environmentMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
+    private readonly Mock<ILogger<BadHttpRequestExceptionHandler>> _badRequestLoggerMock = new();
 
     public ExceptionHandlingMiddlewareTests()
     {
@@ -29,6 +30,8 @@ public class ExceptionHandlingMiddlewareTests
             .Returns(Mock.Of<ILogger<InfrastructureExceptionHandler>>());
         _serviceProviderMock.Setup(sp => sp.GetService(typeof(ILogger<DefaultExceptionHandler>)))
             .Returns(Mock.Of<ILogger<DefaultExceptionHandler>>());
+        _serviceProviderMock.Setup(sp => sp.GetService(typeof(ILogger<BadHttpRequestExceptionHandler>)))
+            .Returns(_badRequestLoggerMock.Object);
     }
 
     private HttpContext CreateHttpContext(IServiceProvider? requestServices = null)
@@ -128,6 +131,59 @@ public class ExceptionHandlingMiddlewareTests
         // 生产环境中，非框架异常应该返回通用错误消息，不暴露具体异常信息
         Assert.Contains("An error occurred while processing your request", responseBody);
         Assert.DoesNotContain("Internal error", responseBody);
+    }
+
+    /// <summary>
+    /// 读请求体时客户端走了：Kestrel 抛 <see cref="BadHttpRequestException"/>（400）。此前落到默认处理器答 500、记 Error，
+    /// 消费方只能各自登记一个处理器把它改回 400。
+    /// </summary>
+    [Fact]
+    public async Task InvokeAsync_WhenTheClientLeavesWhileTheBodyIsRead_AnswersItsOwn400WithoutAnErrorLog()
+    {
+        RequestDelegate next = _ => throw new BadHttpRequestException("Unexpected end of request content.", StatusCodes.Status400BadRequest);
+        var options = new ExceptionHandlingOptions();
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+        var context = CreateHttpContext();
+        using var aborted = new CancellationTokenSource();
+        aborted.Cancel();
+        context.RequestAborted = aborted.Token;
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(400, context.Response.StatusCode);
+        var body = await ReadBodyAsync(context);
+        Assert.Equal(400, body.RootElement.GetProperty("code").GetInt32());
+        Assert.Equal(ErrorCodes.BAD_REQUEST, body.RootElement.GetProperty("errorCode").GetString());
+        Assert.Equal("Unexpected end of request content.", body.RootElement.GetProperty("message").GetString());
+        _badRequestLoggerMock.Verify(
+            l => l.Log(
+                It.Is<LogLevel>(level => level >= LogLevel.Warning),
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.Status413PayloadTooLarge, 413)]
+    [InlineData(StatusCodes.Status408RequestTimeout, 408)]
+    [InlineData(StatusCodes.Status500InternalServerError, 400)]
+    public async Task InvokeAsync_WhenTheRequestCannotBeRead_AnswersTheExceptionsOwnClientErrorStatus(int thrownStatus, int expected)
+    {
+        RequestDelegate next = _ => throw new BadHttpRequestException("Request body too large.", thrownStatus);
+        var options = new ExceptionHandlingOptions();
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+        var context = CreateHttpContext();
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(expected, context.Response.StatusCode);
+        Assert.Equal(expected, (await ReadBodyAsync(context)).RootElement.GetProperty("code").GetInt32());
     }
 
     [Fact]

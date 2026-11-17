@@ -208,9 +208,16 @@ public class UsageLoggingMiddleware : IAiMiddleware
     /// </summary>
     private async Task LogUsageSafeAsync(string operationType, string provider, string? model, AiMiddlewareContext context, int inputTokens, int outputTokens, int cachedInputTokens, int cacheCreationTokens, long durationMs, bool isSuccess, string? errorMessage, CancellationToken ct)
     {
-        var agentId = context.Agent.AgentId;
-        var threadId = context.Request.ThreadId;
         model ??= "unknown";
+        // 用户显式带上：流式场景下请求作用域已释放时改在独立作用域重试，那里没有登录用户也没有执行上下文
+        var entry = new UsageLogEntry
+        {
+            OperationType = operationType, Provider = provider, Model = model,
+            InputTokens = inputTokens, OutputTokens = outputTokens,
+            CachedInputTokens = cachedInputTokens, CacheCreationTokens = cacheCreationTokens,
+            DurationMs = durationMs, IsSuccess = isSuccess, ErrorMessage = errorMessage,
+            UserId = context.Request.UserId, AgentId = context.Agent.AgentId, ThreadId = context.Request.ThreadId
+        };
 
         _logger.LogInformation(
             "AI usage: provider={Provider} model={Model} input={Input} output={Output} cached={Cached} creation={Creation} duration={Duration}ms success={Success}",
@@ -218,11 +225,7 @@ public class UsageLoggingMiddleware : IAiMiddleware
 
         try
         {
-            await _usageLogService.LogUsageAsync(
-                operationType: operationType, provider: provider, model: model,
-                inputTokens: inputTokens, outputTokens: outputTokens, durationMs: durationMs,
-                isSuccess: isSuccess, errorMessage: errorMessage, agentId: agentId, threadId: threadId,
-                cachedInputTokens: cachedInputTokens, cacheCreationTokens: cacheCreationTokens, ct: ct);
+            await _usageLogService.LogUsageAsync(entry, ct);
         }
         catch (ObjectDisposedException)
         {
@@ -231,11 +234,7 @@ public class UsageLoggingMiddleware : IAiMiddleware
             {
                 using var scope = _scopeFactory.CreateScope();
                 var scopedService = scope.ServiceProvider.GetRequiredService<IUsageLogService>();
-                await scopedService.LogUsageAsync(
-                    operationType: operationType, provider: provider, model: model,
-                    inputTokens: inputTokens, outputTokens: outputTokens, durationMs: durationMs,
-                    isSuccess: isSuccess, errorMessage: errorMessage, agentId: agentId, threadId: threadId,
-                    cachedInputTokens: cachedInputTokens, cacheCreationTokens: cacheCreationTokens, ct: ct);
+                await scopedService.LogUsageAsync(entry, ct);
             }
             catch (Exception retryEx)
             {

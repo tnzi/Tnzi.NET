@@ -1,0 +1,272 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { createMessageAdapter } from '../../src/adapters/message'
+import { createNotificationAdapter } from '../../src/adapters/notification'
+import { createLoadingBarAdapter } from '../../src/adapters/loading-bar'
+import { createDialogAdapter } from '../../src/adapters/dialog'
+import { createUiAdapter } from '../../src/adapters/create-ui-adapter'
+
+describe('adapters/message', () => {
+  it('delegates to explicit API when provided', () => {
+    const api = {
+      success: vi.fn(),
+      error: vi.fn(),
+      warning: vi.fn(),
+      info: vi.fn(),
+      loading: vi.fn().mockReturnValue({ destroy: vi.fn() }),
+    }
+    const m = createMessageAdapter(api as any)
+    m.success('ok', { duration: 100, closable: true })
+    m.error('bad')
+    m.warning('hm')
+    m.info('fyi')
+    expect(api.success).toHaveBeenCalledWith('ok', { duration: 100, closable: true })
+    expect(api.error).toHaveBeenCalledWith('bad', undefined)
+    expect(api.warning).toHaveBeenCalled()
+    expect(api.info).toHaveBeenCalled()
+  })
+
+  it('loading returns destroyer that delegates to instance', () => {
+    const destroy = vi.fn()
+    const api = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(), loading: vi.fn().mockReturnValue({ destroy }) }
+    const m = createMessageAdapter(api as any)
+    const stop = m.loading('wait')
+    stop()
+    expect(destroy).toHaveBeenCalled()
+  })
+
+  // naive closes a message after its provider default (3000 ms) unless told
+  // `duration: 0`; a loading toast is closed by the function it returns.
+  it('loading stays open until closed unless the caller sets a duration', () => {
+    const api = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(), loading: vi.fn().mockReturnValue({ destroy: vi.fn() }) }
+    const m = createMessageAdapter(api as any)
+    m.loading('wait')
+    m.loading('closable', { closable: true })
+    m.loading('timed', { duration: 5000 })
+    expect(api.loading).toHaveBeenNthCalledWith(1, 'wait', { duration: 0 })
+    expect(api.loading).toHaveBeenNthCalledWith(2, 'closable', { duration: 0, closable: true })
+    expect(api.loading).toHaveBeenNthCalledWith(3, 'timed', { duration: 5000 })
+  })
+
+  it('falls back to window.$message when no API passed', () => {
+    const api = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(), loading: vi.fn().mockReturnValue({ destroy: vi.fn() }) }
+    ;(window as any).$message = api
+    const m = createMessageAdapter()
+    m.success('hi')
+    expect(api.success).toHaveBeenCalledWith('hi', undefined)
+    delete (window as any).$message
+  })
+
+  it('silently no-ops when no API available', () => {
+    delete (window as any).$message
+    const m = createMessageAdapter()
+    expect(() => m.success('hi')).not.toThrow()
+    const stop = m.loading('wait')
+    expect(() => stop()).not.toThrow()
+  })
+})
+
+describe('adapters/notification', () => {
+  it('delegates to explicit API and maps options', () => {
+    const api = { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn(), destroyAll: vi.fn() }
+    const n = createNotificationAdapter(api as any)
+    n.info('c', { title: 'T', duration: 1000, closable: false, meta: 'meta' as any })
+    expect(api.info).toHaveBeenCalledWith(expect.objectContaining({ title: 'T', content: 'c', duration: 1000, closable: false }))
+    n.success('s'); n.warning('w'); n.error('e'); n.destroyAll()
+    expect(api.success).toHaveBeenCalled()
+    expect(api.warning).toHaveBeenCalled()
+    expect(api.error).toHaveBeenCalled()
+    expect(api.destroyAll).toHaveBeenCalled()
+  })
+
+  it('defaults closable=true when not specified', () => {
+    const api = { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn(), destroyAll: vi.fn() }
+    const n = createNotificationAdapter(api as any)
+    n.info('c')
+    expect(api.info).toHaveBeenCalledWith(expect.objectContaining({ closable: true }))
+  })
+
+  it('falls back to window.$notification', () => {
+    const api = { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn(), destroyAll: vi.fn() }
+    ;(window as any).$notification = api
+    createNotificationAdapter().info('hi')
+    expect(api.info).toHaveBeenCalled()
+    delete (window as any).$notification
+  })
+
+  it('no-ops when API missing', () => {
+    delete (window as any).$notification
+    const n = createNotificationAdapter()
+    expect(() => n.destroyAll()).not.toThrow()
+  })
+})
+
+describe('adapters/loading-bar', () => {
+  it('delegates start/finish/error', () => {
+    const api = { start: vi.fn(), finish: vi.fn(), error: vi.fn() }
+    const lb = createLoadingBarAdapter(api as any)
+    lb.start(); lb.finish(); lb.error()
+    expect(api.start).toHaveBeenCalled()
+    expect(api.finish).toHaveBeenCalled()
+    expect(api.error).toHaveBeenCalled()
+  })
+
+  it('falls back to window.$loadingBar', () => {
+    const api = { start: vi.fn(), finish: vi.fn(), error: vi.fn() }
+    ;(window as any).$loadingBar = api
+    createLoadingBarAdapter().start()
+    expect(api.start).toHaveBeenCalled()
+    delete (window as any).$loadingBar
+  })
+
+  it('no-ops when nothing available', () => {
+    delete (window as any).$loadingBar
+    expect(() => createLoadingBarAdapter().start()).not.toThrow()
+  })
+})
+
+describe('adapters/dialog', () => {
+  function mockApi() {
+    return {
+      success: vi.fn(),
+      error: vi.fn(),
+      warning: vi.fn(),
+      info: vi.fn(),
+      create: vi.fn(),
+    }
+  }
+
+  beforeEach(() => {
+    // happy-dom 20 no longer ships window.confirm/alert/prompt stubs;
+    // define no-op placeholders so vi.spyOn has a function to attach to.
+    if (typeof window.confirm !== 'function') window.confirm = () => false
+    if (typeof window.alert !== 'function') window.alert = () => {}
+    if (typeof window.prompt !== 'function') window.prompt = () => null
+  })
+
+  afterEach(() => {
+    delete (window as any).$dialog
+  })
+
+  it('confirm resolves true on positive click', async () => {
+    const api = mockApi()
+    api.warning.mockImplementation((opts: any) => { opts.onPositiveClick() })
+    const d = createDialogAdapter(api as any)
+    expect(await d.confirm('sure?')).toBe(true)
+  })
+
+  it('confirm resolves false on negative/close', async () => {
+    const api = mockApi()
+    api.warning.mockImplementation((opts: any) => { opts.onNegativeClick() })
+    expect(await createDialogAdapter(api as any).confirm('no')).toBe(false)
+    api.warning.mockImplementation((opts: any) => { opts.onClose() })
+    expect(await createDialogAdapter(api as any).confirm('x')).toBe(false)
+  })
+
+  it('confirm honors options.type and falls back to warning', async () => {
+    const api = mockApi()
+    api.error.mockImplementation((opts: any) => { opts.onPositiveClick() })
+    const d = createDialogAdapter(api as any)
+    await d.confirm('err', { type: 'error' } as any)
+    expect(api.error).toHaveBeenCalled()
+  })
+
+  it('confirm falls back to window.confirm when no api', async () => {
+    const spy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const d = createDialogAdapter()
+    expect(await d.confirm('fallback')).toBe(true)
+    spy.mockRestore()
+  })
+
+  it('alert resolves on positive click', async () => {
+    const api = mockApi()
+    api.info.mockImplementation((opts: any) => { opts.onPositiveClick() })
+    await expect(createDialogAdapter(api as any).alert('msg')).resolves.toBeUndefined()
+    expect(api.info).toHaveBeenCalled()
+  })
+
+  it('alert onClose also resolves', async () => {
+    const api = mockApi()
+    api.info.mockImplementation((opts: any) => { opts.onClose() })
+    await expect(createDialogAdapter(api as any).alert('msg')).resolves.toBeUndefined()
+  })
+
+  it('alert falls back to window.alert', async () => {
+    const spy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    await createDialogAdapter().alert('hi')
+    expect(spy).toHaveBeenCalledWith('hi')
+    spy.mockRestore()
+  })
+
+  it('prompt resolves input value on positive', async () => {
+    const api = mockApi()
+    api.create.mockImplementation((opts: any) => { opts.onPositiveClick() })
+    const d = createDialogAdapter(api as any)
+    const result = await d.prompt('name', { content: 'default' } as any)
+    expect(result).toBe('default')
+  })
+
+  it('prompt resolves null on negative/close', async () => {
+    const api = mockApi()
+    api.create.mockImplementation((opts: any) => { opts.onNegativeClick() })
+    expect(await createDialogAdapter(api as any).prompt('n')).toBeNull()
+    api.create.mockImplementation((opts: any) => { opts.onClose() })
+    expect(await createDialogAdapter(api as any).prompt('n')).toBeNull()
+  })
+
+  it('prompt falls back to window.prompt', async () => {
+    const spy = vi.spyOn(window, 'prompt').mockReturnValue('typed')
+    const d = createDialogAdapter()
+    expect(await d.prompt('name')).toBe('typed')
+    spy.mockRestore()
+  })
+
+  it('prompt fallback returns null when user cancels', async () => {
+    const spy = vi.spyOn(window, 'prompt').mockReturnValue(null)
+    expect(await createDialogAdapter().prompt('x')).toBeNull()
+    spy.mockRestore()
+  })
+
+  // Esc and a mask click close a naive dialog without calling onClose (that hook is the
+  // X button only); the one hook naive fires on every close path is onAfterLeave.
+  it('confirm resolves false when the dialog leaves without any button being pressed', async () => {
+    const api = mockApi()
+    api.warning.mockImplementation((opts: any) => { opts.onAfterLeave() })
+    expect(await createDialogAdapter(api as any).confirm('esc')).toBe(false)
+  })
+
+  it('alert resolves when the dialog leaves without any button being pressed', async () => {
+    const api = mockApi()
+    api.info.mockImplementation((opts: any) => { opts.onAfterLeave() })
+    await expect(createDialogAdapter(api as any).alert('esc')).resolves.toBeUndefined()
+  })
+
+  it('prompt resolves null when the dialog leaves without any button being pressed', async () => {
+    const api = mockApi()
+    api.create.mockImplementation((opts: any) => { opts.onAfterLeave() })
+    expect(await createDialogAdapter(api as any).prompt('esc')).toBeNull()
+  })
+
+  it('a button answer is not overwritten by the leave that follows it', async () => {
+    const api = mockApi()
+    api.warning.mockImplementation((opts: any) => {
+      opts.onPositiveClick()
+      opts.onAfterLeave()
+    })
+    expect(await createDialogAdapter(api as any).confirm('ok then leave')).toBe(true)
+
+    api.create.mockImplementation((opts: any) => {
+      opts.onPositiveClick()
+      opts.onAfterLeave()
+    })
+    expect(await createDialogAdapter(api as any).prompt('p', { content: 'typed' } as any)).toBe('typed')
+  })
+})
+
+describe('adapters/create-ui-adapter', () => {
+  it('creates a composite adapter with message/dialog/theme', () => {
+    const ui = createUiAdapter()
+    expect(ui.message).toBeDefined()
+    expect(ui.dialog).toBeDefined()
+    expect(ui.theme).toBeDefined()
+  })
+})

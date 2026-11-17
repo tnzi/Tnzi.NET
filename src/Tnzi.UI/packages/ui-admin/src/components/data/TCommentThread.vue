@@ -67,7 +67,8 @@
  */
 import { ref, watch } from 'vue'
 import { NAlert, NButton, NInput, NPopconfirm } from 'naive-ui'
-import { TSvgIcon, TAvatar, TRelativeTime } from '@tnzi/ui'
+import { TSvgIcon, TAvatar } from '@tnzi/ui'
+import TRelativeTime from '../display/TRelativeTime.vue'
 import { TEmpty } from '@tnzi/ui'
 
 export interface CommentItem {

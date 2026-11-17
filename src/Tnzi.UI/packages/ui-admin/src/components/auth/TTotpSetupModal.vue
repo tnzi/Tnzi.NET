@@ -47,7 +47,8 @@
  */
 import { ref, watch } from 'vue'
 import { NButton, NForm, NFormItem, NInput, NQrCode, NSpin } from 'naive-ui'
-import { TModalShell, useSafeMessage } from '@tnzi/ui'
+import TModalShell from '../overlay/TModalShell.vue'
+import { useSafeMessage } from '../../headless/useSafeMessage'
 import type { TotpSetupDto } from '@tnzi/core/services/identity'
 import { translatePageKey } from '../../i18n/translate'
 

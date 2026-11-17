@@ -5,6 +5,10 @@
  * Renders messages grouped by role using groupMessages().
  * Shows loading skeleton and streaming indicator; each message (tool calls
  * included) is drawn by TChatMessage.
+ *
+ * `readonly` shows a record rather than a conversation in progress: no actions,
+ * no Retry on a failed answer (its failure line stays), and no blank space kept
+ * at the bottom for a composer.
  */
 
 import { computed } from 'vue';
@@ -19,8 +23,11 @@ const props = withDefaults(defineProps<{
   messages: readonly ChatMessage[];
   /** Show loading skeleton when true and no messages. */
   loading?: boolean;
+  /** Read only: no actions or Retry on any message, no bottom space for a composer. */
+  readonly?: boolean;
 }>(), {
   loading: false,
+  readonly: false,
 });
 
 const emit = defineEmits<{
@@ -61,7 +68,9 @@ const isLastMessageStreaming = computed(() => {
         <template v-for="message in group.messages" :key="message.id">
           <TChatMessage
             :message="message"
+            :data-message-id="message.id"
             :show-actions="message.role === 'assistant'"
+            :readonly="readonly"
             @copy="emit('copy', $event)"
             @regenerate="emit('regenerate', $event)"
             @edit="emit('edit', $event)"
@@ -77,7 +86,7 @@ const isLastMessageStreaming = computed(() => {
       </div>
     </template>
 
-    <!-- Bottom padding spacer for scroll room -->
-    <div class="h-40" aria-hidden="true" />
+    <!-- Bottom padding spacer for scroll room (above a composer) -->
+    <div v-if="!readonly" class="h-40" aria-hidden="true" />
   </div>
 </template>

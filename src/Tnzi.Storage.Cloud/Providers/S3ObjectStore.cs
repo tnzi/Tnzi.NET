@@ -18,6 +18,7 @@ namespace Tnzi.Storage.Cloud.Providers;
 internal sealed class S3ObjectStore
 {
     private readonly IAmazonS3 _client;
+    private readonly IAmazonS3 _presignClient;
     private readonly string _bucketName;
     private readonly string _providerName;
     private readonly Protocol? _presignProtocol;
@@ -28,9 +29,15 @@ internal sealed class S3ObjectStore
     /// <param name="providerName">写进日志与异常消息的 provider 名（S3 / R2）。</param>
     /// <param name="presignProtocol">预签名 URL 的 scheme；null 表示沿用 SDK 的默认。</param>
     /// <param name="logger">日志记录器（可选）。</param>
-    public S3ObjectStore(IAmazonS3 client, string bucketName, string providerName, Protocol? presignProtocol, ILogger? logger)
+    /// <param name="presignClient">
+    /// 只用来签预签名 URL 的客户端（见 <see cref="S3PublicEndpoint"/>）；null 表示用 <paramref name="client"/> 签。
+    /// 生命周期归调用方。
+    /// </param>
+    public S3ObjectStore(IAmazonS3 client, string bucketName, string providerName, Protocol? presignProtocol, ILogger? logger,
+        IAmazonS3? presignClient = null)
     {
         _client = Check.NotNull(client);
+        _presignClient = presignClient ?? client;
         _bucketName = Check.NotNullOrEmpty(bucketName);
         _providerName = Check.NotNullOrEmpty(providerName);
         _presignProtocol = presignProtocol;
@@ -191,7 +198,7 @@ internal sealed class S3ObjectStore
             request.ResponseHeaderOverrides.ContentDisposition = "attachment";
         }
 
-        return _client.GetPreSignedURL(request);
+        return _presignClient.GetPreSignedURL(request);
     }
 
     public async Task<string?> CopyAsync(string sourceKey, string destKey)

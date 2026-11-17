@@ -86,7 +86,7 @@ describe('TChatApp defaults follow the dictionary', () => {
     settingsItem.click();
     await settle();
 
-    const navLabels = [...document.querySelectorAll('.t-settings__nav-item')].map((b) => b.textContent?.trim());
+    const navLabels = [...document.querySelectorAll('.t-settings__item')].map((b) => b.textContent?.trim());
     expect(navLabels).toEqual([zhCn.account.accountLabel, zhCn.settings.appearance, zhCn.settings.about]);
   });
 });
@@ -115,18 +115,19 @@ describe('TChatApp account menu', () => {
 
     // Land on another section first, so the test sees the dialog move.
     await pick(el, en.sidebar.settings);
-    const about = [...document.querySelectorAll('.t-settings__nav-item')].find(
+    const about = [...document.querySelectorAll('.t-settings__item')].find(
       (b) => b.textContent?.trim() === en.settings.about,
     ) as HTMLButtonElement;
     about.click();
     await settle();
-    (document.querySelector('.t-settings__close') as HTMLButtonElement).click();
+    (document.querySelector('.t-settings-dialog .t-dialog__close') as HTMLButtonElement).click();
     await settle();
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     await pick(el, en.account.accountLabel);
 
     expect(document.querySelector('.t-settings')).not.toBeNull();
-    expect(document.querySelector('.t-settings__nav-item--active')?.textContent?.trim()).toBe(
+    expect(document.querySelector('.t-settings__item.is-active')?.textContent?.trim()).toBe(
       en.account.accountLabel,
     );
     expect(onUserMenu).toHaveBeenLastCalledWith('account');
@@ -163,5 +164,40 @@ describe('TChatApp landing composer', () => {
     await settle();
 
     expect(onSend).not.toHaveBeenCalled();
+  });
+});
+
+describe('TChatApp top bar on a new chat', () => {
+  const title = (el: HTMLElement) => el.querySelector('.t-chat-app__workspace-switcher')?.textContent?.trim() ?? null;
+
+  it('is empty whatever the sidebar mode, and keeps its height and controls', async () => {
+    for (const initialSidebarMode of ['expanded', 'icon', 'hidden'] as const) {
+      const el = mountShell({ brandName: 'Acme', initialSidebarMode });
+      await settle();
+      expect(el.querySelector('.t-chat-app__topbar')).not.toBeNull();
+      expect(title(el)).toBeNull();
+      expect(el.querySelector('.t-chat-app__topbar-spacer')).not.toBeNull();
+      app?.unmount();
+      host?.remove();
+    }
+  });
+
+  it('with the sidebar hidden, the bar has the show-sidebar control and still no brand', async () => {
+    const el = mountShell({ brandName: 'Acme', initialSidebarMode: 'hidden' });
+    await settle();
+    expect(el.querySelector('.t-chat-app__topbar-toggle')).not.toBeNull();
+    expect(el.querySelector('.t-chat-app__topbar')?.textContent).not.toContain('Acme');
+  });
+
+  it('still names an open conversation and a view', async () => {
+    let el = mountShell({ brandName: 'Acme', threadTitle: 'Quarterly numbers', activeThreadId: 't1', messages: [{ id: 'm1', role: 'user', content: 'hi' }] });
+    await settle();
+    expect(title(el)).toBe('Quarterly numbers');
+    app?.unmount();
+    host?.remove();
+
+    el = mountShell({ brandName: 'Acme', builtinViews: ['agents'], view: 'agents' });
+    await settle();
+    expect(title(el)).toBe('Agents');
   });
 });

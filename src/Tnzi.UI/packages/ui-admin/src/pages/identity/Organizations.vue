@@ -44,7 +44,7 @@
           <div v-else>
             <header class="t-org-page__detail-header">
               <h3>{{ selectedNode.name }}</h3>
-              <NSpace>
+              <div class="flex flex-wrap items-center gap-x-12px gap-y-8px">
                 <NButton v-if="can('organization.create')" size="small" @click="openCreate(selectedNode.id)">
                   {{ t('addChild') }}
                 </NButton>
@@ -56,7 +56,7 @@
                   </template>
                   {{ t('confirmDelete') }}
                 </NPopconfirm>
-              </NSpace>
+              </div>
             </header>
             <NForm label-placement="left" label-width="100px">
               <NFormItem :label="t('fields.name')" required>
@@ -102,14 +102,14 @@
             <div class="t-org-page__members">
               <header class="t-org-page__section-header">
                 <h4 class="t-org-page__section-title">{{ t('members.title') }}</h4>
-                <NSpace align="center">
+                <div class="flex flex-wrap items-center gap-x-12px gap-y-8px">
                   <NCheckbox v-model:checked="members.includeChildren" @update:checked="reloadMembers">
                     {{ t('members.includeChildren') }}
                   </NCheckbox>
                   <NButton size="small" :loading="members.loading" @click="reloadMembers">
                     {{ t('refresh') }}
                   </NButton>
-                </NSpace>
+                </div>
               </header>
               <p class="t-org-page__hint">{{ t('members.hint') }}</p>
               <div v-if="can('user.update')" class="t-org-page__add-members">
@@ -207,7 +207,7 @@ import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, reactive, ref, h, onMounted, watch } from 'vue'
 import type { DataTableColumns, TreeOption } from 'naive-ui'
 import {
-  NTree, NSpace, NButton, NCheckbox, NInput, NInputNumber,
+  NTree, NButton, NCheckbox, NInput, NInputNumber,
   NSwitch, NSpin, NForm, NFormItem, NPopconfirm,
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'

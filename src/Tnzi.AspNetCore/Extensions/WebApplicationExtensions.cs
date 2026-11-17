@@ -38,34 +38,23 @@ public static class WebApplicationExtensions
     /// <summary>
     /// Run every registered <see cref="IPostMigrationStartupTask"/> once, AFTER the
     /// migration phase, on every boot. Framework infrastructure that needs the schema
-    /// to exist (e.g. syncing the code-declared permission catalogue + refreshing the
-    /// in-memory snapshot) registers a task here instead of doing DB work in module
-    /// init - which runs BEFORE migrations and fails on a brand-new empty database (the
-    /// old "boot the app twice" bug). Errors are isolated: a failing task logs and
-    /// startup continues. No-op when no tasks are registered.
+    /// to exist (e.g. syncing the code-declared permission catalogue) registers a task
+    /// here instead of doing DB work in module init - which runs BEFORE migrations and
+    /// fails on a brand-new empty database (the old "boot the app twice" bug).
+    /// Errors are isolated: a failing task logs and startup continues. Under
+    /// <c>AspNetCoreModule</c> a task that failed is then retried in the background with
+    /// exponential backoff until it completes, and the health check <c>startup-tasks</c>
+    /// reports it until then (<see cref="PostMigrationStartupTaskOptions"/>). A host
+    /// without the module runs each task once, as before. No-op when no tasks are
+    /// registered.
     /// </summary>
     public static async Task RunPostMigrationStartupTasksAsync(this WebApplication app)
     {
         var tasks = app.Services.GetServices<IPostMigrationStartupTask>().ToList();
-        if (tasks.Count == 0)
-        {
-            return;
-        }
-
-        var logger = app.Services.GetRequiredService<ILoggerFactory>()
-            .CreateLogger("Tnzi.PostMigrationStartup");
-        foreach (var task in tasks)
-        {
-            try
-            {
-                await task.ExecuteAsync(app.Services);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex,
-                    "Post-migration startup task {TaskType} failed; startup continues.", task.GetType().Name);
-            }
-        }
+        var runner = app.Services.GetService<PostMigrationStartupTaskRunner>()
+            ?? new PostMigrationStartupTaskRunner(
+                app.Services.GetRequiredService<ILoggerFactory>().CreateLogger<PostMigrationStartupTaskRunner>());
+        await runner.RunAllAsync(tasks, app.Services, app.Lifetime.ApplicationStopping);
     }
 
     /// <summary>

@@ -91,7 +91,12 @@ function outputText(row: CliTimelineToolRow): string {
 
 <template>
   <div ref="containerRef" class="t-cli-timeline t-ai-scroll" :class="{ 't-cli-timeline--scroll': autoScroll }">
-    <div v-for="row in rows" :key="row.key" class="t-cli-timeline__row">
+    <div
+      v-for="row in rows"
+      :key="row.key"
+      class="t-cli-timeline__row"
+      :class="{ 'is-sub-agent': 'parentCallId' in row && row.parentCallId }"
+    >
       <!-- Assistant text -->
       <p v-if="row.kind === 'text'" class="t-cli-timeline__text whitespace-pre-wrap">
         {{ row.content }}
@@ -151,6 +156,12 @@ function outputText(row: CliTimelineToolRow): string {
 </template>
 
 <style scoped>
+/* A sub-agent's words and calls, set in under the main agent's. */
+.t-cli-timeline__row.is-sub-agent {
+  margin-left: 16px;
+  padding-left: 10px;
+  border-left: 2px solid var(--tnzi-ai-border);
+}
 .t-cli-timeline {
   display: flex;
   flex-direction: column;

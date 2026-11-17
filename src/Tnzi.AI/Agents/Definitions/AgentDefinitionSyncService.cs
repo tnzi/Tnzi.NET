@@ -14,6 +14,11 @@ namespace Tnzi.AI.Agents.Definitions;
 /// 而运行时从不经提供者读（<c>AgentResolver</c> 只读 DB），改了文件直到重启才生效，
 /// 日志却写着 cache invalidated。删除文件不删 DB 行（只记警告）：误删一个文件不该顺手删掉线上 Agent。
 /// </para>
+/// <para>
+/// 一次同步没做完（整体抛出，或有定义写不进去）就按 <see cref="RetryDelay"/> 起退避重试，直到做完为止；
+/// 启动同步也一样，<b>与 <c>WatchForChanges</c> 无关</b>。以前启动那一刻数据库不可达、又没开文件监视时，
+/// YAML 里的 Agent 一直停在旧版本（或根本不存在）直到重启，只留下一条 Error。
+/// </para>
 /// </remarks>
 public class AgentDefinitionSyncService : BackgroundService
 {
@@ -22,13 +27,14 @@ public class AgentDefinitionSyncService : BackgroundService
     private readonly IOptionsMonitor<AIOptions> _options;
     private readonly ILogger<AgentDefinitionSyncService> _logger;
     private IDisposable? _subscription;
+    private bool _retryStartupSync;
     private readonly Channel<bool> _changeSignals = Channel.CreateBounded<bool>(new BoundedChannelOptions(1)
     {
         FullMode = BoundedChannelFullMode.DropWrite
     });
 
-    /// <summary>同步结果：写库条数 / 因哈希未变或数据库管理而跳过的条数</summary>
-    public readonly record struct SyncOutcome(int Synced, int Skipped);
+    /// <summary>同步结果：写库条数 / 因哈希未变或数据库管理而跳过的条数 / 写库失败（会被重试）的条数</summary>
+    public readonly record struct SyncOutcome(int Synced, int Skipped, int Failed);
 
     /// <summary>文件变更后的去抖窗口（连续保存只同步一次）</summary>
     public TimeSpan ChangeDebounce { get; init; } = TimeSpan.FromMilliseconds(500);
@@ -57,17 +63,18 @@ public class AgentDefinitionSyncService : BackgroundService
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
         var config = _options.CurrentValue.AgentDefinitions;
-        var startupSyncFailed = false;
+        var startupSyncIncomplete = false;
         if (config.Enabled && config.SyncOnStartup)
         {
             try
             {
-                await SyncAllAsync(cancellationToken);
+                var outcome = await SyncAllAsync(cancellationToken);
+                startupSyncIncomplete = outcome.Failed > 0;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Agent definition sync failed during startup");
-                startupSyncFailed = true;
+                _logger.LogError(ex, "Agent definition sync failed during startup; it is retried in the background");
+                startupSyncIncomplete = true;
             }
         }
         else
@@ -79,12 +86,13 @@ public class AgentDefinitionSyncService : BackgroundService
         if (config.Enabled && config.WatchForChanges)
         {
             _subscription = _definitionProvider.OnDefinitionsChanged(() => _changeSignals.Writer.TryWrite(true));
+        }
 
-            // 启动同步失败时交给变更循环重试，不必等到第一次改文件
-            if (startupSyncFailed)
-            {
-                _changeSignals.Writer.TryWrite(true);
-            }
+        // 启动同步没做完时交给同步循环重试，不必等到第一次改文件；没开文件监视也一样
+        if (startupSyncIncomplete)
+        {
+            _retryStartupSync = true;
+            _changeSignals.Writer.TryWrite(true);
         }
 
         await base.StartAsync(cancellationToken);
@@ -101,7 +109,7 @@ public class AgentDefinitionSyncService : BackgroundService
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (_subscription == null)
+        if (_subscription == null && !_retryStartupSync)
         {
             return;
         }
@@ -118,8 +126,13 @@ public class AgentDefinitionSyncService : BackgroundService
                 try
                 {
                     var outcome = await SyncAllAsync(stoppingToken);
+                    if (outcome.Failed > 0)
+                    {
+                        throw new InvalidOperationException($"{outcome.Failed} agent definition(s) could not be written to the database.");
+                    }
+
                     retryDelay = RetryDelay;
-                    _logger.LogInformation("Agent definitions re-synced after file change: {Synced} synced, {Skipped} skipped",
+                    _logger.LogInformation("Agent definitions re-synced: {Synced} synced, {Skipped} skipped",
                         outcome.Synced, outcome.Skipped);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -130,7 +143,7 @@ public class AgentDefinitionSyncService : BackgroundService
                 {
                     // 一次失败（SQLite 的 database is locked、数据库短暂不可达）不能让这次改动等到下一次存盘：
                     // 不重试的话数据库里的定义一直停在旧版本，留下的只有这一条错误日志。
-                    _logger.LogError(ex, "Agent definition re-sync after file change failed; retrying in {Delay}", retryDelay);
+                    _logger.LogError(ex, "Agent definition sync failed; retrying in {Delay}", retryDelay);
                     await Task.Delay(retryDelay, stoppingToken);
                     retryDelay = TimeSpan.FromTicks(Math.Min(retryDelay.Ticks * 2, MaxRetryDelay.Ticks));
                     _changeSignals.Writer.TryWrite(true);
@@ -164,6 +177,7 @@ public class AgentDefinitionSyncService : BackgroundService
 
         var synced = 0;
         var skipped = 0;
+        var failed = 0;
 
         foreach (var definition in definitions)
         {
@@ -177,8 +191,9 @@ public class AgentDefinitionSyncService : BackgroundService
                 else
                     skipped++;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
+                failed++;
                 _logger.LogWarning(ex, "Failed to sync agent definition '{Name}'", definition.Name);
             }
         }
@@ -192,9 +207,9 @@ public class AgentDefinitionSyncService : BackgroundService
         }
 
         _logger.LogInformation(
-            "Agent definition sync completed: {Synced} synced, {Skipped} skipped (unchanged or database-managed)",
-            synced, skipped);
-        return new SyncOutcome(synced, skipped);
+            "Agent definition sync completed: {Synced} synced, {Skipped} skipped (unchanged or database-managed), {Failed} failed",
+            synced, skipped, failed);
+        return new SyncOutcome(synced, skipped, failed);
     }
 
     private async Task<bool> SyncDefinitionAsync(IRepository<Agent, Guid> repository, IAgentGrantService grantService, AgentDefinitionDto definition, Dictionary<string, Agent> agentsByName, CancellationToken ct)

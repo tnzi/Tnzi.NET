@@ -25,6 +25,12 @@ internal sealed class CliReplayProcess : ICliProcess
 
     public string? ReattachHandle => _inner.ReattachHandle;
 
+    /// <summary>
+    /// 重放已经重新发出了进程停机前收到的全部 stdin 行：从这一刻起写出的行是新的，照常送到进程。
+    /// 在这之前插进来一行新的输入，它会顶掉一行旧的、被当成进程早已收到的丢掉。
+    /// </summary>
+    public bool CaughtUp => _transport.CaughtUp;
+
     public Task TerminateAsync(CancellationToken cancellationToken) => _inner.TerminateAsync(cancellationToken);
 
     public Task<int> WaitForExitAsync(CancellationToken cancellationToken) => _inner.WaitForExitAsync(cancellationToken);
@@ -57,6 +63,8 @@ internal sealed class CliReplayProcess : ICliProcess
         private long _writes;
 
         public string StderrTail => process.Transport.StderrTail;
+
+        public bool CaughtUp => Interlocked.Read(ref _writes) >= _alreadyReceived;
 
         public async IAsyncEnumerable<string> ReadLinesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {

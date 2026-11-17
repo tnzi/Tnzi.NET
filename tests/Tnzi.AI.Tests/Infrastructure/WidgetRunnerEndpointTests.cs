@@ -29,16 +29,20 @@ public class WidgetRunnerEndpointTests
 
             var policy = response.Headers.GetValues("Content-Security-Policy").Single();
             policy.ShouldBe(WidgetRunnerEndpoint.BuildContentSecurityPolicy("*"));
-            policy.ShouldStartWith("sandbox allow-scripts;");
+            // Forms fire submit (allow-forms) but cannot go anywhere (form-action 'none').
+            policy.ShouldStartWith("sandbox allow-scripts allow-forms;");
+            policy.ShouldContain("form-action 'none'");
             policy.ShouldContain("connect-src 'none'");
             policy.ShouldNotContain("allow-same-origin");
+            policy.ShouldNotContain("allow-popups");
+            policy.ShouldNotContain("allow-top-navigation");
 
             // The security-headers middleware sets DENY on every response; framing is this page's purpose.
             response.Headers.Contains("X-Frame-Options").ShouldBeFalse();
 
             var html = await response.Content.ReadAsStringAsync();
             html.ShouldContain("ui/notifications/sandbox-proxy-ready");
-            html.ShouldContain("sandbox', 'allow-scripts'");
+            html.ShouldContain("sandbox', 'allow-scripts allow-forms'");
 
             app.Services.GetRequiredService<IToolRegistry>().GetAllTools()
                 .ShouldContain(t => t.Name == WidgetToolDefinition.Name && t.GroupName == WidgetToolDefinition.GroupName);

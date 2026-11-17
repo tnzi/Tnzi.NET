@@ -15,21 +15,21 @@
  * @example
  * ```ts
  * import { bundleTnziIcons } from '@tnzi/ui-ai/icons'
- * import { icons as lineMd } from '@iconify-json/line-md'
  * import { icons as lucide } from '@iconify-json/lucide'
  * import { icons as mdi } from '@iconify-json/mdi'
  * import { icons as simpleIcons } from '@iconify-json/simple-icons'
  *
- * bundleTnziIcons([lineMd, lucide, mdi, simpleIcons])
+ * bundleTnziIcons([lucide, mdi, simpleIcons])
  * ```
  */
-import { _api, addCollection, type IconifyJSON } from '@iconify/vue'
+import { addCollection, type IconifyJSON } from '@iconify/vue'
 import { getIcons } from '@iconify/utils'
 
-/** Every Iconify name `@tnzi/ui-ai` and its @tnzi dependencies can render (164 names, 4 collections). */
+export { disableRemoteIcons } from '../controls-icons'
+
+/** Every Iconify name `@tnzi/ui-ai` and its @tnzi dependencies can render (142 names, 3 collections). */
 export const tnziIconNames: readonly string[] = [
-  'line-md:menu-fold-left',
-  'line-md:menu-fold-right',
+  'lucide:activity',
   'lucide:alert-circle',
   'lucide:alert-triangle',
   'lucide:archive',
@@ -45,11 +45,13 @@ export const tnziIconNames: readonly string[] = [
   'lucide:bot',
   'lucide:braces',
   'lucide:brain',
+  'lucide:camera',
   'lucide:check',
   'lucide:check-circle-2',
   'lucide:chevron-down',
   'lucide:chevron-left',
   'lucide:chevron-right',
+  'lucide:chevron-up',
   'lucide:chevrons-up-down',
   'lucide:circle',
   'lucide:circle-alert',
@@ -57,6 +59,7 @@ export const tnziIconNames: readonly string[] = [
   'lucide:circle-dashed',
   'lucide:circle-user-round',
   'lucide:clock',
+  'lucide:cloud-off',
   'lucide:code',
   'lucide:command',
   'lucide:copy',
@@ -66,11 +69,14 @@ export const tnziIconNames: readonly string[] = [
   'lucide:download',
   'lucide:ellipsis',
   'lucide:external-link',
+  'lucide:eye',
+  'lucide:eye-off',
   'lucide:file',
   'lucide:file-archive',
   'lucide:file-audio',
   'lucide:file-code',
   'lucide:file-code-2',
+  'lucide:file-pen',
   'lucide:file-text',
   'lucide:file-type',
   'lucide:file-video',
@@ -78,20 +84,26 @@ export const tnziIconNames: readonly string[] = [
   'lucide:folder-open',
   'lucide:gauge',
   'lucide:globe',
+  'lucide:hand',
   'lucide:history',
   'lucide:hourglass',
   'lucide:house',
   'lucide:image',
+  'lucide:inbox',
   'lucide:info',
   'lucide:library',
   'lucide:link',
+  'lucide:list-checks',
+  'lucide:list-ordered',
   'lucide:loader-2',
   'lucide:loader-circle',
   'lucide:log-out',
   'lucide:maximize-2',
   'lucide:message-circle',
+  'lucide:message-circle-question',
   'lucide:message-square',
   'lucide:message-square-plus',
+  'lucide:messages-square',
   'lucide:mic',
   'lucide:minimize-2',
   'lucide:minus',
@@ -115,6 +127,7 @@ export const tnziIconNames: readonly string[] = [
   'lucide:settings',
   'lucide:settings-2',
   'lucide:shield-check',
+  'lucide:shield-question',
   'lucide:sliders-horizontal',
   'lucide:smartphone',
   'lucide:sparkles',
@@ -137,55 +150,21 @@ export const tnziIconNames: readonly string[] = [
   'lucide:x',
   'lucide:x-circle',
   'lucide:zap',
-  'mdi:alert-circle-outline',
+  'lucide:zoom-in',
+  'lucide:zoom-out',
   'mdi:android',
   'mdi:apple',
   'mdi:apple-ios',
-  'mdi:arrow-down-bold',
-  'mdi:arrow-up-bold',
-  'mdi:check-circle-outline',
-  'mdi:close',
-  'mdi:close-circle-outline',
-  'mdi:code-tags',
-  'mdi:database',
   'mdi:devices',
-  'mdi:drag',
   'mdi:facebook',
-  'mdi:file-document-outline',
-  'mdi:file-excel-box',
-  'mdi:file-outline',
-  'mdi:file-pdf-box',
-  'mdi:file-word-box',
-  'mdi:folder-cog-outline',
-  'mdi:folder-outline',
-  'mdi:folder-zip-outline',
-  'mdi:fullscreen',
-  'mdi:fullscreen-exit',
   'mdi:github',
   'mdi:google',
-  'mdi:help-circle-outline',
-  'mdi:image-broken-variant',
   'mdi:inbox-outline',
-  'mdi:information-outline',
-  'mdi:laptop',
-  'mdi:lightbulb-outline',
   'mdi:linux',
   'mdi:login-variant',
   'mdi:microsoft',
   'mdi:microsoft-windows',
-  'mdi:minus',
-  'mdi:package-variant-closed',
-  'mdi:pin',
-  'mdi:pin-outline',
-  'mdi:plus',
-  'mdi:puzzle-outline',
-  'mdi:refresh',
-  'mdi:theme-light-dark',
-  'mdi:translate',
-  'mdi:tune',
   'mdi:twitter',
-  'mdi:weather-night',
-  'mdi:weather-sunny',
   'mdi:wechat',
   'simple-icons:anthropic',
   'simple-icons:cursor',
@@ -208,7 +187,6 @@ const bareNames = (prefix: string): readonly string[] =>
  * {@link tnziIconNames} when you want the qualified form.
  */
 export const tnziIconsByPrefix: Readonly<Record<string, readonly string[]>> = {
-  'line-md': bareNames('line-md'),
   'lucide': bareNames('lucide'),
   'mdi': bareNames('mdi'),
   'simple-icons': bareNames('simple-icons'),
@@ -306,21 +284,4 @@ export function bundleTnziIcons(collections: readonly IconifyJSON[]): TnziIconBu
   const { subsets, ...report } = selectTnziIcons(collections)
   for (const subset of subsets) addCollection(subset)
   return report
-}
-
-/**
- * Stops `@iconify/vue` from asking the public Iconify API for an icon it does
- * not have. Registering the framework's icons (above) makes them local; this
- * makes that the only source: an icon nobody registered (the application's
- * own, one named in data) renders blank instead of being fetched, so no icon
- * request ever leaves the page. An application that cannot reach the network,
- * or must not tell a third party what its users are looking at, wants both.
- *
- * Call it once, before mounting. Register the application's own icons the same
- * way (`addCollection`); anything missed then shows up as a blank square in
- * development rather than as a request in production. Only the default provider
- * is affected: one added with `addAPIProvider` keeps working.
- */
-export function disableRemoteIcons(): void {
-  _api.setAPIModule('', { prepare: () => [], send: () => {} })
 }

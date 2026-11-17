@@ -26,7 +26,7 @@
  */
 import type { App, InjectionKey } from 'vue'
 import { inject } from 'vue'
-import type { WorkbenchConfig } from '@tnzi/ui'
+import type { WorkbenchConfig } from '../components/widgets/widget-types'
 
 export type AdminDashboardConfig = WorkbenchConfig
 

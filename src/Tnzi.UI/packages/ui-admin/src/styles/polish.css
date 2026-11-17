@@ -284,17 +284,28 @@ body *::-webkit-scrollbar-thumb:active {
   overflow-y: auto;
 }
 /* Card-in-a-card flattening. When a full list-shell page (TCrudPage table /
-   TCardPage cards) is embedded as a tab's content, its own white list-card
-   would double the tab container's surface - a second card + a second 12px
-   inset + a stray shadow, pushing the content out of line with the tab bar.
-   Drop the inner card's shadow and its content padding so the table OR the
-   card grid sits flush inside the pane. Tables and cards are treated alike, so
-   this is the single owner of the fix (was a per-page scoped hack on Taxes). */
-.t-table-tabs .t-list-shell__list-card {
+   TCardPage cards / TItemPage rows) is embedded as a tab's content, the tab
+   container IS the card: it already draws the card tier's border + shadow
+   pair and carries the 12px inset (`padding: 0 12px 12px` above). The list's
+   own card would double all of it - a second inset pushing the content out of
+   line with the tab bar, and a second chrome drawn 1px inside the first. So
+   the inner card stops being a card: no border AND no shadow (C20: the pair
+   goes together - keeping only the border is what put the toolbar and the
+   refresh button against a hairline under `outlined`), no background of its
+   own (under `elevated` / `flat` the nesting step would otherwise paint a
+   second, insetless panel), no content padding. The toolbar, table and card
+   grid then sit 12px inside the tab container's border - the same rhythm as a
+   top-level list card - under every surface style. Tables, tiles and rows are
+   treated alike, so this is the single owner of the fix. The `.n-card`
+   compound outranks the shell's own scoped card rules (0,2,0 / 0,3,0), so the
+   result does not hang on which stylesheet happens to load last. */
+.t-table-tabs .t-list-shell__list-card.n-card {
+  background: transparent;
+  border: none;
   box-shadow: none;
 }
-.t-table-tabs .t-list-shell__list-card > .n-card__content,
-.t-table-tabs .t-list-shell__list-card > .n-card-content {
+.t-table-tabs .t-list-shell__list-card.n-card > .n-card__content,
+.t-table-tabs .t-list-shell__list-card.n-card > .n-card-content {
   padding: 0;
 }
 /* Titled section flush on a tab surface (opt-in `class="t-tab-card"`). A page
@@ -664,9 +675,7 @@ body *::-webkit-scrollbar-thumb:active {
 }
 
 /* ===== Naive UI button restoration =====
- * Lives in `@tnzi/ui` (styles/naive-buttons.css), which this stylesheet
- * imports: every package that renders naive buttons needs it, not only the
- * admin shell. */
+ * Lives in `naive-buttons.css` beside this file, imported by `index.css`. */
 
 /* ===== Naive UI image-preview toolbar icon restoration (UnoCSS preflight) =====
  *

@@ -1,7 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { HttpClient } from '../../src/http/http';
 import { useChatApi } from '../../src/services/ai/api';
-import { useAdminCliRunApi, useCliRunApi, CliPermissionOptionKind } from '../../src/services/ai/cli';
+import {
+  useAdminCliRunApi,
+  useCliRunApi,
+  CliPermissionOptionKind,
+  CliInteractionOptionId,
+  type CliPermissionAnswerDto,
+} from '../../src/services/ai/cli';
 
 /**
  * Answering an external agent's permission request: the chat endpoint, the user endpoint for your own
@@ -39,6 +45,16 @@ describe('permission request answers', () => {
     const client = mockClient();
     await useAdminCliRunApi(client).answerPermission('r-1', 'p-1', answer);
     expect(client.calls).toEqual([{ url: '/admin/ai/cli-runs/r-1/permissions/p-1', body: answer }]);
+  });
+
+  it('a question is answered through the same endpoint, with the answers keyed by question', async () => {
+    const client = mockClient();
+    const answers: CliPermissionAnswerDto = {
+      optionId: CliInteractionOptionId.Submit,
+      answers: { 'Which color do you prefer?': ['Blue'], 'Which extras?': ['Stripes', 'Dots'] },
+    };
+    await useChatApi(client).answerRunPermission('r-1', 'q-1', answers);
+    expect(client.calls).toEqual([{ url: '/chat/runs/r-1/permissions/q-1', body: answers }]);
   });
 
   it('encodes the ids it puts into the path', async () => {

@@ -171,6 +171,155 @@ internal static class TiffSamples
         return bytes;
     }
 
+    /// <summary>TIFF 压缩方式（标签 259）里本测试要用到的几个值。</summary>
+    public const ushort CompressionNone = 1;
+    public const ushort CompressionModifiedHuffman = 2;
+    public const ushort CompressionCcittT4 = 3;
+    public const ushort CompressionCcittT6 = 4;
+    public const ushort CompressionLzw = 5;
+
+    /// <summary>
+    /// 一页的描述：尺寸、压缩方式、条带还是分块、像素数据（已按该压缩方式编好）。
+    /// </summary>
+    /// <param name="Width">页宽</param>
+    /// <param name="Height">页高</param>
+    /// <param name="Compression">压缩方式（标签 259）</param>
+    /// <param name="Tiled">分块存储（整页一块）还是条带存储（整页一条）</param>
+    /// <param name="Data">按压缩方式编好的像素数据</param>
+    /// <param name="BitsPerSample">CCITT 页为 1，其余为 8</param>
+    /// <param name="CompressionAsLong">压缩方式按 LONG 而不是 SHORT 写（规范写 SHORT，读取方都要认两种）</param>
+    public sealed record Page(int Width, int Height, ushort Compression, bool Tiled, byte[] Data, int BitsPerSample, bool CompressionAsLong = false);
+
+    /// <summary>
+    /// 一页 CCITT 压缩的页，像素数据是随便填的：拒绝发生在解码之前，数据不会被读到。
+    /// 分块时整页 64×16 是一块（TIFF 要求块边长是 16 的倍数）。
+    /// </summary>
+    public static Page Ccitt(ushort compression, bool tiled, bool compressionAsLong = false)
+        => tiled
+            ? new Page(64, 16, compression, Tiled: true, Data: new byte[32], BitsPerSample: 1, compressionAsLong)
+            : new Page(8, 2, compression, Tiled: false, Data: [0xC0], BitsPerSample: 1, compressionAsLong);
+
+    /// <summary>
+    /// 条带存储、CCITT Group 4（T6）压缩的全白页：每一行是一个 V0 码字（一个比特 <c>1</c>，
+    /// 参考行全白时 a1 = b1 = 行宽，一行即告结束）。这是扫描件与传真件最常见的形态，必须照常解得开。
+    /// </summary>
+    public static Page WhiteGroup4Strip(int width, int height)
+    {
+        var data = new byte[(height + 7) / 8];
+        for (var row = 0; row < height; row++)
+        {
+            data[row / 8] |= (byte)(0x80 >> (row % 8));
+        }
+
+        return new Page(width, height, CompressionCcittT6, Tiled: false, data, BitsPerSample: 1);
+    }
+
+    /// <summary>不压缩的 8 位灰度页；分块时整页是一块，边长须为 16 的倍数。</summary>
+    public static Page Uncompressed(int width, int height, bool tiled = false)
+    {
+        var data = new byte[width * height];
+        for (var i = 0; i < data.Length; i++)
+        {
+            data[i] = (byte)(i * 7);
+        }
+
+        return new Page(width, height, CompressionNone, tiled, data, BitsPerSample: 8);
+    }
+
+    /// <summary>
+    /// 按页拼出经典 TIFF（魔数 42）。条带页写 StripOffsets/RowsPerStrip/StripByteCounts，分块页写 TileWidth/TileLength/
+    /// TileOffsets/TileByteCounts（整页一块）；CCITT 页的光度解释为 WhiteIsZero。
+    /// </summary>
+    public static byte[] Pages(bool bigEndian, params Page[] pages)
+    {
+        var layouts = pages.Select(page => (Page: page, Entries: EntriesFor(page))).ToList();
+
+        var cursor = 8;
+        var ifdOffsets = new int[pages.Length];
+        for (var i = 0; i < layouts.Count; i++)
+        {
+            ifdOffsets[i] = cursor;
+            cursor += 2 + (layouts[i].Entries.Count * 12) + 4;
+        }
+
+        var dataOffsets = new int[pages.Length];
+        for (var i = 0; i < layouts.Count; i++)
+        {
+            dataOffsets[i] = cursor;
+            cursor += layouts[i].Page.Data.Length;
+        }
+
+        var bytes = new byte[cursor];
+        WriteByteOrderMark(bytes, bigEndian);
+        WriteUInt16(bytes, 2, ClassicMagic, bigEndian);
+        WriteUInt32(bytes, 4, (uint)ifdOffsets[0], bigEndian);
+
+        for (var i = 0; i < layouts.Count; i++)
+        {
+            var (page, entries) = layouts[i];
+            var at = ifdOffsets[i];
+            WriteUInt16(bytes, at, (ushort)entries.Count, bigEndian);
+            for (var e = 0; e < entries.Count; e++)
+            {
+                var entry = at + 2 + (e * 12);
+                var (tag, type, value) = entries[e];
+                if (tag is 273 or 324)
+                {
+                    value = (uint)dataOffsets[i];
+                }
+
+                WriteUInt16(bytes, entry, tag, bigEndian);
+                WriteUInt16(bytes, entry + 2, type, bigEndian);
+                WriteUInt32(bytes, entry + 4, 1, bigEndian);
+                if (type == TypeShort)
+                    WriteUInt16(bytes, entry + 8, (ushort)value, bigEndian);
+                else
+                    WriteUInt32(bytes, entry + 8, value, bigEndian);
+            }
+
+            var next = i + 1 < layouts.Count ? (uint)ifdOffsets[i + 1] : 0u;
+            WriteUInt32(bytes, at + 2 + (entries.Count * 12), next, bigEndian);
+
+            page.Data.CopyTo(bytes, dataOffsets[i]);
+
+        }
+
+        return bytes;
+    }
+
+
+    private static List<(ushort Tag, ushort Type, uint Value)> EntriesFor(Page page)
+    {
+        var photometric = page.BitsPerSample == 1 ? (uint)0 : 1; // WhiteIsZero : BlackIsZero
+        var compressionType = page.CompressionAsLong ? TypeLong : TypeShort;
+        var entries = new List<(ushort Tag, ushort Type, uint Value)>
+        {
+            (256, TypeLong, (uint)page.Width),
+            (257, TypeLong, (uint)page.Height),
+            (258, TypeShort, (uint)page.BitsPerSample),
+            (259, compressionType, page.Compression),
+            (262, TypeShort, photometric)
+        };
+
+        if (page.Tiled)
+        {
+            entries.Add((277, TypeShort, 1));
+            entries.Add((322, TypeShort, (uint)page.Width));
+            entries.Add((323, TypeShort, (uint)page.Height));
+            entries.Add((324, TypeLong, 0));
+            entries.Add((325, TypeLong, (uint)page.Data.Length));
+        }
+        else
+        {
+            entries.Add((273, TypeLong, 0));
+            entries.Add((277, TypeShort, 1));
+            entries.Add((278, TypeLong, (uint)page.Height));
+            entries.Add((279, TypeLong, (uint)page.Data.Length));
+        }
+
+        return entries;
+    }
+
     /// <summary><see cref="ClassicGrayscale"/> 在 (x, y) 处写入的灰度值。</summary>
     public static byte PixelValue(int x, int y, int width) => (byte)(10 + (40 * ((y * width) + x)));
 

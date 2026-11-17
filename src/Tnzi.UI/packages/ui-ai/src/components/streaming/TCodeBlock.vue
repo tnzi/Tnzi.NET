@@ -6,9 +6,8 @@
  * Falls back to plain <pre><code> while shiki loads.
  */
 
-import { NButton } from 'naive-ui';
 import { computed, ref, onBeforeUnmount } from 'vue';
-import { Icon } from '@iconify/vue';
+import TIconButton from '../controls/TIconButton.vue';
 import { useCodeHighlight } from '../../headless/useCodeHighlight';
 import { useAiI18n } from '../../i18n/index';
 
@@ -64,20 +63,14 @@ onBeforeUnmount(() => {
       <span v-else>&nbsp;</span>
       <div class="flex items-center gap-1">
         <slot name="actions" />
-        <NButton
-          text
-          size="small"
-          :aria-label="isCopied ? t.chat.copied : t.chat.copyCode"
+        <TIconButton
+          :icon="isCopied ? 'lucide:check' : 'lucide:copy'"
+          size="xs"
+          class="t-code-block__copy"
+          :class="{ 't-code-block__copy--done': isCopied }"
+          :label="isCopied ? t.chat.copied : t.chat.copyCode"
           @click="handleCopy"
-        >
-          <template #icon>
-            <Icon
-              :icon="isCopied ? 'lucide:check' : 'lucide:copy'"
-              class="size-3.5"
-              :class="{ 't-code-block__copy--done': isCopied }"
-            />
-          </template>
-        </NButton>
+        />
       </div>
     </div>
 
@@ -108,13 +101,13 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 12px;
+  padding: 2px 4px 2px 12px;
   font-size: 12px;
-  color: var(--tnzi-base-text-muted);
-  border-bottom: 1px solid color-mix(in srgb, var(--tnzi-border) 50%, transparent);
+  color: var(--tnzi-ai-text-secondary);
+  border-bottom: 1px solid color-mix(in srgb, var(--tnzi-ai-border) 50%, transparent);
 }
-.t-code-block__lang { color: var(--tnzi-base-text-muted); }
-.t-code-block__copy--done { color: var(--tnzi-ai-node-completed); }
+.t-code-block__lang { color: var(--tnzi-ai-text-secondary); }
+.t-code-block__copy.t-code-block__copy--done { color: var(--tnzi-ai-success); }
 .t-code-block__highlighted {
   overflow-x: auto;
   position: relative;

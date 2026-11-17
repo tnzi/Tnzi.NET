@@ -19,6 +19,11 @@ public class AiChatOptionsValidator : OptionsValidatorBase<AiChatOptions>
             errors.Add("AI:Chat:Attachments:MaxBytes must be greater than 0.");
         }
 
+        if (options.Attachments.MaxFileBytes <= 0)
+        {
+            errors.Add("AI:Chat:Attachments:MaxFileBytes must be greater than 0.");
+        }
+
         if (options.Attachments.MaxCount <= 0)
         {
             errors.Add("AI:Chat:Attachments:MaxCount must be greater than 0.");
@@ -38,6 +43,56 @@ public class AiChatOptionsValidator : OptionsValidatorBase<AiChatOptions>
             if (options.Metadata.MaxBytes is <= 0 or > 65536)
             {
                 errors.Add("AI:Chat:Metadata:MaxBytes must be between 1 and 65536.");
+            }
+        }
+
+        if (options.AllowedThreadOrigins?.FirstOrDefault(origin => !ThreadOrigin.IsWellFormed(origin)) is { } badOrigin)
+        {
+            errors.Add($"AI:Chat:AllowedThreadOrigins contains '{badOrigin}', which is not a well-formed thread origin " +
+                       $"(a letter, then letters, digits, '_', '.', ':' or '-', at most {ThreadOrigin.MaxLength} characters).");
+        }
+
+        if (options.Queue is null)
+        {
+            errors.Add("AI:Chat:Queue must not be null.");
+        }
+        else
+        {
+            if (options.Queue.MaxMessagesPerThread <= 0)
+            {
+                errors.Add("AI:Chat:Queue:MaxMessagesPerThread must be greater than 0.");
+            }
+
+            if (options.Queue.MaxTextLength <= 0)
+            {
+                errors.Add("AI:Chat:Queue:MaxTextLength must be greater than 0.");
+            }
+
+            if (options.Queue.SweepInterval < TimeSpan.FromSeconds(1))
+            {
+                errors.Add("AI:Chat:Queue:SweepInterval must be at least 1 second.");
+            }
+
+            if (options.Queue.StrandedAfter <= TimeSpan.Zero)
+            {
+                errors.Add("AI:Chat:Queue:StrandedAfter must be greater than 0.");
+            }
+
+            if (options.Queue.DeliveringTimeout <= TimeSpan.Zero)
+            {
+                errors.Add("AI:Chat:Queue:DeliveringTimeout must be greater than 0.");
+            }
+
+            foreach (var (key, ranking) in options.Queue.StrictestValues ?? [])
+            {
+                if (ranking is not { Count: > 0 } || ranking.Any(string.IsNullOrEmpty))
+                {
+                    errors.Add($"AI:Chat:Queue:StrictestValues:{key} must list at least one value, none of them empty.");
+                }
+                else if (ranking.Distinct(StringComparer.Ordinal).Count() != ranking.Count)
+                {
+                    errors.Add($"AI:Chat:Queue:StrictestValues:{key} lists the same value more than once.");
+                }
             }
         }
 
@@ -62,6 +117,14 @@ public class AiChatOptionsValidator : OptionsValidatorBase<AiChatOptions>
             if (duplicates.Count > 0)
             {
                 errors.Add($"AI:Chat:Models lists the same model more than once: {string.Join(", ", duplicates)}.");
+            }
+
+            foreach (var model in models.Where(m => m is not null && !string.IsNullOrWhiteSpace(m.Id)))
+            {
+                if (ChatModelEfforts.Validate(model.Efforts, model.DefaultEffort) is { } invalid)
+                {
+                    errors.Add($"AI:Chat:Models '{model.Id.Trim()}': {invalid}");
+                }
             }
         }
     }

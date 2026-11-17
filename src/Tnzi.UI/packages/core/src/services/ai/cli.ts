@@ -11,6 +11,7 @@
 
 import type { HttpClient } from '../../http/http';
 import type { PagedList, PagedQueryDto } from '../../types/pagination';
+import type { CliBackgroundTask } from './types';
 
 // ---------------------------------------------------------------------------
 // Enums (mirrored from Tnzi.AI.Metadata - PascalCase string wire form)
@@ -45,10 +46,32 @@ export const CliAgentEventType = {
   Status: 'Status',
   Error: 'Error',
   Log: 'Log',
-  /** The CLI asks to be allowed an action ("ask me" mode, someone attending the turn). Answer with `answerPermission`. */
+  /**
+   * The run waits for the person attending the turn: to allow an action, to answer the agent's questions, or to
+   * approve its plan (`permission.kind`). Answer with `answerPermission`.
+   */
   PermissionRequest: 'PermissionRequest',
-  /** A permission request got its outcome (allowed, denied, timed out, ended with the run). */
+  /** A request got its outcome (allowed, denied, timed out, ended with the run). */
   PermissionResolved: 'PermissionResolved',
+  /**
+   * One turn ended inside the run and the CLI goes on (it still has background tasks and starts another turn when
+   * they finish). `turn` carries the stored answer's id and the running tasks; events after it are the next answer.
+   */
+  TurnCompleted: 'TurnCompleted',
+  /** The CLI compacted the conversation's context; `compaction` carries the trigger and the token counts. */
+  Compacted: 'Compacted',
+  /**
+   * A CLI task started, made progress or finished: a sub-agent (claude's `Agent` tool) or a command running in the
+   * background. `callId` is the call that started it, `task` its kind, description, state and usage; `parentCallId`
+   * the sub-agent that dispatched this one, when nested. Stop one with `useChatApi().stopTask`.
+   */
+  Task: 'Task',
+  /**
+   * A message the user queued while the turn ran reached the agent (`userMessage`): taken in between two of its steps
+   * (`taken`; the answer before it and the message itself are stored in the thread, and events after it answer it), or
+   * declined by the CLI (it is held in the queue with the reason).
+   */
+  UserMessage: 'UserMessage',
 } as const;
 export type CliAgentEventType = (typeof CliAgentEventType)[keyof typeof CliAgentEventType];
 
@@ -75,6 +98,57 @@ export const CliPermissionOptionKind = {
   RejectAlways: 'reject_always',
 } as const;
 
+/**
+ * What a `PermissionRequest` waits for (`CliAgentPermission.kind`). All three share the event, the answer
+ * endpoint and the timeout / cancel / restart rules.
+ */
+export const CliInteractionKind = {
+  /** An action the permission mode does not allow by itself ("ask me" and "plan" modes). */
+  Permission: 'permission',
+  /** The agent asks the user questions with options (`questions`). Answer `submit` with `answers`, or `decline`. */
+  Question: 'question',
+  /** The agent hands over its plan (`plan`) and asks to start. Answer `approve` / `approve_accept_edits` / `reject`. */
+  Plan: 'plan',
+} as const;
+export type CliInteractionKind = (typeof CliInteractionKind)[keyof typeof CliInteractionKind];
+
+/** Where a plan request's `plan` came from (`CliAgentPermission.planSource`). */
+export const CliPlanSource = {
+  /** The plan the agent passed to ExitPlanMode (from the CLI's request, or from the agent's tool call when the CLI dropped it). */
+  Input: 'input',
+  /** No plan was passed: the agent's reply text since plan mode began (sub-agents and thinking left out). */
+  AssistantText: 'assistant_text',
+  /** No plan and no reply text: the thinking the CLI sent since plan mode began. A draft; say so when showing it. */
+  AssistantThinking: 'assistant_thinking',
+} as const;
+export type CliPlanSource = (typeof CliPlanSource)[keyof typeof CliPlanSource];
+
+/** Option ids the framework offers on question and plan requests (permission requests use the kinds as ids). */
+export const CliInteractionOptionId = {
+  /** Question: hand over the answers (`answers` required). */
+  Submit: 'submit',
+  /** Question: do not answer. The agent is told there is no answer, never given empty ones. */
+  Decline: 'decline',
+  /** Plan: approve and continue in the run's mode (a run started in plan mode asks before edits). */
+  Approve: 'approve',
+  /** Plan: approve, and stop asking about file edits for this session. Only on runs started in plan mode. */
+  ApproveAcceptEdits: 'approve_accept_edits',
+  /** Plan: keep planning; the answer's `message` is handed to the agent as feedback. */
+  Reject: 'reject',
+} as const;
+
+/** One question the agent asks (an item of claude's `AskUserQuestion`). */
+export interface CliQuestion {
+  /** The question text. Answers are keyed by it. */
+  question: string;
+  /** A very short label (e.g. "Auth method"), when given. */
+  header?: string | null;
+  /** The choices. The user may also write an answer of their own. */
+  options: { label: string; description?: string | null }[];
+  /** True when more than one choice may be picked. */
+  multiSelect: boolean;
+}
+
 /** One answer a permission request offers. Answer with its `id`. */
 export interface CliPermissionOption {
   id: string;
@@ -91,6 +165,19 @@ export interface CliPermissionOption {
 export interface CliAgentPermission {
   /** The id to answer with; the outcome event carries the same id. */
   requestId?: string | null;
+  /** What the request waits for; one of `CliInteractionKind` (missing on requests stored before kinds existed = `permission`). */
+  kind?: CliInteractionKind | string;
+  /** Question requests: the questions, in the agent's order. */
+  questions?: CliQuestion[] | null;
+  /**
+   * Plan requests: the plan (markdown). When the CLI hands over none (no Write tool, so no plan file), the framework
+   * fills it from what the agent wrote since plan mode began; `planSource` says which. Null when there was nothing.
+   */
+  plan?: string | null;
+  /** Where `plan` came from: one of `CliPlanSource`; null without a plan. */
+  planSource?: CliPlanSource | string | null;
+  /** Outcome of an answered question: question text to the answers given. */
+  answers?: Record<string, string[]> | null;
   title?: string | null;
   /** Why the CLI asks, when it says. */
   reason?: string | null;
@@ -107,12 +194,20 @@ export interface CliAgentPermission {
   answeredBy?: string | null;
 }
 
-/** Answer to a permission request. */
+/** Answer to a permission, question or plan request. */
 export interface CliPermissionAnswerDto {
   /** One of the request's `options[].id`. */
   optionId: string;
-  /** When refusing: a note handed to the agent (e.g. what to do instead). Ignored when allowing. */
+  /**
+   * When refusing: a note handed to the agent (e.g. what to do instead; for a plan, feedback on it).
+   * Ignored when allowing.
+   */
   message?: string | null;
+  /**
+   * Question requests answered with `submit`: question text to its answers. Every question needs one;
+   * a single-choice question exactly one. Usually option labels, or the user's own words.
+   */
+  answers?: Record<string, string[]> | null;
 }
 
 /**
@@ -154,6 +249,11 @@ export const CliRunFailureReason = {
    * not connect within the activation timeout. No process was started.
    */
   TargetUnavailable: 'TargetUnavailable',
+  /**
+   * The turn carried input the CLI cannot take: an image, sent to a runtime that
+   * reported at its handshake that it accepts none. Nothing was sent.
+   */
+  UnsupportedInput: 'UnsupportedInput',
 } as const;
 export type CliRunFailureReason =
   (typeof CliRunFailureReason)[keyof typeof CliRunFailureReason];
@@ -222,7 +322,33 @@ export interface CliRuntimeDto {
   hostInfoJson?: string | null;
   maxConcurrentRuns: number;
   launchHeader?: string | null;
+  /** What the CLI reported about itself at its last handshake; null until it has run (or for stream-json). */
+  capabilities?: CliAgentCapabilities | null;
+  /** When `capabilities` was reported. */
+  capabilitiesReportedAt?: string | null;
   creationTime: string;
+}
+
+/**
+ * What a CLI reported about itself at its handshake (ACP `initialize` and the
+ * session options of `session/new`). Claimed support, not a measurement.
+ */
+export interface CliAgentCapabilities {
+  agentName?: string | null;
+  agentVersion?: string | null;
+  /** Takes image blocks in a prompt. */
+  images: boolean;
+  audio: boolean;
+  /** Takes embedded resources (file contents) in a prompt. */
+  embeddedContext: boolean;
+  /** Can resume an earlier session. */
+  resumeSession: boolean;
+  mcpHttp: boolean;
+  mcpSse: boolean;
+  /** Values of the `thought_level` session option; empty when the effort cannot be set. */
+  reasoningEfforts: string[];
+  /** Values of the `model` session option; empty when not reported. */
+  models: string[];
 }
 
 /** Admin-editable runtime fields. Probed values (path, version) are not among them. */
@@ -294,6 +420,13 @@ export interface CliRunRequestDto {
    * Default false.
    */
   attended?: boolean | null;
+  /** The turn's model; checked against the user's allowed models (`AI_MODEL_NOT_ALLOWED`) unless the caller holds `ai.cliRun.execute`. */
+  model?: string | null;
+  /**
+   * The turn's reasoning effort (runtime-native); checked against the model's efforts (`AI_EFFORT_NOT_ALLOWED`) unless the
+   * caller holds `ai.cliRun.execute`. Null = the binding's `thinkingLevel`.
+   */
+  effort?: string | null;
 }
 
 /** One external run record. */
@@ -323,6 +456,12 @@ export interface CliRunDto {
   estimatedCostUsd?: number | null;
   /** The model the user picked for this turn; null = the binding's model. */
   model?: string | null;
+  /** The reasoning effort picked for this turn; null = the binding's `thinkingLevel`. */
+  effort?: string | null;
+  /** Tokens in the context window when this turn ended (null when the CLI does not report it). */
+  contextTokens?: number | null;
+  /** The size of that model's context window, when the CLI reports it. */
+  contextWindow?: number | null;
   creationTime: string;
 }
 
@@ -336,13 +475,86 @@ export interface CliRunMessageDto {
   content?: string | null;
   tool?: string | null;
   callId?: string | null;
+  /** The sub-agent this event happened in: the `callId` of the call that dispatched it. Null for the main agent. */
+  parentCallId?: string | null;
   inputJson?: string | null;
   output?: string | null;
   status?: string | null;
   level?: string | null;
   /** Permission request / outcome (`PermissionRequest` / `PermissionResolved`). */
   permission?: CliAgentPermission | null;
+  /** A turn that ended inside the run (`TurnCompleted`). */
+  turn?: CliTurnBoundary | null;
+  /** A context compaction (`Compacted`). */
+  compaction?: CliCompaction | null;
+  /** A CLI task's start, progress or outcome (`Task`). */
+  task?: CliTask | null;
+  /** A queued message handed to the turn and what became of it (`UserMessage`). */
+  userMessage?: CliUserMessage | null;
   creationTime: string;
+}
+
+/** Where a CLI task stands (`CliTask.status`, `ToolTaskDetailDto.status`). */
+export const CliTaskStatus = {
+  Running: 'running',
+  Completed: 'completed',
+  Failed: 'failed',
+  /** Stopped by the agent (`TaskStop`), by the user, or because the run ended before it finished. */
+  Stopped: 'stopped',
+} as const;
+export type CliTaskStatus = (typeof CliTaskStatus)[keyof typeof CliTaskStatus];
+
+/** The kind of a CLI task (`CliTask.kind`, `ToolTaskDetailDto.kind`); another kind comes as the CLI's own word. */
+export const CliTaskKind = {
+  /** A sub-agent the agent dispatched. */
+  Agent: 'agent',
+  /** A command, usually one started in the background. */
+  Command: 'command',
+} as const;
+export type CliTaskKind = (typeof CliTaskKind)[keyof typeof CliTaskKind];
+
+/**
+ * A CLI task as one `Task` event reports it. Fields an event leaves out are null (a missing `status` means the
+ * state did not change); merge the events of one task by "a value wins".
+ */
+export interface CliTask {
+  /** The CLI's task id (what stopping it takes). */
+  taskId?: string | null;
+  kind?: CliTaskKind | string | null;
+  /** A sub-agent's type (claude's `subagent_type`, e.g. `general-purpose`). */
+  agentType?: string | null;
+  /** The model a sub-agent answers with. */
+  model?: string | null;
+  /** The short description it was started with. */
+  description?: string | null;
+  /** The task a sub-agent was given. */
+  prompt?: string | null;
+  /** Runs in the background (the call that started it returned at once). */
+  background?: boolean | null;
+  status?: CliTaskStatus | string | null;
+  toolUseCount?: number | null;
+  totalTokens?: number | null;
+  durationMs?: number | null;
+  /** What it is doing now ("Reading alpha.txt"). */
+  activity?: string | null;
+  lastTool?: string | null;
+  /** Its report when it finished (a sub-agent's report, a command's exit note). */
+  summary?: string | null;
+}
+
+/** A turn that ended inside the run while the CLI still had background tasks. */
+export interface CliTurnBoundary {
+  /** The answer stored in the thread for that turn; absent when nothing was stored. */
+  assistantMessageId?: string | null;
+  backgroundTasks: CliBackgroundTask[];
+}
+
+/** A context compaction. */
+export interface CliCompaction {
+  /** `manual` (`/compact`) or `auto`; absent when the CLI did not say. */
+  trigger?: string | null;
+  preTokens?: number | null;
+  postTokens?: number | null;
 }
 
 /** A live event pushed over SSE. Shape matches `CliRunMessageDto` minus persistence fields. */
@@ -351,6 +563,8 @@ export interface CliAgentEvent {
   content?: string | null;
   tool?: string | null;
   callId?: string | null;
+  /** The sub-agent this event happened in: the `callId` of the call that dispatched it. Null for the main agent. */
+  parentCallId?: string | null;
   input?: Record<string, unknown> | null;
   output?: string | null;
   status?: string | null;
@@ -358,6 +572,30 @@ export interface CliAgentEvent {
   sessionId?: string | null;
   /** Permission request / outcome (`PermissionRequest` / `PermissionResolved`). */
   permission?: CliAgentPermission | null;
+  /** A turn that ended inside the run (`TurnCompleted`). */
+  turn?: CliTurnBoundary | null;
+  /** A context compaction (`Compacted`). */
+  compaction?: CliCompaction | null;
+  /** A CLI task's start, progress or outcome (`Task`). */
+  task?: CliTask | null;
+  /** A queued message handed to the turn and what became of it (`UserMessage`). */
+  userMessage?: CliUserMessage | null;
+}
+
+/**
+ * A message the thread's queue handed to a running turn, and what became of it (`UserMessage` event). When taken, the
+ * answer up to that point is stored as its own message (`assistantMessageId`), the user's message after it
+ * (`threadMessageId`), and the rest of the answer as another: the conversation reads the same after a reload.
+ */
+export interface CliUserMessage {
+  /** The queued message (also the uuid it was handed to the CLI with). */
+  messageId: string;
+  /** Taken in by the agent; false when the CLI declined it (`reason`). */
+  taken: boolean;
+  text?: string | null;
+  reason?: string | null;
+  threadMessageId?: string | null;
+  assistantMessageId?: string | null;
 }
 
 /** Run list query. */

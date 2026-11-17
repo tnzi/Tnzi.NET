@@ -32,7 +32,7 @@
 
 <script setup lang="ts">
 import { NModal } from 'naive-ui'
-import { TOverlayTheme } from '@tnzi/ui'
+import TOverlayTheme from '../overlay/TOverlayTheme.vue'
 import { Icon } from '@iconify/vue'
 
 // Shared chrome for the chat pop-up dialogs (New Chat / Member Picker / Search

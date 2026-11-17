@@ -202,7 +202,7 @@ public class UserTurnTests
         var saved = new List<(string Role, string Content)>();
         var threadService = new Mock<IAgentThreadInternalService>();
         threadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         threadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))

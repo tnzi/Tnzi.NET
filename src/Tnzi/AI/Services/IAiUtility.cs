@@ -33,9 +33,14 @@ public interface IAiUtility
     /// 提前把入口藏起来。同一考量见 <see cref="Tnzi.Documents.IDocumentConverter.IsAvailable"/>。
     /// </para>
     /// <para>
-    /// <b>方向刻意偏保守</b>：属性是同步的、不查库，所以只能看配置来源的提供商。
-    /// 加载 <c>Tnzi.AI</c> 后仍可能存在只在数据库里登记的提供商，那种情形本属性会低报
-    /// （少显示一个本可用的入口），而不会高报（显示一个用不了的入口）。
+    /// 回答的口径与 <see cref="ExecuteAsync"/> 不带 <see cref="AiUtilityCallOptions.Provider"/> 时解析提供商的口径相同：
+    /// 核心的默认实现只认 <c>AI:Providers</c>（已启用且拿得到 API Key 的那一个）；加载 <c>Tnzi.AI</c> 后
+    /// 按 <c>AI:DefaultProvider</c> 经 <c>IChatClientFactory</c> 解析，管理端登记在数据库里的提供商同样计入。
+    /// 属性是同步的，实现必须便宜（缓存或内存查找），且在解析失败时答 <see langword="false"/> 而不是抛异常。
+    /// </para>
+    /// <para>
+    /// 它不保证下一次调用一定成功（网络、配额、提供商故障照样会让 <see cref="ExecuteAsync"/> 返回 <see langword="null"/>），
+    /// 只保证答 <see langword="false"/> 时调用必然拿不到提供商。调用方自带提供商时不必问它。
     /// </para>
     /// <para>默认 <see langword="true"/>：自带凭据、无需配置的自定义实现无需覆盖。</para>
     /// </remarks>
@@ -63,4 +68,23 @@ public interface IAiUtility
         string userMessage,
         AiUtilityCallOptions? options = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 同 <see cref="ExecuteAsync"/>，但返回完整结果：停止原因、token 用量、实际的提供商与模型。
+    /// </summary>
+    /// <returns>未配置提供商或调用失败时返回 <see langword="null"/>，与 <see cref="ExecuteAsync"/> 同一口径。</returns>
+    /// <remarks>
+    /// 需要分辨「被截断」「模型没按要求回答」或要按用户计量这次调用的调用方用它。
+    /// 默认实现包一层 <see cref="ExecuteAsync"/>：停止原因为 <see cref="AiUtilityFinishReason.Unknown"/>、用量为 null，
+    /// 能报出这些的实现应覆盖它。
+    /// </remarks>
+    async Task<AiUtilityResponse?> ExecuteForResponseAsync(
+        string systemPrompt,
+        string userMessage,
+        AiUtilityCallOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var text = await ExecuteAsync(systemPrompt, userMessage, options, cancellationToken);
+        return string.IsNullOrEmpty(text) ? null : new AiUtilityResponse { Text = text, Model = options?.Model };
+    }
 }

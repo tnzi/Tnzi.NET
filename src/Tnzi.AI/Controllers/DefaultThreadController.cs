@@ -40,6 +40,30 @@ public class DefaultThreadController : ApiControllerBase
     }
 
     /// <summary>
+    /// 当前用户线程的关注状态：哪些线程有一轮正在服务端跑、哪些有还没看过的回答，以及两者的条数。
+    /// 给侧栏与模式切换上的标识用：比翻列表便宜，也不受分页限制。
+    /// </summary>
+    [HttpPost("attention")]
+    public virtual async Task<ApiResult<ThreadAttentionDto>> GetMyAttention([FromBody] ThreadAttentionQueryDto? query = null)
+    {
+        query ??= new ThreadAttentionQueryDto();
+        query.CreatorId = GetCurrentUserId();
+        var result = await ThreadService.GetAttentionAsync(query);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 标记当前用户看过了这条线程：此前写下的回答都不再算未读。客户端在打开线程、以及线程在屏幕上时一轮结束时调用。
+    /// </summary>
+    [HttpPost("{id:guid}/read")]
+    public virtual async Task<ApiResult> MarkRead(Guid id)
+    {
+        await EnsureOwnershipAsync(id);
+        var result = await ThreadService.MarkReadAsync(id);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 获取当前用户的线程详情（含最近消息）
     /// </summary>
     [HttpGet("{id:guid}")]
@@ -64,8 +88,13 @@ public class DefaultThreadController : ApiControllerBase
     }
 
     /// <summary>
-    /// 读一个附件的内容（用户随消息发的图片 / PDF，或工具返回的图片）。只有线程的主人能读。
+    /// 读一个附件的内容（用户随消息发的图片 / PDF / 文件，或工具返回的图片）。只有线程的主人能读。
     /// </summary>
+    /// <remarks>
+    /// 文件（不是图片或 PDF）的媒体类型是客户端声明的，可能是 <c>text/html</c> 之类能在本站执行脚本的类型：
+    /// 一律以下载（<c>Content-Disposition: attachment</c>）交出，并加 <c>Content-Security-Policy: sandbox</c>，
+    /// 直接打开这个地址也不会在 API 的源上渲染它。
+    /// </remarks>
     [HttpGet("{threadId:guid}/attachments/{attachmentId:guid}")]
     public virtual async Task<IActionResult> GetAttachment(Guid threadId, Guid attachmentId, CancellationToken ct = default)
     {
@@ -81,9 +110,16 @@ public class DefaultThreadController : ApiControllerBase
             return NotFound(result.ToApiResult());
         }
 
-        // 只存过 PNG / JPEG / GIF / WebP / PDF（按文件头认过的），不会是能在本站执行脚本的类型；nosniff 让浏览器不去另猜
+        // 图片与 PDF 是按文件头认过的，不会是能在本站执行脚本的类型；nosniff 让浏览器不去另猜
         Response.Headers["X-Content-Type-Options"] = "nosniff";
-        return File(result.Data.Content, result.Data.MediaType, result.Data.FileName, enableRangeProcessing: false);
+        if (ChatAttachmentRules.IsInlineMediaType(result.Data.MediaType))
+        {
+            return File(result.Data.Content, result.Data.MediaType, result.Data.FileName, enableRangeProcessing: false);
+        }
+
+        Response.Headers["Content-Security-Policy"] = "sandbox";
+        return File(
+            result.Data.Content, result.Data.MediaType, result.Data.FileName ?? ChatAttachmentRules.DefaultFileName, enableRangeProcessing: false);
     }
 
     /// <summary>

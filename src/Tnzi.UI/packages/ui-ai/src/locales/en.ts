@@ -20,9 +20,18 @@ export const en = {
     errorNetwork: 'Network error. Please check your connection.',
     errorRateLimit: 'Rate limit exceeded. Please wait a moment.',
     generationStopped: 'Generation stopped',
+    /** A turn that only compacted the conversation's context (`/compact`). */
+    conversationCompacted: 'Conversation compacted',
+    /** An answer is done and the agent waits for its background tasks before it goes on (the tasks follow). */
+    waitingForBackgroundTasks: 'Still running in the background',
+    /** Between two answers with no user message between them: the agent went on by itself once a background task finished. */
+    continuedAfterBackgroundTask: 'Continued after a background task',
     regenerate: 'Regenerate',
     like: 'Like',
     dislike: 'Dislike',
+    /** Arrows between the versions of a message (an edited question, a regenerated answer). */
+    previousVersion: 'Previous version',
+    nextVersion: 'Next version',
     deleteConversation: 'Delete conversation',
     streaming: 'Streaming',
     generating: 'Generating...',
@@ -51,6 +60,8 @@ export const en = {
     /** {name} = file name. */
     openFile: 'Open {name}',
     attachmentUnavailable: 'Not available',
+    /** An image attachment's name when it has none of its own. */
+    image: 'Image',
     /** Read out while a conversation picked in the sidebar loads. */
     openingThread: 'Opening conversation...',
   },
@@ -67,7 +78,8 @@ export const en = {
     statusActive: 'Active',
     statusArchived: 'Archived',
     statusAll: 'All',
-    lastActivity: 'Last activity',
+    /** The time window filter: when the user last wrote in a conversation (or created it). */
+    lastActivity: 'Last message',
     window1d: '1d',
     window3d: '3d',
     window7d: '7d',
@@ -79,7 +91,12 @@ export const en = {
     sortBy: 'Sort by',
     sortName: 'Name',
     sortCreated: 'Date created',
-    sortActivity: 'Last activity',
+    /** Sort by when the user last wrote in a conversation (the default). */
+    sortLastMessage: 'Last message',
+    /** Heading above the conversations waiting for the user, when the list is grouped by date. */
+    groupAwaitingOwner: 'Needs you',
+    /** Heading above the conversations with a turn going on, when the list is grouped by date. */
+    groupRunning: 'Working',
     today: 'Today',
     yesterday: 'Yesterday',
     previous7: 'Previous 7 days',
@@ -87,6 +104,12 @@ export const en = {
     rename: 'Rename',
     archive: 'Archive',
     unarchive: 'Unarchive',
+    /** Read after a conversation's title while a turn of it waits for the user (its row shows a raised hand). */
+    threadAwaitingOwner: 'Needs you',
+    /** Read after a conversation's title while a turn of it is going on (its row shows a running mark). */
+    threadRunning: 'Working',
+    /** Read after a conversation's title when it has a reply not seen yet (its row shows a dot). */
+    threadUnread: 'Unread',
     delete: 'Delete',
     /** The Active / Archived tabs of the Recents page. */
     tabs: 'Conversation status',
@@ -140,12 +163,52 @@ export const en = {
     readingPage: 'Reading a page',
     readPage: 'Read a page',
     readPages: 'Read {count} pages',
+    /** The CLI's file and shell tools (Read, Edit, Write, Bash, Grep, Glob). {count} = how many. */
+    readingFile: 'Reading a file',
+    readFile: 'Read a file',
+    readFiles: 'Read {count} files',
+    readFileFailed: "Couldn't read a file",
+    editingFile: 'Editing a file',
+    editedFile: 'Edited a file',
+    editedFiles: 'Edited {count} files',
+    editFileFailed: "Couldn't edit a file",
+    writingFile: 'Writing a file',
+    wroteFile: 'Wrote a file',
+    wroteFiles: 'Wrote {count} files',
+    writeFileFailed: "Couldn't write a file",
+    runningCommand: 'Running a command',
+    ranCommand: 'Ran a command',
+    ranCommands: 'Ran {count} commands',
+    commandFailed: 'A command failed',
+    searchingCode: 'Searching the code',
+    searchedCode: 'Searched the code',
+    searchCodeFailed: "Couldn't search the code",
     readPageFailed: "Couldn't read a page",
     /** An inline widget (show_widget): its title follows. {count} = widgets made in one run. */
     widgetRunning: 'Creating a widget',
     widgetDone: 'Created a widget',
     widgetFailed: "Couldn't create a widget",
     widgetsDone: 'Created {count} widgets',
+    /**
+     * The CLI's AskUserQuestion: the agent asks the person; the first question follows.
+     * `...Declined`: the person chose not to answer, or no one answered in time (an outcome, not a failure).
+     */
+    askQuestionRunning: 'Asking you a question',
+    askQuestionDone: 'Got your answer',
+    askQuestionDeclined: 'Question left unanswered',
+    askQuestionFailed: "Couldn't ask a question",
+    /** The CLI's EnterPlanMode: the agent starts planning before it changes anything. */
+    enterPlanModeRunning: 'Starting a plan',
+    enterPlanModeDone: 'Started a plan',
+    enterPlanModeFailed: "Couldn't start a plan",
+    /**
+     * The CLI's ExitPlanMode: the agent hands over its plan and asks to start.
+     * `...Declined`: the plan went back to the agent (with feedback, or unanswered in time) and it keeps planning.
+     */
+    exitPlanModeRunning: 'Waiting for the plan to be approved',
+    exitPlanModeDone: 'Plan approved',
+    exitPlanModeDeclined: 'Plan sent back',
+    exitPlanModeFailed: "Couldn't hand over the plan",
   },
   /* TWidgetCall / TWidgetFrame - an interactive widget an agent put into its reply. */
   widget: {
@@ -194,11 +257,47 @@ export const en = {
   composer: {
     /** Accessible name of the model picker. */
     model: 'Model',
+    /** Title of the effort row in the model picker. */
+    effort: 'Thinking effort',
+    /** What a screen reader hears for the mark on the model's default effort. */
+    effortDefault: 'Default',
+    /**
+     * Names of reasoning efforts, by the runtime's own value (Claude Code's and Codex's levels, Kimi Code's off / on
+     * switch); a value not listed here is shown as it is.
+     */
+    effortNames: {
+      none: 'None',
+      minimal: 'Minimal',
+      low: 'Low',
+      medium: 'Medium',
+      high: 'High',
+      xhigh: 'Extra high',
+      max: 'Max',
+      off: 'Off',
+      on: 'On',
+    } as Record<string, string>,
+    /** One line under the effort row, by the chosen value; none for a value not listed here. */
+    effortHints: {
+      none: 'Answers without thinking first',
+      minimal: 'Barely thinks: the quickest replies',
+      low: 'Quick answers for simple questions, using the least',
+      medium: 'A balance of speed, depth and usage',
+      high: 'Thinks longer before answering harder questions',
+      xhigh: 'Thinks at length for complex, many-step work',
+      max: 'The deepest thinking: slowest, and uses the most',
+      off: 'Answers without thinking first',
+      on: 'Thinks before answering',
+    } as Record<string, string>,
     attach: 'Attach files',
     removeAttachment: 'Remove attachment',
     voiceInput: 'Voice input',
-    stopRecording: 'Stop recording',
+    /** The primary button while dictating: ends it, keeping what was heard. */
+    stopRecording: 'Stop dictation',
+    /** Placeholder and screen-reader status while dictating. */
+    listening: 'Listening…',
     send: 'Send',
+    /** The primary button while a turn runs and the box has a message: it goes once the turn has ended. */
+    queue: 'Send when this reply ends',
     /** {size} = human-readable limit, {names} = comma-separated file names. */
     filesTooLarge: 'Not attached, larger than {size}: {names}',
     /** {names} = comma-separated file names. */
@@ -247,11 +346,8 @@ export const en = {
     search: 'Search',
     searchAria: 'Search settings',
     noResults: 'No matching settings.',
-    close: 'Close settings',
     /** Accessible name of the settings dialog's section list. */
     sections: 'Settings sections',
-    /** The back button of a settings section on a narrow screen. */
-    backToSections: 'Back to all settings',
     language: 'Language',
     languageHint: 'Interface language.',
     theme: 'Theme',
@@ -304,9 +400,32 @@ export const en = {
     currentPassword: 'Current password',
     newPassword: 'New password',
     confirmPassword: 'Confirm new password',
+    currentPasswordPlaceholder: 'Enter your current password',
+    newPasswordPlaceholder: 'Enter a new password',
+    confirmPasswordPlaceholder: 'Enter the new password again',
     passwordMismatch: 'The two new passwords do not match.',
     passwordUpdated: 'Password updated.',
     updatePassword: 'Update password',
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
+    photo: 'Profile photo',
+    photoHint: 'PNG, JPEG, or WebP, up to {size} MB.',
+    photoChange: 'Change profile photo',
+    photoRemove: 'Remove profile photo',
+    photoWrongType: 'Choose a PNG, JPEG, or WebP image.',
+    photoTooLarge: 'That image is larger than {size} MB.',
+    photoFailed: 'The photo could not be saved.',
+    deleteTitle: 'Delete account',
+    deleteLabel: 'Delete your account',
+    deleteHint: 'You will be signed out everywhere and will not be able to sign in again.',
+    deleteButton: 'Delete account',
+    deleteConfirmLabel: 'Confirm deletion',
+    deleteTypeToConfirm: 'Type {target} to confirm.',
+    deleteConfirmButton: 'Delete my account',
+    deleteMismatch: 'That does not match your account.',
+    deleteInUse: 'Your account is still in use, so it cannot be deleted yet.',
+    deleteNeedsVerification: 'Verify it is you, then try again.',
+    deleteFailed: 'The account could not be deleted.',
   },
   /* TSecuritySettings - two-factor authentication and active sessions. */
   securitySettings: {
@@ -316,6 +435,7 @@ export const en = {
     on: 'On',
     off: 'Off',
     scan: 'Scan this',
+    qrLabel: 'QR code for your authenticator app',
     cantScan: "Can't scan? Enter this key in your app:",
     codePlaceholder: '6-digit code',
     setUp: 'Set up',
@@ -333,6 +453,18 @@ export const en = {
     noSessions: 'No sessions recorded.',
     signOutOthers: 'Sign out other devices',
     signOutOthersConfirm: 'Sign out every other device? You stay signed in here.',
+    turnOff: 'Turn off',
+    emailCode: 'Email verification code',
+    emailCodeHint: 'Get a code by email when you sign in.',
+    emailNeedsAddress: 'Confirm your email address first.',
+    passkey: 'Passkey or security key',
+    passkeyHint: 'Verify with your device, a fingerprint or a hardware key.',
+    passkeyAdd: 'Add a passkey',
+    passkeyAddAnother: 'Add another',
+    unnamedPasskey: 'Passkey',
+    passkeyBackedUp: 'Synced',
+    removeKey: 'Remove',
+    removeKeyConfirm: 'Remove this key?',
   },
   /* TPersonalizationSettings - what the assistant should know about the user. */
   personalizationSettings: {
@@ -432,12 +564,77 @@ export const en = {
     showMore: 'Show full output',
     showLess: 'Show less',
   },
+  tasks: {
+    /** A sub-agent with neither a description nor a type. */
+    agent: 'Sub-agent',
+    /** A background command with neither a description nor a command line. */
+    command: 'Background command',
+    running: 'Running',
+    completed: 'Done',
+    failed: 'Failed',
+    stopped: 'Stopped',
+    /** Tag on a task that runs in the background. */
+    background: 'Background',
+    /** A run's line: the phrases are the start of a line, like the other steps' (see `tools`). */
+    agentRunning: 'Running an agent',
+    agentOngoing: 'An agent running',
+    /** {count} = how many. */
+    agentsOngoing: '{count} agents running',
+    agentDone: 'Ran an agent',
+    agentsDone: 'Ran {count} agents',
+    agentFailed: 'An agent failed',
+    agentStopped: 'Stopped an agent',
+    agentsStopped: 'Stopped {count} agents',
+    commandRunning: 'Running a background command',
+    commandOngoing: 'A background command running',
+    commandsOngoing: '{count} background commands running',
+    commandDone: 'Finished a background command',
+    commandsDone: 'Finished {count} background commands',
+    commandFailed: 'A background command failed',
+    commandStopped: 'Stopped a background command',
+    commandsStopped: 'Stopped {count} background commands',
+    /** {count} = tool calls a sub-agent made (one). */
+    oneTool: '1 tool call',
+    /** {count} = tool calls a sub-agent made. */
+    tools: '{count} tool calls',
+    /** What a running sub-agent does when the CLI has not said yet. */
+    working: 'Working...',
+    /** A sub-agent's own panel. */
+    prompt: 'Prompt',
+    showMore: 'Show more',
+    showLess: 'Show less',
+    model: 'Model',
+    result: 'Result',
+    noSteps: 'No steps yet',
+    nestedSteps: 'The CLI does not stream the steps of a sub-agent that another sub-agent started; its state and report are here.',
+    back: 'Back',
+    close: 'Close',
+    /** {title} = the task's description. Opens a sub-agent's panel. */
+    open: 'Open {title}',
+    stop: 'Stop',
+    /** {title} = the task's description. Accessible name of a stop button. */
+    stopNamed: 'Stop {title}',
+    stopping: 'Stopping...',
+    /** The side panel's list. */
+    listTitle: 'Background tasks',
+    listEmpty: 'No background tasks',
+    /** {count} = how many have finished. A row that opens and closes the finished ones. */
+    finished: '{count} finished',
+    /** Images a run's steps returned, at the end of its line. */
+    images: 'Images from these steps',
+    /** {index} / {count}: which image of the run's images. */
+    imageCount: '{index} of {count}',
+    /** {count} = lines the run's steps added / removed in files. */
+    linesAdded: '{count} lines added',
+    linesRemoved: '{count} lines removed',
+  },
   feedback: {
     helpful: 'Helpful',
     notHelpful: 'Not helpful',
     report: 'Report',
     thankYou: 'Thanks for your feedback',
     reasonPlaceholder: 'What went wrong?',
+    sendReason: 'Send feedback',
   },
   agent: {
     handoff: 'Handing off to {agent}...',
@@ -468,6 +665,9 @@ export const en = {
     completed: 'Completed',
     failed: 'Failed',
     paused: 'Paused',
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+    fitView: 'Fit to view',
   },
   quota: {
     usage: 'Usage',
@@ -479,10 +679,6 @@ export const en = {
   token: {
     input: 'Input tokens',
     output: 'Output tokens',
-    cached: 'Cached',
-    cacheWrite: 'Cache write',
-    total: 'Total tokens',
-    cost: 'Cost',
   },
   plan: {
     title: 'Plan',
@@ -514,6 +710,7 @@ export const en = {
     console: 'Console',
     openExternal: 'Open in new tab',
     noPreview: 'Preview not available',
+    address: 'Preview address',
   },
   knowledge: {
     panel: 'Knowledge Base',
@@ -521,6 +718,7 @@ export const en = {
     noBase: 'No knowledge bases',
     citations: 'Sources',
     usedSources: 'Used {count} sources',
+    documentCount: '{count} docs',
   },
   mcp: {
     tools: 'MCP Tools',
@@ -542,7 +740,133 @@ export const en = {
     minimize: 'Minimize',
     expand: 'Expand',
   },
+  toolbar: {
+    search: 'Search',
+    more: 'More actions',
+    clearSearch: 'Clear search',
+    /** Shown beside a folded action that has something applied (a filter). */
+    active: 'On',
+    /** {label} = the primary action, e.g. "New task". */
+    primaryMenu: '{label}: more options',
+  },
+  approvals: {
+    /** Accessible name of the cards above the composer. */
+    region: 'Waiting for you',
+    /** {time} = m:ss left. */
+    expires: '{time} left; no answer by then counts as no',
+    expired: 'Timed out, counted as no',
+    /** {message} = why it failed. */
+    failed: "Couldn't send your answer: {message}",
+    closed: 'This card is no longer waiting for an answer',
+    /** {action} = one of the action* entries. */
+    permissionTitle: 'The agent wants to {action}',
+    allowOnce: 'Allow once',
+    allowAlways: 'Always allow',
+    reject: 'Deny',
+    reason: 'Why',
+    path: 'Path',
+    file: 'File',
+    url: 'Address',
+    actionBash: 'run a command',
+    actionWrite: 'write a file',
+    actionEdit: 'edit a file',
+    actionNotebookEdit: 'edit a notebook',
+    actionWebFetch: 'read a web page',
+    actionWebSearch: 'search the web',
+    /** {tool} = the tool's name. */
+    actionOther: 'use {tool}',
+    questionTitle: 'The agent has a question for you',
+    /** {count} = how many questions. */
+    questionTitleMany: 'The agent has {count} questions for you',
+    submit: 'Send answers',
+    decline: 'Skip',
+    own: 'Other',
+    ownPlaceholder: 'Write your answer',
+    multiple: 'Pick any',
+    planTitle: 'The agent has a plan for your approval',
+    approve: 'Approve',
+    approveAskEdits: 'Approve, ask before changes',
+    approveAcceptEdits: 'Approve, accept file edits',
+    revise: 'Revise',
+    send: 'Send back',
+    cancel: 'Cancel',
+    feedback: 'What to change (optional)',
+    feedbackPlaceholder: 'For example: leave the database alone, only change the page',
+    planEmpty: 'The agent handed over no plan.',
+    planDraft: 'This is the draft the agent wrote while thinking.',
+  },
+  queue: {
+    /** Accessible name of the queued messages above the composer. */
+    region: 'Queued messages',
+    /** {count} = how many wait to go. */
+    title: '{count} queued',
+    /** Beside the title while the turn runs and cannot take messages: they go as the next turn. */
+    hint: 'They go together when this turn ends',
+    /** Beside the title while the turn runs and takes messages as it works. */
+    hintToAgent: 'The agent reads them between its steps',
+    sending: 'Sending…',
+    next: 'Goes next',
+    /** A queued message written to the running agent, not yet taken in. */
+    handed: 'With the agent: it reads this after its current step',
+    stopped: 'The turn was stopped, so this was not sent',
+    /** {reason} = why its turn was refused. */
+    failed: 'Not sent: {reason}',
+    reasonModel: 'this model is not available to you',
+    reasonAgent: 'this assistant is not available to you',
+    reasonLimit: 'you have reached your usage limit',
+    reasonInterrupted: 'sending was interrupted; it may not have arrived',
+    reasonNotTaken: 'the agent did not take it in',
+    edit: 'Edit',
+    remove: 'Remove',
+    sendNow: 'Send now',
+    /** Tooltip of "Send now" while the turn runs and takes messages: nothing is stopped. */
+    sendNowHint: 'Give this to the agent now; it reads it after its current step',
+    /** The button while the turn runs and cannot take this message: sending it stops the turn. */
+    stopAndSend: 'Stop and send',
+    /** Tooltip of "Stop and send". */
+    stopAndSendHint: 'This turn cannot take a message while it works: stop it and send this one right away',
+    /** Accessible name of a queued message's attachments. */
+    attachments: 'Attachments',
+    send: 'Send',
+    save: 'Save',
+    cancel: 'Cancel',
+    editLabel: 'Edit the queued message',
+    /** The folded list on a phone while cards wait: shows the messages again. */
+    show: 'Show',
+    hide: 'Hide',
+  },
+  slash: {
+    /** Heading and accessible name of the composer's `/` menu. */
+    title: 'Skills and commands',
+    loading: 'Reading…',
+    loadFailed: "Couldn't read the commands here. Type / again in a moment.",
+    none: 'No skill or command matches',
+    keys: '↑↓ to choose · Enter to insert · Esc to close',
+  },
+  context: {
+    /** The context meter's tooltip and accessible name: tokens used against the window. */
+    used: 'Context {used} / {window}',
+    /** The same when the window's size is not known. */
+    usedOnly: 'Context {used}',
+  },
+  imageViewer: {
+    /** Accessible name of the full-size image viewer when the picture has no name. */
+    label: 'Image',
+    previous: 'Previous image',
+    next: 'Next image',
+    /** {index} = the picture shown, {count} = how many there are. */
+    counter: '{index} / {count}',
+    failed: "This image couldn't be loaded",
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+    /** The button between the two zoom buttons: shows the zoom as {percent}%, a press fits the picture again. */
+    fit: 'Fit to screen',
+    /** {percent} = the zoom, 100 when the picture fits the screen. */
+    zoomLevel: '{percent}%',
+  },
   common: {
+    /** Read for something going on that has no words of its own (a `TSegmented` option's `running`). */
+    running: 'Working',
     loading: 'Loading...',
     error: 'Error',
     cancel: 'Cancel',
@@ -560,12 +884,26 @@ export const en = {
     actions: 'Actions',
     yes: 'Yes',
     no: 'No',
+    minimize: 'Minimize',
+    maximize: 'Maximize',
+    restore: 'Restore',
+    resizeColumn: 'Resize column {name}',
+    moreInfo: 'More information',
+    /** A searchable list (`TSearchSelect`) that found nothing for the words typed. */
+    noMatches: 'No matches',
+    /** Empties a field (`TSearchSelect`'s clear button). */
+    clear: 'Clear',
+    /** A list whose options could not be loaded. */
+    loadFailed: 'Could not load',
   },
 };
 
-/** Recursive string record type derived from en structure */
+/**
+ * String record type derived from en structure. An entry is a string, or a map of strings keyed by a value the
+ * backend gives (`composer.effortNames`: a runtime's own effort values), looked up at run time.
+ */
 export type AiLocaleMessages = {
   [K in keyof typeof en]: {
-    [P in keyof (typeof en)[K]]: string;
+    [P in keyof (typeof en)[K]]: (typeof en)[K][P] extends string ? string : Record<string, string>;
   };
 };

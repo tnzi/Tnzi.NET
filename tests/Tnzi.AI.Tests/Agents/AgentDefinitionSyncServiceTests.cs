@@ -196,6 +196,33 @@ public class AgentDefinitionSyncServiceTests : IDisposable
         definitions.Loads.ShouldBeGreaterThanOrEqualTo(2);
     }
 
+    [Fact]
+    public async Task FailedStartupSync_IsRetried_EvenWithoutWatchingForChanges()
+    {
+        // The database is unreachable at startup and nobody edits a file afterwards: before, the YAML
+        // agents stayed missing until the next restart unless WatchForChanges happened to be on.
+        var definitions = new FlakyDefinitionProvider(failures: 2);
+        var options = Options(watch: false, syncOnStartup: true);
+        var service = new AgentDefinitionSyncService(_provider, definitions, options, NullLogger<AgentDefinitionSyncService>.Instance)
+        {
+            ChangeDebounce = TimeSpan.FromMilliseconds(10),
+            RetryDelay = TimeSpan.FromMilliseconds(20),
+        };
+        await service.StartAsync(CancellationToken.None);
+
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        List<Agent> agents;
+        do
+        {
+            await Task.Delay(50);
+            agents = await AgentsAsync();
+        } while (DateTime.UtcNow < deadline && agents.Count == 0);
+
+        await service.StopAsync(CancellationToken.None);
+        agents.ShouldHaveSingleItem().Name.ShouldBe("reviewer");
+        definitions.Loads.ShouldBe(3);
+    }
+
     /// <summary>第一次（或前 <c>failures</c> 次）读定义时抛，之后正常返回一条定义；变更由测试手动触发。</summary>
     private sealed class FlakyDefinitionProvider(int failures) : IAgentDefinitionProvider
     {

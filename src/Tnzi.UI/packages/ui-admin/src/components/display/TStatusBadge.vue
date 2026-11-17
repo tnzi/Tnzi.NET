@@ -1,48 +1,142 @@
 <script setup lang="ts">
 /**
- * `TStatusBadge` admin wrapper.
+ * `TStatusBadge` - soybean-style status pill with semantic color mapping.
  *
- * The component implementation lives in `@tnzi/ui/components/display`
- * (sunk in 0.2.x). This wrapper just injects the admin-side
- * `translatePageKey` helper so existing admin call-sites pick up i18n
- * resolution without passing the translator explicitly.
+ * Accepts either a boolean (true=success/false=danger) or a string value
+ * mapped via the `mapping` prop. Falls back to neutral color for unknown
+ * keys.
  *
- * New code outside the admin shell should import directly from
- * `@tnzi/ui`:
- *
- *   import { TStatusBadge } from '@tnzi/ui'
+ * Labels given as i18n keys resolve through the admin page translator
+ * (`translatePageKey`) unless a `translate` prop is passed.
  */
-import { TStatusBadge as TStatusBadgeBase, type StatusType } from '@tnzi/ui'
+import { computed } from 'vue'
+import { NTag } from 'naive-ui'
+import { EMPTY_DASH, isEmptyValue } from '../../utils/placeholders'
 import { translatePageKey } from '../../i18n/translate'
+
+export type StatusType = 'success' | 'info' | 'warning' | 'error' | 'default'
 
 interface Props {
   value: string | number | boolean | null | undefined
+  /** Map values to {type, label}. Keys are stringified `value`. */
   mapping?: Record<string, { type: StatusType; label?: string; labelKey?: string }>
+  /** Label override (skips mapping lookup). */
   label?: string
+  /** i18n key for `label` (takes precedence over `label`). */
   labelKey?: string
+  /** Type override (skips mapping lookup). */
   type?: StatusType
   size?: 'tiny' | 'small' | 'medium' | 'large'
+  /**
+   * i18n resolver. Receives a key string, returns the translated label, or an
+   * empty string when the key is unknown (in which case the component falls
+   * back to the raw `label` / mapping label). Defaults to the admin page
+   * translator.
+   */
+  translate?: (key: string) => string
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   mapping: () => ({}),
   label: undefined,
   labelKey: undefined,
   type: undefined,
   size: 'small',
+  translate: undefined,
 })
 
+// Boolean default - resolves through the shared status dictionary so the
+// label tracks the active locale (`admin.shared.status.{enabled,disabled}`)
+// instead of being stuck on English "Enabled"/"Disabled".
+const DEFAULT_BOOL_MAPPING: Record<string, { type: StatusType; labelKey: string; fallback: string }> = {
+  true: { type: 'success', labelKey: 'admin.shared.status.enabled', fallback: 'Enabled' },
+  // soybean parity - disabled rows render with the `warning` tone (orange)
+  // rather than neutral grey so the negative state is visually obvious.
+  false: { type: 'warning', labelKey: 'admin.shared.status.disabled', fallback: 'Disabled' },
+}
+
+// Humanise an i18n key into a readable last-segment fallback
+// (`admin.shared.status.featured` → `Featured`). Used when no translator
+// is supplied or the translator returns an empty string - better to
+// render *something* than an empty pill.
+function humaniseKey(key: string): string {
+  const last = key.split('.').pop() ?? key
+  const spaced = last.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ')
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}
+
 const adminTranslate = (key: string): string => translatePageKey('', key)
+
+function resolveLabel(key: string | undefined, fallback: string): string {
+  if (!key) return fallback
+  const out = (props.translate ?? adminTranslate)(key)
+  return out || fallback || humaniseKey(key)
+}
+
+/**
+ * No value and nothing that names it: render the shared placeholder instead of
+ * a pill reading "null" / "undefined". An explicit label, label key or a
+ * mapping entry for the empty key still renders a pill.
+ */
+const isEmpty = computed(
+  () =>
+    isEmptyValue(props.value) &&
+    !props.label &&
+    !props.labelKey &&
+    props.mapping[String(props.value)] === undefined,
+)
+
+const resolved = computed<{ type: StatusType; label: string }>(() => {
+  // Explicit label-key + type - short-circuit i18n resolution path.
+  if (props.type && props.labelKey) {
+    return { type: props.type, label: resolveLabel(props.labelKey, props.label ?? '') }
+  }
+  if (props.type && props.label) return { type: props.type, label: props.label }
+
+  const key = String(props.value)
+  const fromMapping = props.mapping[key]
+  const isBool = typeof props.value === 'boolean'
+  const boolEntry = isBool ? DEFAULT_BOOL_MAPPING[key] : undefined
+
+  // Resolve type - explicit prop > mapping > bool default > 'default'.
+  const finalType = props.type ?? fromMapping?.type ?? boolEntry?.type ?? 'default'
+
+  // Resolve label with i18n priority chain:
+  //  1. explicit prop.labelKey / prop.label
+  //  2. mapping.labelKey / mapping.label
+  //  3. boolean default i18n key
+  //  4. raw string value
+  let finalLabel: string
+  if (props.labelKey) {
+    finalLabel = resolveLabel(props.labelKey, props.label ?? key)
+  } else if (props.label) {
+    finalLabel = props.label
+  } else if (fromMapping?.labelKey) {
+    finalLabel = resolveLabel(fromMapping.labelKey, fromMapping.label ?? key)
+  } else if (fromMapping?.label) {
+    // Explicit raw mapping label wins over the bool default - keeps
+    // back-compat for callers that intentionally use a non-standard label
+    // (e.g. "Active" instead of "Enabled" for tenant rows).
+    finalLabel = fromMapping.label
+  } else if (boolEntry) {
+    finalLabel = resolveLabel(boolEntry.labelKey, boolEntry.fallback)
+  } else {
+    finalLabel = key
+  }
+
+  return { type: finalType, label: finalLabel }
+})
 </script>
 
 <template>
-  <TStatusBadgeBase
-    :value="value"
-    :mapping="mapping"
-    :label="label"
-    :label-key="labelKey"
-    :type="type"
-    :size="size"
-    :translate="adminTranslate"
-  />
+  <span v-if="isEmpty" class="t-status-badge__empty">{{ EMPTY_DASH }}</span>
+  <NTag v-else :type="resolved.type === 'default' ? 'default' : resolved.type" :size="size" round>
+    {{ resolved.label }}
+  </NTag>
 </template>
+
+<style scoped>
+.t-status-badge__empty {
+  color: var(--tnzi-base-text-muted);
+}
+</style>

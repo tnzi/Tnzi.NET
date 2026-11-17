@@ -3,9 +3,8 @@
  * TWorkflowToolbar - Node action toolbar
  */
 
-import { NButton, NTooltip } from 'naive-ui';
-import { Icon } from '@iconify/vue';
 import { useAiI18n } from '../../i18n/index';
+import TIconButton from '../controls/TIconButton.vue';
 const t = useAiI18n();
 
 defineEmits<{
@@ -18,40 +17,10 @@ defineEmits<{
 
 <template>
   <div class="t-wf-toolbar">
-    <NTooltip>
-      <template #trigger>
-        <NButton text size="small" @click="$emit('add')">
-          <template #icon><Icon icon="lucide:plus" class="size-4" /></template>
-        </NButton>
-      </template>
-      {{ t.workflow.addNode }}
-    </NTooltip>
-    <NTooltip>
-      <template #trigger>
-        <NButton text size="small" @click="$emit('delete')">
-          <template #icon><Icon icon="lucide:trash-2" class="size-4" /></template>
-        </NButton>
-      </template>
-      {{ t.workflow.deleteNode }}
-    </NTooltip>
-    <NTooltip>
-      <template #trigger>
-        <NButton text size="small" @click="$emit('connect')">
-          <template #icon><Icon icon="lucide:link" class="size-4" /></template>
-        </NButton>
-      </template>
-      {{ t.workflow.connect }}
-    </NTooltip>
-    <NTooltip>
-      <template #trigger>
-        <NButton text size="small" @click="$emit('run')">
-          <template #icon>
-            <Icon icon="lucide:play" class="size-4 t-wf-toolbar__run" />
-          </template>
-        </NButton>
-      </template>
-      {{ t.workflow.run }}
-    </NTooltip>
+    <TIconButton icon="lucide:plus" :label="t.workflow.addNode" @click="$emit('add')" />
+    <TIconButton icon="lucide:trash-2" :label="t.workflow.deleteNode" danger @click="$emit('delete')" />
+    <TIconButton icon="lucide:link" :label="t.workflow.connect" @click="$emit('connect')" />
+    <TIconButton icon="lucide:play" :label="t.workflow.run" class="t-wf-toolbar__run" @click="$emit('run')" />
   </div>
 </template>
 
@@ -59,12 +28,16 @@ defineEmits<{
 .t-wf-toolbar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  border-radius: 8px;
-  border: 1px solid var(--tnzi-border);
-  background-color: var(--tnzi-container-bg);
-  padding: 4px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--tnzi-ai-border);
+  border-radius: 10px;
+  background: var(--tnzi-ai-surface);
+  box-shadow: var(--tnzi-ai-popover-shadow);
 }
-.t-wf-toolbar__run { color: var(--tnzi-ai-accent-text); }
+/* Run is the toolbar's main action: the accent, readable as an icon colour. */
+.t-wf-toolbar .t-wf-toolbar__run,
+.t-wf-toolbar .t-wf-toolbar__run:hover:not(:disabled) {
+  color: var(--tnzi-ai-accent-text);
+}
 </style>

@@ -17,6 +17,7 @@ import { useAiI18n } from '../../i18n/index'
 import type { ToolCallInfo } from '../../headless/useChat'
 import { useChatRenderContext } from '../chat/chat-render-context'
 import TAttachmentImage from '../chat/TAttachmentImage.vue'
+import { provideImageGroup } from '../chat/image-group'
 import TFileCard from '../chat/TFileCard.vue'
 import TToolStep from './TToolStep.vue'
 import TToolFields from './TToolFields.vue'
@@ -25,7 +26,10 @@ import TToolOutput from './TToolOutput.vue'
 import { readableToolName, toolCallState, toolInputSummary } from './tool-call-status'
 import { toolFields, toolResultText, toolResultView } from './tool-views'
 import { resolveToolEntry } from './built-in-tool-renderers'
-import { describeToolStep, stepPhrase } from './tool-steps'
+import { describeToolStep, shownStepState, stepPhrase } from './tool-steps'
+
+/* The pictures one call returned are one set in the full-size viewer. */
+provideImageGroup()
 
 const props = withDefaults(
   defineProps<{
@@ -41,15 +45,19 @@ const props = withDefaults(
 const t = useAiI18n()
 const context = useChatRenderContext()
 
-const state = computed(() => toolCallState(props.toolCall, props.streaming))
+const callState = computed(() => toolCallState(props.toolCall, props.streaming))
 const name = computed(() => readableToolName(props.toolCall.name))
 /* The product's words for the tool, when it gave some. */
 const described = computed(() => {
   const describe = resolveToolEntry(props.toolCall.name, context.value.toolRenderers).describe
   return describe ? describeToolStep(props.toolCall, describe, t.value) : null
 })
+/* A plan sent back or a question left unanswered is drawn as finished, not failed (`declined`). */
+const state = computed(() =>
+  described.value ? shownStepState({ description: described.value, state: callState.value }) : callState.value,
+)
 const label = computed(() =>
-  described.value ? stepPhrase({ description: described.value, state: state.value }) : name.value,
+  described.value ? stepPhrase({ description: described.value, state: callState.value }) : name.value,
 )
 const summary = computed(() =>
   described.value?.subject !== undefined ? described.value.subject : toolInputSummary(props.toolCall.input),

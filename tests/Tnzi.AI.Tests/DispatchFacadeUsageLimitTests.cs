@@ -21,8 +21,8 @@ public class DispatchFacadeUsageLimitTests
 
     public DispatchFacadeUsageLimitTests()
     {
-        _threads.Setup(t => t.GetOrCreateThreadAsync(It.IsAny<Guid?>(), AgentId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid? threadId, Guid? _, CancellationToken _) => threadId is { } id ? (id, false) : (NewThreadId, true));
+        _threads.Setup(t => t.GetOrCreateThreadAsync(It.IsAny<Guid?>(), AgentId, It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid? threadId, Guid? _, string? _, ThreadListing _, CancellationToken _) => threadId is { } id ? (id, false) : (NewThreadId, true));
         _threads.Setup(t => t.SaveMessageAsync(It.IsAny<Guid>(), MessageRole.User, It.IsAny<string>(), null, null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(_userMessageId);
         _threads.Setup(t => t.FindUserMessageAsync(ExistingThreadId, _userMessageId, It.IsAny<CancellationToken>()))
@@ -36,9 +36,15 @@ public class DispatchFacadeUsageLimitTests
     }
 
     private AgentDispatchFacade CreateFacade(
-        IUsageLimitService? usageLimits = null, IBudgetService? budget = null, AiChatOptions? chatOptions = null)
+        IUsageLimitService? usageLimits = null, IBudgetService? budget = null, AiChatOptions? chatOptions = null,
+        IChatModelTargetResolver? target = null)
     {
         var services = new ServiceCollection();
+        if (target is not null)
+        {
+            services.AddScoped(_ => target);
+        }
+
         services.AddScoped(_ => _dispatcher.Object);
         services.AddScoped(_ => _threads.Object);
         services.AddScoped(_ => _threadService.Object);
@@ -84,7 +90,7 @@ public class DispatchFacadeUsageLimitTests
         error.HttpStatusCode.ShouldBe(429);
         error.Code.ShouldBe(ErrorCodes.UsageLimitReached);
         error.ErrorDetails.ShouldBeOfType<UsageLimitDenialDto>().Window.ShouldBe(UsageLimitWindow.Weekly);
-        _threads.Verify(t => t.GetOrCreateThreadAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _threads.Verify(t => t.GetOrCreateThreadAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()), Times.Never);
         _threads.Verify(t => t.SaveMessageAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
         _enqueued.ShouldBeEmpty();
     }
@@ -170,6 +176,59 @@ public class DispatchFacadeUsageLimitTests
     }
 
     [Fact]
+    public async Task AModelOfTheProviderTheConversationRunsOn_IsHandedToTheCli()
+    {
+        var options = new AiChatOptions
+        {
+            Models = [new ChatModelOption { Id = "claude-opus-5-5", Provider = "claude" }, new ChatModelOption { Id = "gpt-5", Provider = "codex" }]
+        };
+        var target = new Mock<IChatModelTargetResolver>();
+        target.Setup(t => t.ResolveAsync(It.Is<ChatModelTargetRequest>(r => r.AgentId == AgentId && r.UserId == UserId && r.BindingProviderKey == "claude"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ChatModelTarget { ProviderKey = "codex" });
+
+        await DrainAsync(CreateFacade(chatOptions: options, target: target.Object).RunStreamingAsync(Request(model: "gpt-5")).Take(1));
+
+        _enqueued.ShouldHaveSingleItem().Model.ShouldBe("gpt-5", "the application says this conversation runs on codex");
+    }
+
+    [Fact]
+    public async Task TheTurnsMetadata_ReachesTheTargetResolverAndTheRun()
+    {
+        var options = new AiChatOptions { Models = [new ChatModelOption { Id = "kimi-k2", Provider = "kimi" }] };
+        ChatModelTargetRequest? seen = null;
+        var target = new Mock<IChatModelTargetResolver>();
+        target.Setup(t => t.ResolveAsync(It.IsAny<ChatModelTargetRequest>(), It.IsAny<CancellationToken>()))
+            .Callback((ChatModelTargetRequest r, CancellationToken _) => seen = r)
+            .ReturnsAsync(new ChatModelTarget { ProviderKey = "kimi" });
+        var metadata = new Dictionary<string, JsonElement> { ["cliProfile"] = JsonSerializer.SerializeToElement("kimi") };
+
+        await DrainAsync(CreateFacade(chatOptions: options, target: target.Object)
+            .RunStreamingAsync(new AgentRunRequest { AgentId = AgentId, UserMessage = "hi", UserId = UserId, Model = "kimi-k2", TurnMetadata = metadata }).Take(1));
+
+        seen!.Metadata["cliProfile"].GetString().ShouldBe("kimi");
+        var run = _enqueued.ShouldHaveSingleItem();
+        run.Model.ShouldBe("kimi-k2");
+        run.Metadata!["cliProfile"].GetString().ShouldBe("kimi", "the dispatcher checks the turn and asks the placement with the same selection");
+    }
+
+    [Fact]
+    public async Task AModelOfAThirdProvider_IsStillNotHandedToTheCli_WithATarget()
+    {
+        var options = new AiChatOptions
+        {
+            Models = [new ChatModelOption { Id = "gpt-5", Provider = "codex" }, new ChatModelOption { Id = "kimi-k2", Provider = "kimi" }]
+        };
+        var target = new Mock<IChatModelTargetResolver>();
+        target.Setup(t => t.ResolveAsync(It.IsAny<ChatModelTargetRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ChatModelTarget { ProviderKey = "codex" });
+
+        await DrainAsync(CreateFacade(chatOptions: options, target: target.Object).RunStreamingAsync(Request(model: "kimi-k2")).Take(1));
+
+        _enqueued.ShouldHaveSingleItem().Model.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task WithoutAModelList_TheBindingDecidesTheModel()
     {
         await DrainAsync(CreateFacade().RunStreamingAsync(Request(model: "claude-opus-5-5")).Take(1));
@@ -182,7 +241,7 @@ public class DispatchFacadeUsageLimitTests
         public Task<CliAgentBindingDto?> GetByAgentIdAsync(Guid agentId, CancellationToken cancellationToken = default)
             => Task.FromResult<CliAgentBindingDto?>(new CliAgentBindingDto
             {
-                Id = Guid.NewGuid(), AgentId = agentId, CliRuntimeId = Guid.NewGuid(), ProviderKey = "claude", AcceptsAttachments = true
+                Id = Guid.NewGuid(), AgentId = agentId, CliRuntimeId = Guid.NewGuid(), ProviderKey = "claude", AcceptedAttachments = CliAttachmentKinds.Images | CliAttachmentKinds.Documents
             });
 
         public Task<Result<CliAgentBindingDto>> UpsertAsync(Guid agentId, UpsertCliAgentBindingDto input, CancellationToken cancellationToken = default)

@@ -5,6 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Tnzi.System grants InternalsVisibleTo with the framework's public key (the settings load state and its
+         health check are internal), so this assembly is signed with the same snk. -->
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\..\build\Tnzi.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
 
   <ItemGroup>

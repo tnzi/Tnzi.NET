@@ -192,11 +192,9 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
 // once data has loaded, and a real chart created on them keeps painting on a
 // canvas happy-dom does not have (an unhandled TypeError per animation frame).
 // Nothing here asserts on the charts.
-vi.mock('@tnzi/ui', async () => {
-  const actual = await vi.importActual<Record<string, unknown>>('@tnzi/ui')
+vi.mock('../../../src/headless/useEcharts', async () => {
   const { ref, shallowRef } = await import('vue')
   return {
-    ...actual,
     useEcharts: () => ({
       containerRef: ref<HTMLDivElement | null>(null),
       chart: shallowRef(null),
@@ -204,6 +202,12 @@ vi.mock('@tnzi/ui', async () => {
       resize: vi.fn(),
       dispose: vi.fn(),
     }),
+  }
+})
+vi.mock('@tnzi/ui', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('@tnzi/ui')
+  return {
+    ...actual,
     useTheme: () => ({
       settings: { value: { mode: 'light', colors: { primary: '#646cff' } } },
       isDark: { value: false },

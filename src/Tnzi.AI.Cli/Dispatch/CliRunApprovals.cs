@@ -35,8 +35,9 @@ internal sealed class CliEventSequence(int start) : IDisposable
 /// </remarks>
 internal sealed class CliRunApprovals
 {
-    private const string TimedOutMessage = "No one answered this permission request in time.";
-    private const string EndedMessage = "The run ended before this permission request was answered.";
+    // 三种请求（权限、问题、计划）共用这两句：都是「没有回答」，agent 不能把它当成用户的选择
+    private const string TimedOutMessage = "No one answered this request in time. Do not assume an answer.";
+    private const string EndedMessage = "The run ended before this request was answered.";
 
     private readonly CliRun _run;
     private readonly ICliProtocolAdapter _adapter;
@@ -105,7 +106,9 @@ internal sealed class CliRunApprovals
                 Sequence = sequence,
                 ProtocolKey = key,
                 Tool = CliRunExecutor.Truncate(evt.Tool, 200),
+                Kind = permission.Kind,
                 OptionsJson = JsonSerializer.Serialize(permission.Options, TnziJsonDefaults.Options),
+                QuestionsJson = permission.Questions is null ? null : JsonSerializer.Serialize(permission.Questions, TnziJsonDefaults.Options),
                 Status = CliPermissionStatus.Pending,
                 ExpiresAt = DateTime.UtcNow + _options.Timeout
             };
@@ -113,7 +116,7 @@ internal sealed class CliRunApprovals
             await repository.SaveChangesAsync(CancellationToken.None);
         }
 
-        var tracked = new Tracked(row.Id, key, evt.Tool, evt.CallId);
+        var tracked = new Tracked(row.Id, key, evt.Tool, evt.CallId, row.Kind);
         _requests[row.Id] = tracked;
 
         if (row.ResolvedSequence is { } resolvedAt)
@@ -344,16 +347,20 @@ internal sealed class CliRunApprovals
         Permission = new CliAgentPermission
         {
             RequestId = tracked.RequestId,
+            Kind = tracked.Kind,
             Status = resolution.Status,
             OptionId = resolution.OptionId,
-            AnsweredBy = resolution.AnsweredBy
+            AnsweredBy = resolution.AnsweredBy,
+            Answers = resolution.Status == CliPermissionStatus.Allowed ? resolution.Answers : null
         }
     };
 
     /// <summary>这一次尝试里的一个请求。</summary>
-    private sealed class Tracked(Guid requestId, string protocolKey, string? tool, string? callId)
+    private sealed class Tracked(Guid requestId, string protocolKey, string? tool, string? callId, string kind)
     {
         public Guid RequestId { get; } = requestId;
+
+        public string Kind { get; } = kind;
 
         public string ProtocolKey { get; } = protocolKey;
 
@@ -372,13 +379,15 @@ internal sealed class CliRunApprovals
     }
 
     /// <summary>一个请求的结局：交给 CLI 的回答与事件里记下的内容。</summary>
-    private sealed record Resolution(CliPermissionStatus Status, string? OptionId, string? Message, Guid? AnsweredBy)
+    private sealed record Resolution(
+        CliPermissionStatus Status, string? OptionId, string? Message, Guid? AnsweredBy, IReadOnlyDictionary<string, IReadOnlyList<string>>? Answers)
     {
-        public static Resolution From(CliRunPermissionRequest row) => new(row.Status, row.OptionId, row.Message, row.AnsweredById);
+        public static Resolution From(CliRunPermissionRequest row)
+            => new(row.Status, row.OptionId, row.Message, row.AnsweredById, CliRunMessageConverter.DeserializeAnswers(row.AnswersJson));
 
         public CliPermissionDecision ToDecision() => Status switch
         {
-            CliPermissionStatus.Allowed => new CliPermissionDecision(true, OptionId, null),
+            CliPermissionStatus.Allowed => new CliPermissionDecision(true, OptionId, null, Answers),
             CliPermissionStatus.Denied => new CliPermissionDecision(false, OptionId, Message),
             CliPermissionStatus.TimedOut => new CliPermissionDecision(false, null, TimedOutMessage),
             _ => new CliPermissionDecision(false, null, EndedMessage)

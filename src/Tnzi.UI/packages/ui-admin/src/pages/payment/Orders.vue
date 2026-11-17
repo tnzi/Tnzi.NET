@@ -144,7 +144,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NForm, NFormItem, NInput, NInputNumber } from 'naive-ui'
-import { TRelativeTime, TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 import TItemPage from '../../components/crud/TItemPage.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'

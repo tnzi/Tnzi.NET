@@ -7,11 +7,29 @@ namespace Tnzi.System.Configuration;
 ///
 /// 仅暴露未加密配置。加密配置依旧由 ISettingService.GetDecryptedAsync 单条读取，
 /// 避免明文落到内存 dict + IOptionsMonitor 缓存。
+///
+/// 首次填充失败时（启动那一刻数据库不可达），<see cref="LoadState"/> 停在 <see cref="SettingConfigurationLoadState.Failed"/>，
+/// 由 <see cref="SettingConfigurationInitialLoadService"/> 在后台退避重试直到读到为止，
+/// 期间 <see cref="SettingConfigurationHealthCheck"/> 报告未就绪。
 /// </summary>
 public sealed class SettingConfigurationProvider : ConfigurationProvider
 {
     private IServiceProvider? _rootServiceProvider;
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
+    private volatile SettingConfigurationLoadState _loadState = SettingConfigurationLoadState.NotAttached;
+    private int _failedAttempts;
+
+    /// <summary>从数据库填充到哪一步了。只有 <see cref="SettingConfigurationLoadState.Failed"/> 意味着正在用 appsettings 的值顶替。</summary>
+    internal SettingConfigurationLoadState LoadState => _loadState;
+
+    /// <summary>首次填充失败以来连续失败的次数（成功读到一次后归零）。</summary>
+    internal int FailedAttempts => Volatile.Read(ref _failedAttempts);
+
+    /// <summary>首次填充从哪一刻开始失败；没有失败时为 null。</summary>
+    internal DateTimeOffset? FailingSince { get; private set; }
+
+    /// <summary>首次填充最近一次失败的异常；没有失败时为 null。</summary>
+    internal Exception? LastFailure { get; private set; }
 
     internal SettingConfigurationSource OwningSource { get; }
 
@@ -32,6 +50,8 @@ public sealed class SettingConfigurationProvider : ConfigurationProvider
     internal void AttachServiceProvider(IServiceProvider rootServiceProvider)
     {
         _rootServiceProvider = Check.NotNull(rootServiceProvider);
+        if (_loadState == SettingConfigurationLoadState.NotAttached)
+            _loadState = SettingConfigurationLoadState.Pending;
     }
 
     /// <summary>
@@ -59,7 +79,10 @@ public sealed class SettingConfigurationProvider : ConfigurationProvider
 
             if (repository == null)
             {
+                // 没有 Setting 表的宿主（无 DbContext 的轻宿主 / 测试宿主）：没有可读的东西，也就没有可重试的东西。
                 logger?.LogWarning("IRepository<Setting> not available; SettingConfigurationProvider skipped reload");
+                if (_loadState != SettingConfigurationLoadState.Loaded)
+                    _loadState = SettingConfigurationLoadState.Unavailable;
                 return;
             }
 
@@ -83,18 +106,66 @@ public sealed class SettingConfigurationProvider : ConfigurationProvider
                 }
 
                 Data = data;
+                var recoveredAfter = _loadState == SettingConfigurationLoadState.Failed ? FailedAttempts : 0;
+                MarkLoaded();
                 OnReload();
-                logger?.LogDebug("SettingConfigurationProvider loaded {Count} setting(s) from database", data.Count);
+                if (recoveredAfter > 0)
+                {
+                    logger?.LogInformation(
+                        "SettingConfigurationProvider loaded {Count} setting(s) from database after {Attempts} failed attempt(s); the database values now replace the appsettings defaults",
+                        data.Count, recoveredAfter);
+                }
+                else
+                {
+                    logger?.LogDebug("SettingConfigurationProvider loaded {Count} setting(s) from database", data.Count);
+                }
             }
-            catch (Exception ex) when (!propagateFailure)
+            catch (Exception ex) when (!IsCancellation(ex, cancellationToken) && RecordFailure(ex) && !propagateFailure)
             {
-                logger?.LogWarning(ex, "SettingConfigurationProvider failed to load from database; the configuration keeps its previous values");
+                if (_loadState == SettingConfigurationLoadState.Failed)
+                {
+                    logger?.LogWarning(ex,
+                        "SettingConfigurationProvider failed to load from database; the app runs on the appsettings values " +
+                        "until a background retry reads the database (health check 'settings' reports it meanwhile)");
+                }
+                else
+                {
+                    logger?.LogWarning(ex, "SettingConfigurationProvider failed to load from database; the configuration keeps its previous values");
+                }
             }
         }
         finally
         {
             _reloadLock.Release();
         }
+    }
+
+    private static bool IsCancellation(Exception ex, CancellationToken cancellationToken) =>
+        ex is OperationCanceledException && cancellationToken.IsCancellationRequested;
+
+    private void MarkLoaded()
+    {
+        _loadState = SettingConfigurationLoadState.Loaded;
+        Volatile.Write(ref _failedAttempts, 0);
+        FailingSince = null;
+        LastFailure = null;
+    }
+
+    /// <summary>
+    /// 记下一次读库失败（总是返回 <see langword="true"/>，供异常过滤器调用，不改变是否捕获）。
+    /// 已经读到过真实值的 provider 只是「这次重载失败、保持上一次的值」，不回到 Failed：那是变更重载的既有语义。
+    /// </summary>
+    private bool RecordFailure(Exception ex)
+    {
+        if (_loadState is SettingConfigurationLoadState.Loaded or SettingConfigurationLoadState.Unavailable)
+            return true;
+
+        if (_loadState != SettingConfigurationLoadState.Failed)
+            FailingSince = DateTimeOffset.UtcNow;
+        _loadState = SettingConfigurationLoadState.Failed;
+        Interlocked.Increment(ref _failedAttempts);
+        LastFailure = ex;
+        return true;
     }
 
     /// <summary>

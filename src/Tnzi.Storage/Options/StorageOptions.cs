@@ -441,6 +441,18 @@ public class S3StorageOptions
     /// 获取或设置 是否使用HTTPS
     /// </summary>
     public bool UseHttps { get; set; } = true;
+
+    /// <summary>
+    /// 获取或设置 浏览器访问对象存储的公开端点 URL（可选，绝对的 http/https 地址，例如 <c>https://s3.example.com</c>）。
+    ///
+    /// **只用于签预签名 URL**（GET 下载与 PUT 直传），其余所有操作仍走 <see cref="ServiceUrl"/>。为的是应用与浏览器经不同地址
+    /// 到达同一个存储的部署：应用在内网经 <c>http://10.0.0.5:3900</c> 访问，浏览器经 <c>https://s3.example.com</c> 访问。
+    /// SigV4 签名覆盖 Host，所以链接必须从一开始就对公开主机签名，事后改写 URL 会让签名失效。
+    ///
+    /// 签出的链接用路径样式（<c>https://s3.example.com/{bucket}/{key}</c>），scheme 取这个 URL 自己的，
+    /// 凭据与签名区域与 <see cref="ServiceUrl"/> 那一路相同。留空时预签名 URL 照旧对 <see cref="ServiceUrl"/> 签名。
+    /// </summary>
+    public string? PublicServiceUrl { get; set; }
 }
 
 /// <summary>
@@ -488,6 +500,18 @@ public class R2StorageOptions
     /// 获取或设置 自定义端点URL（可选，默认使用 https://{AccountId}.r2.cloudflarestorage.com）
     /// </summary>
     public string? CustomEndpoint { get; set; }
+
+    /// <summary>
+    /// 获取或设置 浏览器访问对象存储的公开端点 URL（可选，绝对的 http/https 地址，例如 <c>https://s3.example.com</c>）。
+    ///
+    /// **只用于签预签名 URL**（GET 下载与 PUT 直传），其余所有操作仍走 R2 端点（<see cref="CustomEndpoint"/> 或由 <see cref="AccountId"/> 拼出的地址）。为的是应用与浏览器经不同地址
+    /// 到达同一个存储的部署：应用在内网经 <c>http://10.0.0.5:3900</c> 访问，浏览器经 <c>https://s3.example.com</c> 访问。
+    /// SigV4 签名覆盖 Host，所以链接必须从一开始就对公开主机签名，事后改写 URL 会让签名失效。
+    ///
+    /// 签出的链接用路径样式（<c>https://s3.example.com/{bucket}/{key}</c>），scheme 取这个 URL 自己的，
+    /// 凭据与签名区域与 R2 端点（<see cref="CustomEndpoint"/> 或由 <see cref="AccountId"/> 拼出的地址） 那一路相同。留空时预签名 URL 照旧对 R2 端点（<see cref="CustomEndpoint"/> 或由 <see cref="AccountId"/> 拼出的地址） 签名。
+    /// </summary>
+    public string? PublicServiceUrl { get; set; }
 }
 
 /// <summary>
@@ -676,6 +700,8 @@ public class StorageOptionsValidator : OptionsValidatorBase<StorageOptions>
 
                 if (string.IsNullOrEmpty(options.S3.Region))
                     errors.Add("S3.Region is required.");
+
+                ValidatePublicServiceUrl("S3", options.S3.PublicServiceUrl, errors);
             }
         }
 
@@ -712,7 +738,31 @@ public class StorageOptionsValidator : OptionsValidatorBase<StorageOptions>
 
                 if (string.IsNullOrEmpty(options.R2.CustomEndpoint) && string.IsNullOrEmpty(options.R2.AccountId))
                     errors.Add("R2.AccountId is required when CustomEndpoint is not set.");
+
+                ValidatePublicServiceUrl("R2", options.R2.PublicServiceUrl, errors);
             }
         }
+    }
+
+    /// <summary>
+    /// 公开端点是交给浏览器的地址，不像 ServiceUrl 那样容许省略 scheme：链接的 scheme 就取自它，
+    /// 猜错一次就是一批打不开的链接。带路径或查询的地址也拒绝：签名覆盖路径，
+    /// 而桶名与键要直接跟在主机后面，前面多一段前缀的反向代理会把签名对不上的请求转给存储。
+    /// </summary>
+    private static void ValidatePublicServiceUrl(string provider, string? publicServiceUrl, List<string> errors)
+    {
+        if (string.IsNullOrWhiteSpace(publicServiceUrl))
+            return;
+
+        if (!Uri.TryCreate(publicServiceUrl, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrEmpty(uri.Host))
+        {
+            errors.Add($"{provider}.PublicServiceUrl must be an absolute http or https URL, for example https://s3.example.com.");
+            return;
+        }
+
+        if (uri.AbsolutePath != "/" || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
+            errors.Add($"{provider}.PublicServiceUrl must be a scheme, host and optional port only, without a path or query.");
     }
 }

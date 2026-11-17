@@ -26,7 +26,7 @@
 import { computed, defineAsyncComponent, type Component } from 'vue'
 import { useRouter } from 'vue-router'
 import { NResult, NSpin } from 'naive-ui'
-import { TOverlayTheme } from '@tnzi/ui'
+import TOverlayTheme from '../overlay/TOverlayTheme.vue'
 import { getDesktopPanel } from '../../headless/desktop-panels'
 import { useWindowRoute } from '../../headless/useWindowRoute'
 import { useAdminRouteStore } from '../../stores/useAdminRouteStore'

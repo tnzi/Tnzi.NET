@@ -8,6 +8,17 @@ public class UsageLog : CreationAuditedEntity<Guid>, IMultiTenant
     public Guid? TenantId { get; set; }
 
     /// <summary>
+    /// 这一行用量计在谁的名下（可选）。为空 = 这次调用确实不属于任何用户（系统任务、匿名调用）。
+    /// </summary>
+    /// <remarks>
+    /// 写入时定下且之后不再改：删除线程只解除 <see cref="ThreadId"/>，归属仍在。按用户的用量查询以它为准，
+    /// 不要再经 <see cref="ThreadId"/> 去找线程的创建人 —— 没有线程的调用、线程已删除的调用都找不到人。
+    /// 刻意不用 <c>CreatorId</c>：很多写入发生在没有登录用户的作用域里（后台运行、按运行令牌认证的回调），
+    /// 那里的创建人为空，计量对象却是明确的。
+    /// </remarks>
+    public Guid? UserId { get; set; }
+
+    /// <summary>
     /// 关联的 Agent ID（可选）
     /// </summary>
     public Guid? AgentId { get; set; }

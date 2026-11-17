@@ -9,11 +9,13 @@
         :help="help"
         :help-title="helpTitle"
         :back="back"
+        :inline-actions="inlineActions"
         :translate="translate"
       >
         <template v-if="$slots.title" #title><slot name="title" /></template>
         <template v-if="$slots.actions" #actions><slot name="actions" /></template>
         <template v-if="$slots.extra" #extra><slot name="extra" /></template>
+        <template v-if="$slots.below" #below><slot name="below" /></template>
       </TPageHeader>
     </slot>
     <div class="t-content-page__body">
@@ -45,6 +47,8 @@ interface Props {
   card?: boolean
   /** Body scroll behaviour. 'auto' = page scrolls (long-form); 'fill' = body flex-fills, inner element scrolls (tables); 'none' = no scroll mgmt. */
   scroll?: 'auto' | 'fill' | 'none'
+  /** Forwarded to `TPageHeader`: keep the actions on the title's row on phones (a compact icon cluster). */
+  inlineActions?: boolean
   translate?: (key: string) => string
 }
 
@@ -58,6 +62,7 @@ const props = withDefaults(defineProps<Props>(), {
   headerSurface: true,
   card: false,
   scroll: 'auto',
+  inlineActions: false,
   translate: undefined,
 })
 
@@ -66,6 +71,7 @@ defineSlots<{
   title?: () => unknown
   actions?: () => unknown
   extra?: () => unknown
+  below?: () => unknown
   default?: () => unknown
 }>()
 
@@ -81,7 +87,8 @@ const renderHeader = computed(() => {
     route?.meta?.title ||
     slots.title ||
     slots.actions ||
-    slots.extra
+    slots.extra ||
+    slots.below
   )
 })
 </script>

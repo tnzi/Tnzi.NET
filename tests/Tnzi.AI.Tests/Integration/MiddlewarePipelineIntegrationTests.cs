@@ -226,8 +226,8 @@ public class MiddlewarePipelineIntegrationTests
         {
             // 模拟线程管理
             _threadServiceMock
-                .Setup(t => t.GetOrCreateThreadAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Guid? threadId, Guid? agentId, CancellationToken ct) =>
+                .Setup(t => t.GetOrCreateThreadAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid? threadId, Guid? agentId, string? origin, ThreadListing listing, CancellationToken ct) =>
                 {
                     var tid = threadId ?? Guid.NewGuid();
                     return (tid, threadId == null);

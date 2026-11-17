@@ -4,7 +4,7 @@ import { formatCurrency, formatDateTime } from '@tnzi/core'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import type { StatusType } from '@tnzi/ui'
+import type { StatusType } from '../../components/display/TStatusBadge.vue'
 
 /**
  * Orders page config - aligned with the real `PaymentDto`

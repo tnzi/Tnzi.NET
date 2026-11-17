@@ -22,16 +22,10 @@ import { join, sep } from 'path'
  */
 
 /**
- * Both packages: `@tnzi/ui` owns the shells and the cropper modal, this one
- * owns everything else. `@tnzi/ui-ai` is deliberately NOT scanned - its
- * overlays take their mode from `useAiNaiveTheme(isDark)`, the chat shell's
- * own switch, and `TOverlayTheme` would reset them to whatever the `@tnzi/ui`
- * theme context says instead (a light modal over a dark chat).
+ * This package is the only one that renders naive overlays: `@tnzi/ui` renders
+ * with no component library and `@tnzi/ui-ai` draws its own overlays.
  */
-const ROOTS = [
-  join(__dirname, '..', '..', 'src'),
-  join(__dirname, '..', '..', '..', 'ui', 'src'),
-]
+const ROOTS = [join(__dirname, '..', '..', 'src')]
 
 /**
  * Files that may pass `:dense="false"` (theme reset without the small control
@@ -70,7 +64,7 @@ function walk(dir: string, out: string[] = []): string[] {
   return out
 }
 
-/** `@tnzi/ui/components/form/TImageUpload.vue` - package-qualified, split on the LAST `src`. */
+/** `@tnzi/ui-admin/components/forms/TImageUpload.vue` - package-qualified, split on the LAST `src`. */
 function relative(file: string): string {
   const parts = file.split(sep)
   const at = parts.lastIndexOf('src')
@@ -111,7 +105,7 @@ describe('overlay chrome', () => {
   it('finds the overlays it is meant to check', () => {
     expect(files.length).toBeGreaterThan(100)
     expect(found.length).toBeGreaterThanOrEqual(18)
-    expect(found.map((o) => o.file)).toContain('@tnzi/ui/components/overlay/TModalShell.vue')
+    expect(found.map((o) => o.file)).toContain('@tnzi/ui-admin/components/overlay/TModalShell.vue')
   })
 
   it('every NModal / NDrawer renders inside a TOverlayTheme', () => {

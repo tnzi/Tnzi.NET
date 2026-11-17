@@ -3,7 +3,7 @@ import type { DataTableColumns } from 'naive-ui'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import { TRelativeTime } from '@tnzi/ui'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 import {
   ConversationType,
   MemberRole,

@@ -131,6 +131,7 @@ public class EntityPolicyTests : IDisposable
         [typeof(AgentAttachment)] = (true, false, false),
         [typeof(AgentThread)] = (true, true, false),
         [typeof(AgentThreadMessage)] = (true, false, false),
+        [typeof(QueuedThreadMessage)] = (true, false, false),
         [typeof(AgentRun)] = (true, true, false),
         [typeof(AgentRunNode)] = (true, false, false),
         [typeof(AgentRunTrace)] = (true, false, false),
@@ -352,6 +353,7 @@ internal sealed class EntityPolicyDbContext : TnziDbContext<EntityPolicyDbContex
         modelBuilder.ApplyConfiguration(new UserProfileConfiguration());
         modelBuilder.ApplyConfiguration(new AgentArtifactConfiguration());
         modelBuilder.ApplyConfiguration(new AgentAttachmentConfiguration());
+        modelBuilder.ApplyConfiguration(new QueuedThreadMessageConfiguration());
         modelBuilder.ApplyConfiguration(new EvaluationRunConfiguration());
         modelBuilder.ApplyConfiguration(new ProviderConfiguration());
         modelBuilder.ApplyConfiguration(new SubAgentTypeConfiguration());

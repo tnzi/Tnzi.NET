@@ -130,6 +130,27 @@ describe('the widget document', () => {
     expect(copy).toContain('<style data-widget-theme>');
     expect(copy).not.toContain('<script>');
   });
+
+  it("draws the conversation's thin scrollbar from the theme variables, in a layer the widget's CSS overrides", () => {
+    const style = widgetThemeStyle(theme);
+    const layer = style.indexOf('@layer widget-host{');
+    expect(layer).toBeGreaterThan(style.indexOf(':root{'));
+    // Every scrollbar rule is inside the layer: unlayered widget rules win whatever their specificity.
+    expect(style.indexOf('::-webkit-scrollbar')).toBeGreaterThan(layer);
+    expect(style.indexOf('scrollbar-width')).toBeGreaterThan(layer);
+
+    const webkit = /@supports selector\(::-webkit-scrollbar\)\{(.*?\})\}/.exec(style)?.[1] ?? '';
+    expect(webkit).toContain('::-webkit-scrollbar{width:var(--scrollbar-size);height:var(--scrollbar-size);}');
+    expect(webkit).toContain('::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent;}');
+    expect(webkit).toMatch(/::-webkit-scrollbar-thumb\{background:var\(--scrollbar-thumb\);border-radius:999px;/);
+    expect(webkit).toContain('::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-thumb-hover);');
+    // The standard properties would switch Chromium's pseudo-elements off, the widget's own included.
+    expect(webkit).not.toContain('scrollbar-width');
+    expect(webkit).not.toContain('scrollbar-color');
+
+    const standard = /@supports not selector\(::-webkit-scrollbar\)\{(.*?\})\}/.exec(style)?.[1] ?? '';
+    expect(standard).toBe('html,html *{scrollbar-width:thin;scrollbar-color:var(--scrollbar-thumb) transparent;}');
+  });
 });
 
 describe('the widget theme', () => {
@@ -149,6 +170,48 @@ describe('the widget theme', () => {
       }
       expect(sameWidgetTheme(theme, readWidgetTheme(inside))).toBe(true);
       expect(sameWidgetTheme(theme, readWidgetTheme(document.body))).toBe(false);
+    } finally {
+      page.remove();
+    }
+  });
+
+  it("hands the widget the conversation's scrollbar, light or dark, when the page has no tokens", () => {
+    const page = document.createElement('div');
+    document.body.appendChild(page);
+    try {
+      expect(readWidgetTheme(page).variables).toMatchObject({
+        '--scrollbar-size': '8px',
+        '--scrollbar-thumb': 'rgba(0, 0, 0, 0.18)',
+        '--scrollbar-thumb-hover': 'rgba(0, 0, 0, 0.32)',
+      });
+      page.className = 'dark';
+      expect(readWidgetTheme(page).variables).toMatchObject({
+        '--scrollbar-size': '8px',
+        '--scrollbar-thumb': 'rgba(255, 255, 255, 0.18)',
+        '--scrollbar-thumb-hover': 'rgba(255, 255, 255, 0.34)',
+      });
+    } finally {
+      page.remove();
+    }
+  });
+
+  it("reads the host's own scrollbar tokens, and a change to them is a theme change", () => {
+    const page = document.createElement('div');
+    page.style.setProperty('--tnzi-ai-scrollbar-size', '6px');
+    page.style.setProperty('--tnzi-ai-scrollbar-thumb', 'rgb(1, 2, 3)');
+    page.style.setProperty('--tnzi-ai-scrollbar-thumb-hover', 'rgb(4, 5, 6)');
+    document.body.appendChild(page);
+    try {
+      const before = readWidgetTheme(page);
+      expect(before.variables).toMatchObject({
+        '--scrollbar-size': '6px',
+        '--scrollbar-thumb': 'rgb(1, 2, 3)',
+        '--scrollbar-thumb-hover': 'rgb(4, 5, 6)',
+      });
+      expect(widgetHostContext(before, 'inline').styles.variables['--scrollbar-thumb']).toBe('rgb(1, 2, 3)');
+
+      page.style.setProperty('--tnzi-ai-scrollbar-thumb-hover', 'rgb(7, 8, 9)');
+      expect(sameWidgetTheme(before, readWidgetTheme(page))).toBe(false);
     } finally {
       page.remove();
     }

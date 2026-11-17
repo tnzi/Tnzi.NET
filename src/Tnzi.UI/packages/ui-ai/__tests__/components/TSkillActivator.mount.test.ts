@@ -81,6 +81,33 @@ describe('TSkillActivator required parameters', () => {
     expect(onActivate).toHaveBeenCalledExactlyOnceWith('weather', { city: ' Paris ', note: '' });
   });
 
+  it('labels each parameter field and marks the required ones', async () => {
+    const root = mount(() => h(TSkillActivator, { skill, params }));
+    await settle();
+
+    const inputs = [...root.querySelectorAll<HTMLInputElement>('input.t-input')];
+    expect(inputs).toHaveLength(2);
+    const label = root.querySelector<HTMLLabelElement>(`label[for="${inputs[0]!.id}"]`)!;
+    expect(label.textContent).toContain('City');
+    expect(label.textContent).toContain('*');
+    expect(inputs[0]!.required).toBe(true);
+    expect(inputs[1]!.required).toBe(false);
+  });
+
+  it('Cancel emits cancel and nothing else', async () => {
+    const onActivate = vi.fn();
+    const onCancel = vi.fn();
+    const root = mount(() => h(TSkillActivator, { skill, params, onActivate, onCancel }));
+    await settle();
+
+    const cancel = [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Cancel')!;
+    cancel.click();
+    await settle();
+
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+
   it('a required parameter with a default value can be activated as is', async () => {
     const onActivate = vi.fn();
     const root = mount(() =>

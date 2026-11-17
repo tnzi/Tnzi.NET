@@ -746,7 +746,7 @@ function selectFile(path: string): void {
   top: 0;
   bottom: 0;
   width: 8px;
-  z-index: 10;
+  z-index: 1; /* over the panel content, within this component */
   cursor: ew-resize;
   display: flex;
   align-items: stretch;

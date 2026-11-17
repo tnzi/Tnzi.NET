@@ -158,7 +158,7 @@ function toggle(): void {
 button.t-tool-step__line { cursor: pointer; }
 button.t-tool-step__line:hover { color: var(--tnzi-ai-text); }
 button.t-tool-step__line:focus-visible {
-  outline: 2px solid var(--tnzi-ai-accent);
+  outline: var(--tnzi-ai-focus-outline);
   outline-offset: 2px;
 }
 .t-tool-step__mark {

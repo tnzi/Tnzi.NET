@@ -38,9 +38,11 @@
  * ```
  *
  * **Attachments.** The widgets show a paperclip and accept paste / drop by
- * default. Server-backed mode sends images inline and needs `uploadFile` for
- * anything else (a `file` part is a Storage id) - without it a non-image file
- * is refused, never silently dropped: the turn shows as failed in the widget
+ * default. Server-backed mode sends images and PDFs inline; anything else
+ * goes inline too with `inlineFiles` (for an agent that runs as an external CLI
+ * on turns its backend accepts files for), or by `uploadFile` (a `file` part is
+ * a Storage id) - without either a non-image file is refused, never silently
+ * dropped: the turn shows as failed in the widget
  * (its Retry sends the same text and files again) and `onError` is called.
  * The framework's default backend does not load file contents (a `file` part
  * gets 501), so only a backend that resolves file references needs `uploadFile`.
@@ -51,15 +53,12 @@
  * attachments are still uploading) is ignored, as the composer's Enter is:
  * two concurrent turns would share the thread id and the abort handle.
  *
- * **Theme.** The widget provides its own naive theme (see `useAiNaiveTheme`):
- * the Tnzi palette rather than naive's stock green, light or dark after
- * `<html>` (a `dark` class or `data-theme="dark"`), which is also what
- * switches the package's `--tnzi-ai-*` colours. Without it the launcher and the send button stayed
- * naive green and light on any page.
+ * **Theme.** Everything the widget draws reads the package's `--tnzi-ai-*`
+ * colours, which follow `<html>` (a `dark` class or `data-theme="dark"`)
+ * through the package stylesheet. Nothing has to be provided around it.
  */
 
 import { createApp, ref, h, type App } from 'vue';
-import { NConfigProvider } from 'naive-ui';
 import { streamChat } from '@tnzi/core/services/ai';
 import {
   attachmentsToContentParts,
@@ -71,14 +70,6 @@ import TFloatingChat from './TFloatingChat.vue';
 import TSidebarChat from './TSidebarChat.vue';
 import TInlineChat from './TInlineChat.vue';
 import type { ChatMessage, MessageRole } from '../headless/useChat';
-import { useAiNaiveTheme } from '../headless/useAiNaiveTheme';
-
-/** The page's colour mode, read the way the package stylesheet reads it. */
-function documentIsDark(): boolean {
-  if (typeof document === 'undefined') return false;
-  const root = document.documentElement;
-  return root.classList.contains('dark') || root.getAttribute('data-theme') === 'dark';
-}
 
 /** Handle passed to `onSend` for pushing a reply back into the widget. */
 export interface TnziChatTransportApi {
@@ -131,14 +122,25 @@ export interface TnziChatOptions {
   enableAttachments?: boolean;
   /**
    * Server-backed mode: upload a non-image attachment and return its storage
-   * id (images travel inline as base64 and need nothing). Without it a
+   * id (images travel inline as base64 and need nothing). Without it (or `inlineFiles`) a
    * non-image file is refused through `onError` and the turn is not sent.
    * Only for a backend that resolves file references: the default one answers
    * a `file` part with 501.
    */
   uploadFile?: (file: File) => Promise<UploadedAttachment>;
-  /** Per-attachment ceiling in bytes. Default 10 MB. */
+  /**
+   * Send files that are not images or PDFs inline (`document` parts with the
+   * file's name and type) instead of refusing them or uploading them. For an
+   * agent that runs as an external CLI on a backend whose turns accept files
+   * (`ICliFileAttachmentPolicy`): the agent opens them with its own tools. A
+   * turn that does not take files is refused by the backend (415) through
+   * `onError`. Takes precedence over `uploadFile`. Default false.
+   */
+  inlineFiles?: boolean;
+  /** Per-attachment ceiling in bytes for images and PDFs. Default 10 MB. */
   maxAttachmentBytes?: number;
+  /** Per-file ceiling in bytes for files sent with `inlineFiles`. Default `maxAttachmentBytes`. */
+  maxFileAttachmentBytes?: number;
 }
 
 export interface TnziChatInstance {
@@ -374,7 +376,9 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
     try {
       resolved = await filesToContentParts(text, files, {
         uploadFile: options.uploadFile,
+        inlineFiles: options.inlineFiles,
         maxBytes: options.maxAttachmentBytes,
+        maxFileBytes: options.maxFileAttachmentBytes,
       });
     } catch (err) {
       if (destroyed || turn !== turnSeq) return;
@@ -449,38 +453,25 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
     setStreaming(false);
   }
 
-  const isDark = ref(documentIsDark());
-  const themeObserver =
-    typeof MutationObserver !== 'undefined' && typeof document !== 'undefined'
-      ? new MutationObserver(() => {
-          isDark.value = documentIsDark();
-        })
-      : null;
-  themeObserver?.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
-
   let app: App | null = createApp({
     setup() {
-      const { theme, themeOverrides } = useAiNaiveTheme(isDark);
-      // `abstract`: no wrapper element around the widget.
       return () =>
-        h(NConfigProvider, { abstract: true, theme: theme.value, themeOverrides: themeOverrides.value }, () =>
-          h(component, {
-            messages: messages.value,
-            isStreaming: isStreaming.value,
-            inputText: inputText.value,
-            open: isOpen.value,
-            'onUpdate:open': (v: boolean) => {
-              isOpen.value = v;
-            },
-            'onUpdate:inputText': (v: string) => {
-              inputText.value = v;
-            },
-            enableAttachments: options.enableAttachments ?? true,
-            onSend: (content: string, files: File[]) => send(content, files),
-            onStop: () => stop(),
-            onRegenerate: (messageId: string) => regenerate(messageId),
-          }),
-        );
+        h(component, {
+          messages: messages.value,
+          isStreaming: isStreaming.value,
+          inputText: inputText.value,
+          open: isOpen.value,
+          'onUpdate:open': (v: boolean) => {
+            isOpen.value = v;
+          },
+          'onUpdate:inputText': (v: string) => {
+            inputText.value = v;
+          },
+          enableAttachments: options.enableAttachments ?? true,
+          onSend: (content: string, files: File[]) => send(content, files),
+          onStop: () => stop(),
+          onRegenerate: (messageId: string) => regenerate(messageId),
+        });
     },
   });
 
@@ -508,7 +499,6 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
       abortController?.abort();
       abortController = null;
       refusedTurnFiles.clear();
-      themeObserver?.disconnect();
       app?.unmount();
       app = null;
       if (ownsMountEl && mountEl.parentNode) {

@@ -10,6 +10,7 @@
 import { onBeforeUnmount, ref } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useAiI18n } from '../../i18n/index'
+import { useBackLayer } from '../../headless/back-layers'
 
 const props = withDefaults(
   defineProps<{
@@ -88,6 +89,10 @@ function onKeydown(e: KeyboardEvent): void {
     emit('close')
   }
 }
+
+/* The narrow layer is a screen of its own over the conversation: back returns
+   from it, as its back button does, instead of leaving the page. */
+useBackLayer(() => props.narrow, () => emit('close'))
 
 onBeforeUnmount(stopDrag)
 </script>

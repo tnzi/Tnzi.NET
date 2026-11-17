@@ -17,7 +17,7 @@
  * })
  * ```
  */
-import type { WidgetDef } from '@tnzi/ui'
+import type { WidgetDef } from './widget-types'
 import type { KpiCard } from '../pages/TDashboardPage.vue'
 import type { TimelineItem } from '../dashboard/TProjectTimeline.vue'
 import type { QuickAction } from './TWidgetQuickActions.vue'

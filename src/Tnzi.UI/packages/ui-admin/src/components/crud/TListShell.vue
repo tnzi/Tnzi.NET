@@ -1,7 +1,42 @@
 <template>
   <div class="t-list-shell" :class="`t-list-shell--${mode}`">
-    <!-- 手机端搜索开关与下展面板各定义一次：头部在时挂进头部卡，
-         头部关掉（tab 内嵌列表）时挂进列表卡工具栏，两条路径同一份表单与行为。 -->
+    <!-- 桌面搜索簇（关键字框 + 搜索 + 高级搜索）只定义这一次，挂在三处之一：
+         头部在时挂进头部卡右侧；头部关掉、身处 TTabsPage 某个页签且是该页签唯一的
+         可搜索列表时，传送进 TTabsPage 的页头栏右侧；其余头部关掉的情形挂进列表卡
+         工具栏左侧。各处同一份按钮类型、图标与尺寸，用户看到的是同一个入口，而不是
+         几套控件。没有外层元素，所以在工具栏里它的成员与其余过滤项同属一行，窄时一起换行。 -->
+    <DefineDesktopSearch>
+      <!-- showDefaultSearch=false 只隐藏关键词框(后端无自由文本查询的页面),
+           searchFields 驱动的 Advanced 仍保留 -->
+      <template v-if="showDefaultSearch">
+        <NInput
+          v-model:value="simpleQuery"
+          size="small"
+          clearable
+          :placeholder="searchPlaceholder ?? t('admin.crud.searchPlaceholder')"
+          class="t-list-shell__search-input"
+          @keydown.enter="onSimpleSearch"
+          @clear="onSimpleClear"
+        >
+          <template #prefix><TSvgIcon icon="mdi:magnify" :size="16" /></template>
+        </NInput>
+        <NButton size="small" type="primary" class="t-list-shell__search-submit" @click="onSimpleSearch">
+          {{ t('admin.crud.search') }}
+        </NButton>
+      </template>
+      <NButton
+        v-if="hasAdvanced"
+        size="small"
+        tertiary
+        class="t-list-shell__adv-toggle"
+        @click="advancedOpen = true"
+      >
+        <template #icon><TSvgIcon icon="mdi:filter-variant" :size="16" /></template>
+        {{ t('admin.crud.advancedSearch') }}
+      </NButton>
+    </DefineDesktopSearch>
+    <!-- 手机端搜索开关与下展面板各定义一次，与桌面搜索簇挂在同样的三处之一，
+         各处同一份表单与行为。 -->
     <DefineMobileToggles>
       <div class="t-list-shell__search t-list-shell__search--mobile">
         <NButton
@@ -29,8 +64,8 @@
         </NButton>
       </div>
     </DefineMobileToggles>
-    <DefineMobilePanel v-slot="{ inToolbar }">
-      <div class="t-list-shell__mobile-search" :class="{ 't-list-shell__mobile-search--toolbar': inToolbar }">
+    <DefineMobilePanel v-slot="{ placement }">
+      <div class="t-list-shell__mobile-search" :class="`t-list-shell__mobile-search--${placement}`">
         <template v-if="mobilePanel === 'keyword'">
           <NInput
             ref="mobileKeywordRef"
@@ -96,34 +131,7 @@
           <!-- Desktop / tablet: inline keyword input + Advanced opens a right
                drawer. -->
           <div v-if="!bp.isSm.value" class="t-list-shell__search">
-            <!-- showDefaultSearch=false 只隐藏关键词框(后端无自由文本查询的页面),
-                 searchFields 驱动的 Advanced 仍保留 -->
-            <template v-if="showDefaultSearch">
-              <NInput
-                v-model:value="simpleQuery"
-                size="small"
-                clearable
-                :placeholder="searchPlaceholder ?? t('admin.crud.searchPlaceholder')"
-                class="t-list-shell__search-input"
-                @keydown.enter="onSimpleSearch"
-                @clear="onSimpleClear"
-              >
-                <template #prefix><TSvgIcon icon="mdi:magnify" :size="16" /></template>
-              </NInput>
-              <NButton size="small" type="primary" @click="onSimpleSearch">
-                {{ t('admin.crud.search') }}
-              </NButton>
-            </template>
-            <NButton
-              v-if="hasAdvanced"
-              size="small"
-              tertiary
-              class="t-list-shell__adv-toggle"
-              @click="advancedOpen = true"
-            >
-              <template #icon><TSvgIcon icon="mdi:filter-variant" :size="16" /></template>
-              {{ t('admin.crud.advancedSearch') }}
-            </NButton>
+            <ReuseDesktopSearch />
           </div>
 
           <!-- Phone: title stays left; the right shows a 🔍 toggle (+ an
@@ -135,7 +143,7 @@
 
       <!-- Phone downward-expanding search panel - one field per row, the
            action buttons pinned to the right of their own row. -->
-      <ReuseMobilePanel v-if="bp.isSm.value && mobilePanel !== 'none'" :in-toolbar="false" />
+      <ReuseMobilePanel v-if="bp.isSm.value && mobilePanel !== 'none'" placement="header" />
 
       <!-- Desktop advanced drawer (phones use the inline panel above). -->
       <TCrudSearchDrawer
@@ -146,6 +154,19 @@
         :translate="translate"
       />
     </NCard>
+
+    <!-- 搜索在 TTabsPage 页头时传送过去：桌面是搜索簇，手机是图标开关，
+         展开的表单进页头栏下方（仍在页头卡内）。 -->
+    <Teleport v-if="searchInTabsHeader && tabsHeaderActions" :to="tabsHeaderActions">
+      <ReuseMobileToggles v-if="bp.isSm.value" />
+      <div v-else class="t-list-shell__search"><ReuseDesktopSearch /></div>
+    </Teleport>
+    <Teleport
+      v-if="searchInTabsHeader && tabsHeaderPanel && bp.isSm.value && mobilePanel !== 'none'"
+      :to="tabsHeaderPanel"
+    >
+      <ReuseMobilePanel placement="tabs-header" />
+    </Teleport>
 
     <!-- 头部关掉时抽屉挂在外层：它原本嵌在头部卡里，会随头部一起消失。 -->
     <TCrudSearchDrawer
@@ -213,32 +234,12 @@
            entirely (no empty gap above the table). -->
       <div v-if="hasToolbar" class="t-list-shell__toolbar">
         <div class="t-list-shell__toolbar-left">
-          <!-- 头部关掉时（tab 内嵌列表的标准用法）搜索入口补到工具栏里：
-               否则 `searchFields` 会随头部一起消失，而那是框架承诺过的能力。 -->
-          <!-- 手机上换成与头部同一套图标开关，表单在工具栏下方展开；
-               桌面仍是内联关键字框 + Advanced 抽屉。 -->
-          <ReuseMobileToggles v-if="showInlineSearch && bp.isSm.value" />
-          <template v-else-if="showInlineSearch">
-            <!-- 与头部同一条约定：showDefaultSearch=false 只去掉关键词框，Advanced 保留 -->
-            <template v-if="showDefaultSearch">
-              <NInput
-                v-model:value="simpleQuery"
-                clearable
-                size="small"
-                :placeholder="searchPlaceholder ?? t('admin.crud.searchPlaceholder')"
-                class="t-list-shell__inline-keyword"
-                @keydown.enter="onSimpleSearch"
-                @clear="onSimpleClear"
-              >
-                <template #prefix><TSvgIcon icon="mdi:magnify" :size="16" /></template>
-              </NInput>
-              <NButton size="small" @click="onSimpleSearch">{{ t('admin.crud.search') }}</NButton>
-            </template>
-            <NButton v-if="hasAdvanced" size="small" tertiary @click="advancedOpen = true">
-              <template #icon><TSvgIcon icon="mdi:tune-variant" :size="16" /></template>
-              {{ t('admin.crud.advancedSearch') }}
-            </NButton>
-          </template>
+          <!-- 头部关掉、又没有 TTabsPage 页头可去时（不在页签里，或页签里有不止一个
+               可搜索列表），搜索入口补到工具栏里：否则 `searchFields` 会随头部一起消失，
+               而那是框架承诺过的能力。手机上换成与头部同一套图标开关，表单在工具栏
+               下方展开；桌面仍是内联关键字框 + Advanced 抽屉。 -->
+          <ReuseMobileToggles v-if="searchInToolbar && bp.isSm.value" />
+          <ReuseDesktopSearch v-else-if="searchInToolbar" />
           <slot name="toolbarLeft" />
         </div>
         <div class="t-list-shell__actions">
@@ -283,8 +284,8 @@
       </div>
 
       <ReuseMobilePanel
-        v-if="showInlineSearch && bp.isSm.value && mobilePanel !== 'none'"
-        :in-toolbar="true"
+        v-if="searchInToolbar && bp.isSm.value && mobilePanel !== 'none'"
+        placement="toolbar"
       />
 
       <div class="t-list-shell__body">
@@ -367,20 +368,21 @@
 </template>
 
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
-import { computed, nextTick, ref, useSlots, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, ref, useSlots, watch } from 'vue'
 import { NAlert, NButton, NCard, NInput, NPopconfirm, NTooltip } from 'naive-ui'
 import TListPager from '../data/TListPager.vue'
 import { TSvgIcon } from '@tnzi/ui'
 import { downloadBlob } from '@tnzi/core/utils'
 import TFormModal from './TFormModal.vue'
-import { TDrawerShell } from '@tnzi/ui'
+import TDrawerShell from '../overlay/TDrawerShell.vue'
 import TCrudSearchDrawer from './TCrudSearchDrawer.vue'
 import TCrudSearchAdvanced from './TCrudSearchAdvanced.vue'
 import TPageHeader from '../layout/TPageHeader.vue'
+import { TABS_PAGE_PANE } from '../layout/tabs-page-search'
 import type { UseCrudPageReturn } from '../../headless/useCrudPage'
 import { useRetainedFormState } from '../../headless/useFormModal'
 import type { UseFormModalReturn, FormModalMode } from '../../headless/useFormModal'
-import type { FormSchemaItem } from '@tnzi/ui'
+import type { FormSchemaItem } from '../forms/TSchemaForm'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import { createReusableTemplate } from '@vueuse/core'
 import { maybeTranslateKey } from '../../i18n/translate'
@@ -464,8 +466,11 @@ defineSlots<{
 
 const bp = useBreakpoint()
 const slots = useSlots()
+const [DefineDesktopSearch, ReuseDesktopSearch] = createReusableTemplate()
 const [DefineMobileToggles, ReuseMobileToggles] = createReusableTemplate()
-const [DefineMobilePanel, ReuseMobilePanel] = createReusableTemplate<{ inToolbar: boolean }>()
+const [DefineMobilePanel, ReuseMobilePanel] = createReusableTemplate<{
+  placement: 'header' | 'toolbar' | 'tabs-header'
+}>()
 
 function t(key: string): string {
   return props.translate ? props.translate(key) : key
@@ -476,8 +481,9 @@ function t(key: string): string {
 // above it. The card content owns its own top inset (CSS), independent of
 // whether this toolbar exists.
 /**
- * 头部被关掉（`showHeader=false`，tab 内嵌列表的标准用法）时，把搜索入口补进工具栏。
- * 头部在时不补——那会渲染出两个搜索框。
+ * 头部被关掉（`showHeader=false`，tab 内嵌列表的标准用法）时，搜索入口要另找位置：
+ * TTabsPage 的页头（`searchInTabsHeader`）或本列表的工具栏（`searchInToolbar`）。
+ * 头部在时不另找：那会渲染出两个搜索框。
  */
 const showInlineSearch = computed(
   () => !props.showHeader && props.showSearch !== false && (props.showDefaultSearch !== false || hasAdvanced.value),
@@ -485,7 +491,7 @@ const showInlineSearch = computed(
 
 const hasToolbar = computed(
   () =>
-    showInlineSearch.value ||
+    searchInToolbar.value ||
     !!slots.toolbarLeft ||
     !!slots.primary ||
     !!slots.toolbar ||
@@ -499,6 +505,30 @@ const hasToolbar = computed(
 // ── Search (in the white header card) ──────────────────────────────
 const showSearchUi = computed(() => props.showSearch && (!!props.searchFields || props.showDefaultSearch))
 const hasAdvanced = computed(() => !!props.searchFields?.length)
+
+// ── Search in the enclosing TTabsPage's header (see layout/tabs-page-search.ts) ──
+// A header-less list in a tab pane registers as searchable; when it is the only
+// one in its pane it claims the page header, and the search goes there while
+// its tab is active. Otherwise (no pane, an overlay, several searchable lists
+// in the pane) the search stays in this list's toolbar.
+const tabsPane = inject(TABS_PAGE_PANE, null)
+const tabsSearchToken = Symbol('t-list-shell-search')
+if (tabsPane) {
+  watch(
+    showInlineSearch,
+    (searchable) => (searchable ? tabsPane.register(tabsSearchToken) : tabsPane.unregister(tabsSearchToken)),
+    { immediate: true },
+  )
+  onBeforeUnmount(() => tabsPane.unregister(tabsSearchToken))
+}
+const claimsTabsHeader = computed(() => !!tabsPane && tabsPane.owner() === tabsSearchToken)
+/** The search renders in the TTabsPage header (only while this list's tab is the active one). */
+const searchInTabsHeader = computed(() => claimsTabsHeader.value && !!tabsPane?.isActive())
+/** The search renders at the left of this list's own toolbar. */
+const searchInToolbar = computed(() => showInlineSearch.value && !claimsTabsHeader.value)
+const tabsHeaderActions = computed(() => tabsPane?.actionsTarget() ?? null)
+const tabsHeaderPanel = computed(() => tabsPane?.panelTarget() ?? null)
+
 const simpleQuery = ref<string>(props.state.query.value.searchText ?? '')
 const advancedOpen = ref(props.defaultAdvancedMode && !!props.searchFields?.length)
 // Phone search panel state: 'none' | 'keyword' | 'advanced'. When
@@ -633,16 +663,12 @@ const modalTitle = computed(() => {
 </script>
 
 <style scoped>
-/* 内联关键字框（头部关掉时）限宽：工具栏是给动作的，搜索不该占满整行。 */
-.t-list-shell__inline-keyword {
-  width: 200px;
-  max-width: 100%;
-}
-
 /* Spacing convention: ONE 12px scale. Cards carry a single uniform 12px
    inset; vertical rhythm comes from flex-column `gap` (gap-y), NOT per-child
    padding/margin; cards are separated by the root `gap`. */
 .t-list-shell {
+  /* One width for the keyword box, in the header and in the toolbar alike. */
+  --t-list-shell-keyword-width: 260px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -732,7 +758,7 @@ const modalTitle = computed(() => {
   gap: 12px;
   flex-wrap: wrap;
 }
-.t-list-shell__toolbar-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.t-list-shell__toolbar-left { display: flex; flex: 1 1 auto; align-items: center; gap: 8px; min-width: 0; }
 .t-list-shell__footer {
   flex-shrink: 0;
   display: flex;
@@ -743,6 +769,11 @@ const modalTitle = computed(() => {
 .t-list-shell__footer-left { display: flex; align-items: center; gap: 8px; min-height: 28px; min-width: 0; }
 .t-list-shell__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .t-list-shell__action { font-weight: 400; }
+/* naive 的 primary + tertiary 按钮把主色原样当字色画在浅灰底上，浅色主色（亮黄之类）
+   几乎看不见。字色换成主题给的「主色作文字」令牌，它保证在浅/深表面上 4.5:1 可读，
+   本来就够深的主色取值不变。 */
+.t-list-shell__create :deep(.n-button__content),
+.t-list-shell__create :deep(.n-button__icon) { color: var(--tnzi-primary-text, var(--tnzi-primary)); }
 /* Trailing icon-only buttons (Refresh / Columns) keep the same `tertiary`
    background as the adjacent text buttons (Export / Import) - they are NOT
    bare icons. A slightly tighter horizontal padding makes them read as
@@ -752,7 +783,14 @@ const modalTitle = computed(() => {
 /* Header-card search cluster (right of the page header bar). */
 .t-list-shell__search { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .t-list-shell__search--mobile { gap: 6px; }
-.t-list-shell__search-input { width: 240px; max-width: 100%; }
+/* 关键字框在头部与工具栏同一宽度，放得下一句正常的提示语（如「搜索应用名、项目、域名」）；
+   所在行变窄时先收缩它（下限 140px），再让按钮换行。 */
+.t-list-shell__search-input {
+  flex: 0 1 var(--t-list-shell-keyword-width);
+  width: var(--t-list-shell-keyword-width);
+  min-width: 140px;
+  max-width: 100%;
+}
 .t-list-shell__adv-toggle :deep(.n-button__content) { color: var(--tnzi-base-text-muted, #6b7280); }
 .t-list-shell__adv-toggle:hover :deep(.n-button__content) { color: var(--tnzi-primary); }
 
@@ -769,6 +807,8 @@ const modalTitle = computed(() => {
 }
 /* 在列表卡里时由卡片内容的 gap 负责与工具栏的间距，不再叠一层 margin。 */
 .t-list-shell__mobile-search--toolbar { flex-shrink: 0; margin-top: 0; }
+/* 在 TTabsPage 页头卡里时，页头自身的纵向 gap(8px) 已经隔开了一段，补足到与列表页头部相同的 12px。 */
+.t-list-shell__mobile-search--tabs-header { margin-top: 4px; }
 .t-list-shell__mobile-field { width: 100%; }
 .t-list-shell__mobile-actions {
   display: flex;
@@ -783,6 +823,5 @@ const modalTitle = computed(() => {
   .t-list-shell__actions { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
   .t-list-shell__actions::-webkit-scrollbar { display: none; }
   .t-list-shell__search { flex-wrap: wrap; }
-  .t-list-shell__search-input { width: 100%; }
 }
 </style>

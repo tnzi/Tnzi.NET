@@ -3,10 +3,11 @@
  * TSkillActivator - Skill activation config panel
  */
 
-import { NCard, NButton, NInput } from 'naive-ui';
 import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '../../i18n/index';
+import TButton from '../controls/TButton.vue';
+import TField from '../controls/TField.vue';
 import type { SkillInfo } from './TSkillCard.vue';
 
 const t = useAiI18n();
@@ -47,26 +48,75 @@ function handleActivate(): void {
 </script>
 
 <template>
-  <NCard>
-    <div class="flex items-center gap-2 mb-3">
-      <Icon :icon="skill.icon ?? 'lucide:zap'" class="size-6 t-skill-activator__icon" />
-      <div>
-        <div class="text-base font-medium">{{ skill.name }}</div>
-        <div v-if="skill.description" class="text-sm t-skill-activator__desc">{{ skill.description }}</div>
+  <div class="t-skill-activator">
+    <div class="t-skill-activator__head">
+      <Icon :icon="skill.icon ?? 'lucide:zap'" class="t-skill-activator__icon" aria-hidden="true" />
+      <div class="min-w-0">
+        <div class="t-skill-activator__name">{{ skill.name }}</div>
+        <div v-if="skill.description" class="t-skill-activator__desc">{{ skill.description }}</div>
       </div>
     </div>
-    <div v-if="params?.length" class="space-y-3 mb-4">
-      <div v-for="param in params" :key="param.key" class="space-y-1">
-        <label class="text-xs font-medium">
-          {{ param.label }}
-          <span v-if="param.required" class="t-skill-activator__required ml-1">*</span>
-        </label>
-        <NInput v-model:value="paramValues[param.key]" size="small" :inputmode="param.type === 'number' ? 'numeric' : undefined" />
-      </div>
+    <div v-if="params?.length" class="t-skill-activator__params">
+      <TField v-for="param in params" :key="param.key" :label="param.label" :required="param.required">
+        <template #default="{ id }">
+          <input
+            :id="id"
+            v-model="paramValues[param.key]"
+            type="text"
+            class="t-input"
+            :required="param.required"
+            :inputmode="param.type === 'number' ? 'numeric' : undefined"
+          />
+        </template>
+      </TField>
     </div>
-    <div class="flex justify-end gap-2">
-      <NButton secondary size="small" @click="$emit('cancel')">{{ t.common.cancel }}</NButton>
-      <NButton type="primary" size="small" :disabled="missingRequired" @click="handleActivate">{{ t.skill.activate }}</NButton>
+    <div class="t-skill-activator__actions">
+      <TButton @click="$emit('cancel')">{{ t.common.cancel }}</TButton>
+      <TButton variant="primary" :disabled="missingRequired" @click="handleActivate">{{ t.skill.activate }}</TButton>
     </div>
-  </NCard>
+  </div>
 </template>
+
+<style scoped>
+/* The package's card: surface, one hairline, the radius of TResourceCard. */
+.t-skill-activator {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--tnzi-ai-border);
+  border-radius: 14px;
+  background: var(--tnzi-ai-surface);
+  color: var(--tnzi-ai-text);
+}
+.t-skill-activator__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.t-skill-activator__icon {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  color: var(--tnzi-ai-accent-text);
+}
+.t-skill-activator__name {
+  font-size: 15px;
+  font-weight: 500;
+}
+.t-skill-activator__desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--tnzi-ai-text-secondary);
+}
+.t-skill-activator__params {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.t-skill-activator__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+</style>

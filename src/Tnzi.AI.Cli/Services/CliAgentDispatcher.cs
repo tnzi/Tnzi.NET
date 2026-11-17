@@ -11,6 +11,9 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
     /// <summary>拒绝说明的长度上限（与列宽一致）：它原样交给 agent。</summary>
     private const int MaxPermissionMessageLength = 2000;
 
+    /// <summary>一个问题的一个回答最长多少字符（用户自己写的回答进的是 agent 的上下文）。</summary>
+    private const int MaxAnswerLength = 2000;
+
     private readonly IRepository<CliRun, Guid> _runRepository;
     private readonly IRepository<CliRunMessage, Guid> _messageRepository;
     private readonly IRepository<CliAgentBinding, Guid> _bindingRepository;
@@ -158,7 +161,7 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
             return Fail<Guid>(versionRejection, 409, ErrorCodes.CliRuntimeVersionUnsupported);
         }
 
-        var attachments = ReadAttachments(request, providerKey);
+        var attachments = await ReadAttachmentsAsync(request, providerKey, currentUserId, cancellationToken);
         if (!attachments.Succeeded)
         {
             return Fail<Guid>(attachments.Message!, attachments.Code ?? 400, attachments.ErrorCode);
@@ -174,20 +177,22 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
         }
 
         // 按用户的用量上限同理：入队这一次只查不开窗口（让调用方当场知道），开窗口与结算在执行器里。
-        var usageRejection = await CheckUsageLimitAsync(request, cancellationToken);
+        // 落点说用量在别处计量的（用户自己的订阅或 key），不查平台的上限
+        var usageRejection = placement?.UsageMeteredElsewhere == true ? null : await CheckUsageLimitAsync(request, cancellationToken);
         if (usageRejection is not null)
         {
             return usageRejection;
         }
 
-        // 落点给了模型就是使用方的决定；没给时请求里的模型照常按允许列表校验
-        var model = !string.IsNullOrWhiteSpace(placement?.Model)
-            ? Ok<string?>(placement.Model.Trim())
-            : await ResolveRequestedModelAsync(request, cancellationToken);
-        if (!model.Succeeded)
+        // 请求里的模型与强度照常按允许列表校验；落点给了模型就是使用方的决定
+        var turn = await ResolveRequestedTurnAsync(request, cancellationToken);
+        if (!turn.Succeeded)
         {
-            return Fail<Guid>(model.Message!, model.Code ?? 403, model.ErrorCode ?? ErrorCodes.ModelNotAllowed);
+            return Fail<Guid>(turn.Message!, turn.Code ?? 403, turn.ErrorCode ?? ErrorCodes.ModelNotAllowed);
         }
+
+        var model = !string.IsNullOrWhiteSpace(placement?.Model) ? placement.Model.Trim() : turn.Data!.Model;
+        var effort = await ResolvePlacedEffortAsync(request, turn.Data!, placement, binding, runtime, model, currentUserId, cancellationToken);
 
         // 续接指针（同一线程上一轮的 CLI 会话）不在这里定：执行器认领之后、线程已经串行化时才解析
         //（见 CliRunExecutor.ResolveResumePointerAsync）。入队这一刻前一轮可能还在排队或执行，它的会话还不存在。
@@ -205,10 +210,16 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
             Priority = trustedScheduler ? request.Priority : 0,
             Prompt = request.Prompt ?? string.Empty,
             PerTurnContext = request.PerTurnContext,
-            Model = model.Data,
+            Model = model,
+            Effort = effort,
             AssignedWorkDirectory = string.IsNullOrWhiteSpace(placement?.WorkDirectory) ? null : placement.WorkDirectory.Trim(),
             CreateAssignedWorkDirectory = !string.IsNullOrWhiteSpace(placement?.WorkDirectory) && placement.CreateWorkDirectory,
-            Attended = request.Attended ?? false
+            UsageMeteredElsewhere = placement?.UsageMeteredElsewhere == true,
+            Attended = request.Attended ?? false,
+            // 运行归属：有登录用户时就是登录用户（请求体里的 UserId 不能把运行记到别人名下）；没有登录用户的进程内调用方
+            // 代某人入队（线程的消息队列在后台替用户发出排队的消息）时是那个人。只交给审计钩子的话，后台入队的运行
+            // 没有主人：用户看不见、接不上它，执行器认领后的用量上限也算不到任何人头上
+            CreatorId = currentUserId ?? request.UserId
         };
 
         // 附件先于排队行落库：排队行一旦提交就可能立刻被认领，执行器按运行 id 取附件，那时它们必须已经在了
@@ -229,6 +240,8 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
 
         return Ok(run.Id);
     }
+
+    private static readonly IReadOnlyDictionary<string, JsonElement> EmptyMetadata = new Dictionary<string, JsonElement>();
 
     /// <summary>一个存在且没被停用的运行时；否则 null。</summary>
     private Task<Entities.CliRuntime?> FindUsableRuntimeAsync(Guid runtimeId, CancellationToken cancellationToken)
@@ -253,8 +266,64 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
             TenantId = ServiceProvider.GetService<ICurrentTenant>()?.Id ?? CurrentUser?.TenantId,
             BindingRuntimeId = binding.CliRuntimeId,
             BindingProviderKey = bindingProviderKey ?? string.Empty,
-            RequestedModel = string.IsNullOrWhiteSpace(request.Model) ? null : request.Model.Trim()
+            RequestedModel = string.IsNullOrWhiteSpace(request.Model) ? null : request.Model.Trim(),
+            RequestedEffort = string.IsNullOrWhiteSpace(request.Effort) ? null : request.Effort.Trim(),
+            Metadata = request.Metadata ?? EmptyMetadata
         };
+    }
+
+    /// <summary>
+    /// 这一轮交给 CLI 的推理强度。落点给了强度就用它（使用方的决定）；落点把这一轮换到了别的 provider 或模型时，
+    /// 请求里的强度（按原来那家的模型校验过的）按新的 provider / 模型可选的档位再校验一次，不在其中就丢掉（这一轮按绑定或运行时的缺省跑），记一条 Warning。
+    /// </summary>
+    /// <remarks>
+    /// 不丢的话，按 Claude 模型校验过的 <c>xhigh</c> 会作为 codex 的 <c>thought_level</c> 交出去，codex 不认，整轮失败；
+    /// 而用户要的是「这一轮想得多一点」，按新那家的缺省跑比失败更接近它。新那家可选的档位来自
+    /// <see cref="IUsagePolicyService.GetModelEffortsAsync"/>：策略、模型清单、落点运行时握手报的档位。
+    /// </remarks>
+    private async Task<string?> ResolvePlacedEffortAsync(
+        CliRunRequestDto request, ChatTurnModel turn, CliRunPlacement? placement, CliAgentBinding binding,
+        Entities.CliRuntime runtime, string? model, Guid? currentUserId, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(placement?.Effort))
+        {
+            return placement.Effort.Trim();
+        }
+
+        var requested = turn.Effort;
+        if (requested is null || placement is null)
+        {
+            return requested;
+        }
+
+        var bindingProviderKey = runtime.Id == binding.CliRuntimeId
+            ? runtime.ProviderKey
+            : await _runtimeRepository.AsQueryable()
+                .Where(r => r.Id == binding.CliRuntimeId)
+                .Select(r => r.ProviderKey)
+                .FirstOrDefaultAsync(cancellationToken);
+        var providerChanged = !string.Equals(runtime.ProviderKey, bindingProviderKey, StringComparison.OrdinalIgnoreCase);
+        var modelChanged = !string.IsNullOrWhiteSpace(placement.Model)
+                           && !string.Equals(placement.Model.Trim(), turn.Model, StringComparison.OrdinalIgnoreCase);
+        if (!providerChanged && !modelChanged)
+        {
+            return requested;
+        }
+
+        var offered = _usagePolicy is null
+            ? null
+            : await _usagePolicy.GetModelEffortsAsync(request.UserId ?? currentUserId, runtime.ProviderKey, model, runtime.Id, cancellationToken);
+        if (ChatModelEfforts.Find(offered, requested) is { } match)
+        {
+            return match;
+        }
+
+        Logger.LogWarning(
+            "Dropped reasoning effort {Effort} for agent {AgentId}: the placement moved the turn to {ProviderKey} / {Model}, which offers {Offered}; " +
+            "the turn runs at that runtime's default",
+            requested, request.AgentId, runtime.ProviderKey, model ?? "(default model)",
+            offered is { Count: > 0 } ? string.Join(", ", offered) : "no effort choice");
+        return null;
     }
 
     /// <summary>
@@ -333,21 +402,44 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
 
     /// <summary>
     /// 读出并校验这次运行要交给 CLI 的附件：类型、大小、条数按 <c>AI:Chat:Attachments</c>，
-    /// 并且绑定的 provider 得收得了附件。任何一项不合规都整体拒绝，绝不只发文本。
+    /// 图片与 PDF 要 provider 收得了，文件（其余类型）要消费方的 <see cref="ICliFileAttachmentPolicy"/> 收这一轮。
+    /// 任何一项不合规都整体拒绝，绝不只发文本。
     /// </summary>
-    private Result<IReadOnlyList<ChatAttachmentPayload>> ReadAttachments(CliRunRequestDto request, string providerKey)
+    private async Task<Result<IReadOnlyList<ChatAttachmentPayload>>> ReadAttachmentsAsync(
+        CliRunRequestDto request, string providerKey, Guid? currentUserId, CancellationToken cancellationToken)
     {
         var limits = _chatOptions?.CurrentValue.Attachments ?? new ChatAttachmentOptions();
-        var attachments = ChatAttachmentRules.Read(request.Attachments, limits);
+        var attachments = ChatAttachmentRules.Read(request.Attachments, limits, acceptFiles: true);
         if (!attachments.Succeeded || attachments.Data is not { Count: > 0 })
         {
             return attachments;
         }
 
-        if (_providerRegistry?.Find(providerKey) is not { AcceptsAttachments: true })
+        if (attachments.Data.FirstOrDefault(a => a.IsFile) is { } file
+            && !await ChatAttachmentRules.AcceptsFilesAsync(
+                ServiceProvider.GetServices<ICliFileAttachmentPolicy>(),
+                new CliFileAttachmentRequest
+                {
+                    AgentId = request.AgentId,
+                    ThreadId = request.ThreadId,
+                    UserMessageId = request.UserMessageId,
+                    UserId = request.UserId ?? currentUserId,
+                    Files = attachments.Data
+                        .Where(a => a.IsFile)
+                        .Select(a => new CliTurnAttachment(a.MediaType, a.FileName, a.Content.LongLength, IsFile: true))
+                        .ToList()
+                },
+                cancellationToken))
+        {
+            return ChatAttachmentRules.RefuseFile(file);
+        }
+
+        var accepted = _providerRegistry?.Find(providerKey)?.Attachments ?? CliAttachmentKinds.None;
+        if (attachments.Data.FirstOrDefault(a => !a.IsFile && !accepted.Accepts(a.MediaType)) is { } refused)
         {
             return Result<IReadOnlyList<ChatAttachmentPayload>>.Failure(
-                $"This agent runs on {providerKey}, which cannot receive attachments.", 415, ErrorCodes.UnsupportedMediaType);
+                $"This agent runs on {providerKey}, which cannot receive {(refused.IsImage ? "images" : "PDF documents")}.",
+                415, ErrorCodes.UnsupportedMediaType);
         }
 
         if (_attachmentService is null)
@@ -467,43 +559,53 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
     /// 拒绝是 429 <c>AI_USAGE_LIMIT_REACHED</c>，错误详情是 <see cref="UsageLimitDenialDto"/>（哪个窗口、什么时候重置）。
     /// </remarks>
     /// <summary>
-    /// 这一轮交给 CLI 的模型（<c>--model</c>）。请求体里的模型与聊天入口同一口径：没配模型清单（<c>AI:Chat:Models</c>）时不采纳，
-    /// 配了就必须是这个用户在这个 Agent 上被允许的模型之一，否则 403 <c>AI_MODEL_NOT_ALLOWED</c>。
+    /// 这一轮交给 CLI 的模型（<c>--model</c>）与推理强度。请求体里的模型与聊天入口同一口径：没配模型清单（<c>AI:Chat:Models</c>）时不采纳，
+    /// 配了就必须是这个用户在这个 Agent 上被允许的模型之一，否则 403 <c>AI_MODEL_NOT_ALLOWED</c>。强度必须是这一轮的模型可选的档位之一，
+    /// 否则 403 <c>AI_EFFORT_NOT_ALLOWED</c>（没配模型清单时带了强度一律拒绝）。
     /// </summary>
     /// <remarks>
     /// 用户端入队把请求体原样交到这里，不校验的话持有 <c>ai.agent.execute</c> 的用户点名哪个模型 CLI 就用哪个，允许列表形同虚设。
     /// 受信调度者（持 <c>ai.cliRun.execute</c>，或没有登录用户的进程内调用）原样采纳，与 Priority / AgentRunId 同一规则。
-    /// 聊天门面交来的模型已在入口校验过，这里再判一次结果相同。
+    /// 聊天门面交来的模型与强度已在入口校验过，这里再判一次结果相同。只带强度不带模型时，强度按这个用户的默认模型校验，
+    /// 这一轮也就用那个模型（强度属于模型，不能按一个模型校验、在另一个模型上用）。
     /// </remarks>
-    private async Task<Result<string?>> ResolveRequestedModelAsync(CliRunRequestDto request, CancellationToken cancellationToken)
+    private async Task<Result<ChatTurnModel>> ResolveRequestedTurnAsync(CliRunRequestDto request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Model))
+        var requestedModel = string.IsNullOrWhiteSpace(request.Model) ? null : request.Model.Trim();
+        var requestedEffort = string.IsNullOrWhiteSpace(request.Effort) ? null : request.Effort.Trim();
+        if (requestedModel is null && requestedEffort is null)
         {
-            return Ok<string?>(null);
+            return Ok(new ChatTurnModel(null, null));
         }
 
-        var requested = request.Model.Trim();
         var currentUserId = CurrentUser?.Id;
         if (currentUserId is null
             || (PermissionChecker is { } checker && await checker.IsGrantedAsync(CliPermissions.CliRunExecute)))
         {
-            return Ok<string?>(requested);
+            return Ok(new ChatTurnModel(requestedModel, requestedEffort));
         }
 
         if (_chatOptions?.CurrentValue.Models is not { Count: > 0 } || _usagePolicy is null)
         {
+            if (requestedEffort is not null)
+            {
+                return Fail<ChatTurnModel>(
+                    $"The reasoning effort '{requestedEffort}' cannot be chosen: no model list is configured.", 403, ErrorCodes.EffortNotAllowed);
+            }
+
             Logger.LogInformation(
                 "Ignored model {Model} requested for agent {AgentId}: no model list is configured (AI:Chat:Models), so the binding's model is used",
-                requested, request.AgentId);
-            return Ok<string?>(null);
+                requestedModel, request.AgentId);
+            return Ok(new ChatTurnModel(null, null));
         }
 
-        var resolved = await _usagePolicy.ResolveChatModelAsync(
-            request.UserId ?? currentUserId, request.AgentId, null, requested, cancellationToken);
+        var resolved = await _usagePolicy.ResolveChatTurnAsync(
+            new ChatModelsRequest(request.UserId ?? currentUserId, request.AgentId, null, request.ThreadId) { Metadata = request.Metadata },
+            requestedModel, requestedEffort, cancellationToken);
         return resolved.Succeeded
-            ? Ok<string?>(resolved.Data)
-            : Fail<string?>(
-                resolved.Message ?? $"The model '{requested}' is not available to you for this assistant.",
+            ? Ok(resolved.Data!)
+            : Fail<ChatTurnModel>(
+                resolved.Message ?? $"The model '{requestedModel}' is not available to you for this assistant.",
                 resolved.Code ?? 403,
                 resolved.ErrorCode ?? ErrorCodes.ModelNotAllowed);
     }
@@ -758,6 +860,17 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
             var dto = m.MapTo<CliRunMessageDto>();
             dto.OutputBlocks = CliRunMessageConverter.DeserializeBlocks(m.OutputBlocksJson)?.ToList();
             dto.Permission = CliRunMessageConverter.DeserializePermission(m.PermissionJson);
+            if (m.Type is CliAgentEventType.TurnCompleted or CliAgentEventType.Compacted or CliAgentEventType.Task or CliAgentEventType.UserMessage)
+            {
+                // 这几类事件的 InputJson 是它们自己的载荷，不是工具入参
+                var evt = CliRunMessageConverter.ToEvent(m);
+                dto.InputJson = null;
+                dto.Turn = evt.Turn;
+                dto.Compaction = evt.Compaction;
+                dto.Task = evt.Task;
+                dto.UserMessage = evt.UserMessage;
+            }
+
             return dto;
         }).ToList();
 
@@ -781,6 +894,57 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
         await RequestCancellationAsync(run, acrossTenants: false, reason: null, cancellationToken);
         return Ok();
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 请求追加到运行的 <see cref="CliRun.StopTaskRequests"/>（一条按列的 SQL 拼接，以「仍在跑」为条件），再提示执行它的副本；
+    /// 写给 CLI 的是执行器（<c>CliRunTaskStops</c>）。任务 id 只认 CLI 可能给出的形状，挡住拼进 stdin 的异常内容。
+    /// </remarks>
+    public async Task<Result> StopTaskAsync(Guid runId, string taskId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(taskId) || taskId.Length > MaxTaskIdLength || !TaskIdShape.IsMatch(taskId))
+        {
+            return Fail("The task id is not valid.", 400, ErrorCodes.CliTaskIdInvalid);
+        }
+
+        var run = await FindRunAsync(runId, cancellationToken);
+        if (run is null || !await CanSeeAsync(run))
+        {
+            return Fail("CLI run not found.", 404, ErrorCodes.CliRunNotFound);
+        }
+
+        if (run.Status is not (CliRunStatus.Dispatched or CliRunStatus.Running))
+        {
+            return Fail("The CLI run is not running.", 409, ErrorCodes.CliRunInvalidState);
+        }
+
+        var providerKey = await _runtimeRepository.AsQueryable()
+            .Where(r => r.Id == run.CliRuntimeId)
+            .Select(r => r.ProviderKey)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (providerKey is not null && _providerRegistry?.Find(providerKey) is { Protocol: not CliAgentProtocol.StreamJson })
+        {
+            return Fail("This CLI cannot stop a single task; stop the run instead.", 501, ErrorCodes.CliTaskStopNotSupported);
+        }
+
+        var line = taskId + "\n";
+        var updated = await _runRepository.AsQueryable()
+            .Where(r => r.Id == run.Id && (r.Status == CliRunStatus.Dispatched || r.Status == CliRunStatus.Running))
+            .ExecuteUpdateAsync(set => set.SetProperty(r => r.StopTaskRequests, r => (r.StopTaskRequests ?? string.Empty) + line), cancellationToken);
+        if (updated == 0)
+        {
+            return Fail("The CLI run is not running.", 409, ErrorCodes.CliRunInvalidState);
+        }
+
+        _signalHub.Signal(run.Id);
+        return Ok();
+    }
+
+    /// <summary>CLI 任务 id 的上限长度（claude 的是十几个字符）。</summary>
+    private const int MaxTaskIdLength = 128;
+
+    /// <summary>CLI 任务 id 的形状：字母、数字、<c>-</c>、<c>_</c>。</summary>
+    private static readonly Regex TaskIdShape = new("^[A-Za-z0-9_-]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <inheritdoc />
     /// <remarks>
@@ -823,6 +987,121 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
         }
 
         return Ok(active.Count);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Guid>?> GetActiveThreadRunIdsAsSystemAsync(Guid threadId, CancellationToken cancellationToken = default)
+        => await _runRepository.AcrossTenants()
+            .Where(r => r.ThreadId == threadId
+                        && (r.Status == CliRunStatus.Queued
+                            || r.Status == CliRunStatus.Dispatched
+                            || r.Status == CliRunStatus.Running))
+            .OrderBy(r => r.CreationTime)
+            .ThenBy(r => r.Id)
+            .Select(r => r.Id)
+            .ToListAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlySet<Guid>?> GetRunningThreadIdsAsSystemAsync(
+        IReadOnlyCollection<Guid>? threadIds, CancellationToken cancellationToken = default)
+    {
+        var query = _runRepository.AcrossTenants()
+            .Where(r => r.ThreadId != null
+                        && !r.AwaitingFollowUp
+                        && (r.Status == CliRunStatus.Queued
+                            || r.Status == CliRunStatus.Dispatched
+                            || r.Status == CliRunStatus.Running));
+        if (threadIds is not null)
+        {
+            if (threadIds.Count == 0)
+            {
+                return new HashSet<Guid>();
+            }
+
+            var ids = threadIds.Distinct().ToList();
+            query = query.Where(r => ids.Contains(r.ThreadId!.Value));
+        }
+
+        var running = await query.Select(r => r.ThreadId!.Value).Distinct().ToListAsync(cancellationToken);
+        return running.ToHashSet();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<Guid, CliRunStatus>?> GetStatusesAsSystemAsync(
+        IReadOnlyCollection<Guid> runIds, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(runIds);
+        if (runIds.Count == 0)
+        {
+            return new Dictionary<Guid, CliRunStatus>();
+        }
+
+        var ids = runIds.Distinct().ToList();
+        return await _runRepository.AcrossTenants()
+            .Where(r => ids.Contains(r.Id))
+            .ToDictionaryAsync(r => r.Id, r => r.Status, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 执行器开始读进程输出时写下的 <see cref="CliRun.TakesMessagesMidTurn"/> 为准；还没写（排队中、刚派发）时按运行时的 provider 预计：
+    /// 协议是 stream-json、provider 实测过（<see cref="CliProviderDescriptor.TakesMessagesMidTurn"/>）、运行有线程。
+    /// 运行时在哪里不影响：远程宿主交出重新附着句柄的进程同样收（执行器记下每条写在哪里，接回时重放对得上）。
+    /// </remarks>
+    public async Task<string?> GetRunEffortAsSystemAsync(Guid runId, CancellationToken cancellationToken = default)
+    {
+        var run = await _runRepository.AcrossTenants()
+            .Where(r => r.Id == runId)
+            .Select(r => new { r.Effort, r.AgentId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (run is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(run.Effort))
+        {
+            return run.Effort;
+        }
+
+        // 后台作用域里没有租户上下文：按运行的 Agent 跨租户找它的绑定（运行与绑定同属一个租户）
+        var bound = await _bindingRepository.AsQueryable()
+            .IgnoreQueryFilters()
+            .Where(b => b.AgentId == run.AgentId && !b.IsDeleted)
+            .Select(b => b.ThinkingLevel)
+            .FirstOrDefaultAsync(cancellationToken);
+        return string.IsNullOrWhiteSpace(bound) ? null : bound;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool?> TakesMessagesWhileRunningAsSystemAsync(Guid runId, CancellationToken cancellationToken = default)
+    {
+        var run = await _runRepository.AcrossTenants()
+            .Where(r => r.Id == runId)
+            .Select(r => new { r.Status, r.TakesMessagesMidTurn, r.CliRuntimeId, r.ThreadId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (run is null || IsTerminal(run.Status))
+        {
+            return null;
+        }
+
+        if (run.TakesMessagesMidTurn is { } known)
+        {
+            return known;
+        }
+
+        if (run.ThreadId is null || _providerRegistry is null)
+        {
+            return false;
+        }
+
+        var runtime = await _runtimeRepository.AsQueryable()
+            .IgnoreQueryFilters()
+            .Where(r => r.Id == run.CliRuntimeId)
+            .Select(r => new { r.ProviderKey })
+            .FirstOrDefaultAsync(cancellationToken);
+        return runtime is not null
+               && _providerRegistry.Find(runtime.ProviderKey) is { Protocol: CliAgentProtocol.StreamJson, TakesMessagesMidTurn: true };
     }
 
     /// <summary>
@@ -925,6 +1204,19 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
         var message = status == CliPermissionStatus.Denied && !string.IsNullOrWhiteSpace(answer.Message)
             ? CliRunExecutor.Truncate(answer.Message.Trim(), MaxPermissionMessageLength)
             : null;
+
+        // 交出问题的回答：每个问题都要有回答，按问题校验后存下（执行的副本把它们写给 CLI）
+        string? answersJson = null;
+        if (status == CliPermissionStatus.Allowed && request.Kind == CliInteractionKinds.Question)
+        {
+            var (answers, problem) = NormalizeAnswers(CliRunMessageConverter.DeserializeQuestions(request.QuestionsJson), answer.Answers);
+            if (answers is null)
+            {
+                return Fail(problem!, 400, ErrorCodes.CliQuestionAnswersInvalid);
+            }
+
+            answersJson = JsonSerializer.Serialize(answers, TnziJsonDefaults.Options);
+        }
         var answeredBy = CurrentUser?.Id;
         var now = DateTime.UtcNow;
 
@@ -935,6 +1227,7 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
                 .SetProperty(r => r.Status, status)
                 .SetProperty(r => r.OptionId, option.Id)
                 .SetProperty(r => r.Message, message)
+                .SetProperty(r => r.AnswersJson, answersJson)
                 .SetProperty(r => r.AnsweredById, answeredBy)
                 .SetProperty(r => r.AnsweredAt, (DateTime?)now), cancellationToken);
         if (written == 0)
@@ -948,6 +1241,86 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
         Logger.LogInformation(
             "Permission request {RequestId} of CLI run {RunId} answered: {Status} ({OptionId})", requestId, runId, status, option.Id);
         return Ok();
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<List<CliAgentEvent>>> GetPendingPermissionsAsync(Guid runId, CancellationToken cancellationToken = default)
+    {
+        var run = await FindRunAsync(runId, cancellationToken);
+        if (run is null || !await CanSeeAsync(run))
+        {
+            return Fail<List<CliAgentEvent>>("CLI run not found.", 404, ErrorCodes.CliRunNotFound);
+        }
+
+        // 不转发权限请求的部署、已经结束的运行：没有在等的
+        if (_permissionRepository is null || IsTerminal(run.Status))
+        {
+            return Ok(new List<CliAgentEvent>());
+        }
+
+        var now = DateTime.UtcNow;
+        var waiting = await _permissionRepository.AsQueryable()
+            .Where(r => r.RunId == runId && r.Status == CliPermissionStatus.Pending && r.ExpiresAt > now)
+            .Select(r => r.Sequence)
+            .ToListAsync(cancellationToken);
+        if (waiting.Count == 0)
+        {
+            return Ok(new List<CliAgentEvent>());
+        }
+
+        // 请求行先建、事件后落库：刚出现、事件还没写下的那一条这次不在，下一次就在
+        var messages = await _messageRepository.AsQueryable()
+            .Where(m => m.RunId == runId && m.Type == CliAgentEventType.PermissionRequest && waiting.Contains(m.Sequence))
+            .OrderBy(m => m.Sequence)
+            .ToListAsync(cancellationToken);
+
+        return Ok(messages
+            .Select(CliRunMessageConverter.ToEvent)
+            .Where(e => e.Permission?.RequestId is not null)
+            .ToList());
+    }
+
+    /// <summary>
+    /// 校验问题的回答：只答请求里的问题、每个问题都答、单选恰好一个回答；回答去掉首尾空白、过长截断。
+    /// 回答不限于选项标签：用户可以自己写一句（claude 本机界面的 "Other"）。
+    /// </summary>
+    /// <returns>规整后的回答（按请求里的问题顺序）；不合格时为 null，并给出原因（面向调用方的英文）。</returns>
+    internal static (Dictionary<string, List<string>>? Answers, string? Problem) NormalizeAnswers(
+        IReadOnlyList<CliQuestion> questions, Dictionary<string, List<string>>? given)
+    {
+        if (given is not { Count: > 0 })
+        {
+            return (null, "Answer the questions: 'answers' maps each question to its answers.");
+        }
+
+        if (given.Keys.FirstOrDefault(k => !questions.Any(q => string.Equals(q.Question, k, StringComparison.Ordinal))) is { } unknown)
+        {
+            return (null, $"'{CliRunExecutor.Truncate(unknown, 200)}' is not one of the questions.");
+        }
+
+        var answers = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var question in questions)
+        {
+            var values = (given.GetValueOrDefault(question.Question) ?? [])
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Select(v => CliRunExecutor.Truncate(v.Trim(), MaxAnswerLength)!)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (values.Count == 0)
+            {
+                return (null, $"The question '{CliRunExecutor.Truncate(question.Question, 200)}' has no answer.");
+            }
+
+            if (!question.MultiSelect && values.Count > 1)
+            {
+                return (null, $"The question '{CliRunExecutor.Truncate(question.Question, 200)}' takes a single answer.");
+            }
+
+            answers[question.Question] = values;
+        }
+
+        return (answers, null);
     }
 
     /// <summary>这条运行的权限请求该不该让当前调用者回答（见 <see cref="AnswerPermissionAsync"/>）。</summary>

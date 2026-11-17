@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { nextTick, type App } from 'vue';
-import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui';
+import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui/headless';
 import type { Router } from 'vue-router';
 import { defineChatApp } from '../../src/plugin/defineChatApp';
 

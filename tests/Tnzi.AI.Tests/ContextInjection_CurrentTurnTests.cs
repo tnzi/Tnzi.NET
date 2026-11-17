@@ -92,7 +92,7 @@ public class ContextInjection_CurrentTurnTests
         {
             var threadService = new Mock<IAgentThreadInternalService>();
             threadService
-                .Setup(s => s.GetOrCreateThreadAsync(_threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .Setup(s => s.GetOrCreateThreadAsync(_threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((_threadId, false));
             threadService
                 .Setup(s => s.GetMessageHistoryAsync(_threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))

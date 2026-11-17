@@ -20,7 +20,7 @@
  *   // {{ MatterStatus.label(row.status) }}
  */
 import { computed, type ComputedRef } from 'vue'
-import type { StatusType } from '@tnzi/ui'
+import type { StatusType } from '../components/display/TStatusBadge.vue'
 import { translatePageKey } from '../i18n/translate'
 
 export interface EnumMetaSpec<V extends string | number> {

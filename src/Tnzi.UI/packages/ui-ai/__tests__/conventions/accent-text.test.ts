@@ -40,7 +40,7 @@ const files = sourceFiles(join(pkgRoot, 'src')).map((path) => ({
     .replace(/<!--[\s\S]*?-->/g, ''),
 }));
 
-const stylesheet = readFileSync(join(pkgRoot, 'src/styles/index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const stylesheet = readFileSync(join(pkgRoot, 'src/styles/tokens.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
 /**
  * The two shapes the raw accent takes as a text colour:

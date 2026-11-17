@@ -18,7 +18,7 @@ describe('TnziUiResolver', () => {
   it('resolves every T* component @tnzi/ui exports', () => {
     const resolver = TnziUiResolver()
     const names = exportedComponentNames()
-    expect(names.length).toBeGreaterThan(50)
+    expect(names.length).toBeGreaterThan(20)
     for (const name of names) {
       expect(resolver.resolve(name), name).toEqual({ name, from: '@tnzi/ui' })
     }

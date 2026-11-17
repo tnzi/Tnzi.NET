@@ -8,12 +8,14 @@
  * it every consumer re-derives the same flex row, and they drift.
  *
  * The control is the default slot, so it can be anything: a switch, a select,
- * a button, a read-only value, a cluster of buttons.
+ * a button, a read-only value, a cluster of buttons (8px apart). The label is
+ * a flex line that wraps (6px between lines, 8px between items): the `#label`
+ * slot can put an icon or a `TTag` beside the name.
  *
  * @example
  * ```vue
  * <TSettingRow label="Browser notifications" description="Get notified when a task completes.">
- *   <NSwitch v-model:value="notify" />
+ *   <TSwitch v-model="notify" label="Browser notifications" />
  * </TSettingRow>
  * ```
  */
@@ -69,7 +71,14 @@ withDefaults(
   flex-direction: column;
   gap: 2px;
 }
+/* A flex line, so an icon or a badge can sit beside the name (`#label` slot);
+   it wraps when they do not fit, and may shrink below its content's width. */
 .t-setting-row__label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-width: 0;
   font-size: 14px;
   font-weight: 500;
   color: var(--tnzi-ai-text);

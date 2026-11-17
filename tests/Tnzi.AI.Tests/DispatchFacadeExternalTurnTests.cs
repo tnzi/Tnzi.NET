@@ -36,6 +36,18 @@ public class DispatchFacadeExternalTurnTests
     }
 
     [Fact]
+    public async Task RunStreamingAsync_NewThread_IsCreatedWithTheRequestsThreadOrigin_AndAnExistingOneIsOnlyVerified()
+    {
+        var threads = new RecordingThreadService();
+        var facade = CreateFacade(new ScriptedDispatcher([Text(1, "hello")]), threads);
+
+        await CollectAsync(facade.RunStreamingAsync(new AgentRunRequest { AgentId = AgentId, UserMessage = "hi", UserId = UserId, ThreadOrigin = "Card" }));
+        await CollectAsync(facade.RunStreamingAsync(new AgentRunRequest { AgentId = AgentId, ThreadId = ExistingThreadId, UserMessage = "again", UserId = UserId, ThreadOrigin = "Card" }));
+
+        threads.Origins.ShouldBe(["Card", null]);
+    }
+
+    [Fact]
     public async Task RunStreamingAsync_TerminalChunk_CarriesTheReplyTheRunWrote_AndTheFacadeWritesNoReply()
     {
         var threads = new RecordingThreadService();
@@ -230,6 +242,57 @@ public class DispatchFacadeExternalTurnTests
         resolved.EventData["optionId"].ShouldBe("allow_once");
     }
 
+    /// <summary>
+    /// 一轮在运行中途结束（CLI 还有后台任务）：客户端收到 turn_completed（带写进线程的那条回答与还在跑的任务），
+    /// 之后的文本是一条新回答，从头折叠（不接在上一条后面）。
+    /// </summary>
+    [Fact]
+    public async Task RunStreamingAsync_ATurnBoundary_ClosesTheAnswer_AndTheNextTextStartsANewOne()
+    {
+        var firstAnswer = Guid.NewGuid();
+        var dispatcher = new ScriptedDispatcher(
+        [
+            Text(1, "Started the build."),
+            new CliAgentEvent
+            {
+                Type = CliAgentEventType.TurnCompleted, Sequence = 2, Content = "Started the build.",
+                Turn = new CliTurnBoundary { AssistantMessageId = firstAnswer, BackgroundTasks = [new CliBackgroundTask("b1", "Build", "local_bash")] }
+            },
+            ToolUse(3, "call-2", "Read"),
+            Text(4, "The build passed.")
+        ]);
+        var facade = CreateFacade(dispatcher, new RecordingThreadService());
+
+        var chunks = await CollectAsync(facade.RunStreamingAsync(Request("build it", ExistingThreadId)));
+
+        var boundary = chunks.Single(c => c.EventType == RunStreamEventTypes.TurnCompleted);
+        boundary.Sequence.ShouldBe(2);
+        boundary.EventData!["assistantMessageId"].ShouldBe(firstAnswer);
+        ((IReadOnlyList<CliBackgroundTask>)boundary.EventData["backgroundTasks"]).ShouldHaveSingleItem().Description.ShouldBe("Build");
+
+        var texts = chunks.Where(c => c.Text is not null && c.EventType is null).Select(c => c.Text).ToList();
+        texts.ShouldBe(["Started the build.", "The build passed."], "the second answer is not glued to the first");
+        chunks.IndexOf(boundary).ShouldBeLessThan(chunks.FindIndex(c => c.Text == "The build passed."));
+        chunks.Single(c => c.IsToolCall).ToolCalls!.ShouldHaveSingleItem().TextOffset
+            .ShouldBe(0, "the second answer's tool card sits at the start of the second answer, as in its stored reply");
+    }
+
+    /// <summary>上下文压缩以自己的事件到达，不论粒度：一轮 /compact 唯一的结果就是它。</summary>
+    [Fact]
+    public async Task RunStreamingAsync_ACompaction_ReachesTheClientAsItsOwnEvent()
+    {
+        var dispatcher = new ScriptedDispatcher(
+            [new CliAgentEvent { Type = CliAgentEventType.Compacted, Sequence = 1, Compaction = new CliCompaction("manual", 28750, 3533) }]);
+        var facade = CreateFacade(dispatcher, new RecordingThreadService());
+
+        var chunks = await CollectAsync(facade.RunStreamingAsync(Request("/compact", ExistingThreadId)));
+
+        var compacted = chunks.Single(c => c.EventType == RunStreamEventTypes.Compacted);
+        compacted.EventData!["trigger"].ShouldBe("manual");
+        compacted.EventData["preTokens"].ShouldBe(28750L);
+        compacted.EventData["postTokens"].ShouldBe(3533L);
+    }
+
     [Theory]
     [InlineData(false, true)]
     [InlineData(true, false)]
@@ -271,6 +334,70 @@ public class DispatchFacadeExternalTurnTests
         runs.ShouldHaveSingleItem().RunId.ShouldBe(dispatcher.RunId);
         dispatcher.LastQuery!.ThreadId.ShouldBe(ExistingThreadId);
         dispatcher.LastQuery.ActiveOnly.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task GetPendingPermissionsAsync_ListsTheThreadsWaitingRequests_InTheStreamEventsShape()
+    {
+        var requestId = Guid.NewGuid();
+        var created = DateTime.UtcNow.AddSeconds(-5);
+        var expires = DateTime.UtcNow.AddMinutes(5);
+        var dispatcher = new ScriptedDispatcher([])
+        {
+            Pending =
+            [
+                new CliAgentEvent
+                {
+                    Type = CliAgentEventType.PermissionRequest,
+                    Tool = "AskUserQuestion",
+                    CallId = "toolu_9",
+                    Content = "Which database?",
+                    Sequence = 4,
+                    CreatedAt = created,
+                    Permission = new CliAgentPermission
+                    {
+                        RequestId = requestId,
+                        Kind = CliInteractionKinds.Question,
+                        Questions = [new CliQuestion("Which database?", "DB", [new CliQuestionOption("Postgres", null)], false)],
+                        Options =
+                        [
+                            new CliPermissionOption(CliInteractionOptionIds.Submit, "Submit", CliPermissionOptionKinds.AllowOnce),
+                            new CliPermissionOption(CliInteractionOptionIds.Decline, "Decline", CliPermissionOptionKinds.RejectOnce)
+                        ],
+                        ExpiresAt = expires
+                    }
+                }
+            ]
+        };
+        var facade = CreateFacade(dispatcher, new RecordingThreadService());
+
+        var pending = (await facade.GetPendingPermissionsAsync(ExistingThreadId)).ShouldHaveSingleItem();
+
+        pending.RunId.ShouldBe(dispatcher.RunId);
+        pending.RequestId.ShouldBe(requestId);
+        pending.Kind.ShouldBe(CliInteractionKinds.Question);
+        pending.Status.ShouldBe("Pending");
+        pending.Tool.ShouldBe("AskUserQuestion");
+        pending.ToolCallId.ShouldBe("toolu_9");
+        pending.Description.ShouldBe("Which database?");
+        pending.Questions.ShouldHaveSingleItem().Header.ShouldBe("DB");
+        pending.Options.Select(o => o.Id).ShouldBe([CliInteractionOptionIds.Submit, CliInteractionOptionIds.Decline]);
+        pending.ExpiresAt.ShouldBe(expires);
+        pending.CreatedAt.ShouldBe(created);
+        dispatcher.LastQuery!.ActiveOnly.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task GetRunPendingPermissionsAsync_IsNullForARunTheCallerCannotSee_AndEmptyWithoutRelaying()
+    {
+        var hidden = CreateFacade(new ScriptedDispatcher([]) { Visible = false }, new RecordingThreadService());
+        (await hidden.GetRunPendingPermissionsAsync(Guid.NewGuid())).ShouldBeNull();
+
+        var notRelaying = CreateFacade(new ScriptedDispatcher([]) { RelaysPermissions = false }, new RecordingThreadService());
+        var none = await notRelaying.GetRunPendingPermissionsAsync(Guid.NewGuid());
+        none.ShouldNotBeNull();
+        none.ShouldBeEmpty();
+        (await notRelaying.GetPendingPermissionsAsync(ExistingThreadId)).ShouldBeEmpty();
     }
 
     // ---------------------------------------------------------------- attachments
@@ -332,6 +459,69 @@ public class DispatchFacadeExternalTurnTests
         error.HttpStatusCode.ShouldBe(415);
         error.Code.ShouldBe(ErrorCodes.UnsupportedMediaType);
         threads.Saved.ShouldBeEmpty();
+        dispatcher.Enqueued.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task APdf_ToARuntimeThatTakesOnlyImages_IsRefused()
+    {
+        // codex / kimi 经 ACP 只收图片：PDF 只能当 base64 文本塞进提示，模型读不到
+        var threads = new RecordingThreadService();
+        var dispatcher = new ScriptedDispatcher([]);
+        var facade = CreateFacade(dispatcher, threads, accepted: CliAttachmentKinds.Images);
+
+        var error = await Should.ThrowAsync<BusinessException>(() => CollectAsync(facade.RunStreamingAsync(Request("read", ExistingThreadId,
+        [
+            new TextContentPartDto { Text = "read" },
+            new DocumentContentPartDto { Base64Data = Convert.ToBase64String(Pdf), FileName = "b.pdf" }
+        ]))));
+
+        error.HttpStatusCode.ShouldBe(415);
+        error.Message.ShouldContain("PDF documents");
+        dispatcher.Enqueued.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task AFile_ForATurnThatTakesFiles_GoesToTheRunAsADocumentPart_AndHandlersSeeItAsAFile()
+    {
+        var dispatcher = new ScriptedDispatcher([]);
+        var handler = new RecordingHandler(CliTurnDecision.Proceed());
+        var facade = CreateFacade(dispatcher, new RecordingThreadService(), handlers: [handler], acceptsFiles: true,
+            accepted: CliAttachmentKinds.None);
+
+        await CollectAsync(facade.RunStreamingAsync(Request(null, ExistingThreadId,
+        [
+            new TextContentPartDto { Text = "what does it say?" },
+            new DocumentContentPartDto { Base64Data = Convert.ToBase64String("Subject: hi\r\n\r\nbody"u8.ToArray()), MediaType = "message/rfc822", FileName = "hi.eml" }
+        ])));
+
+        var enqueued = dispatcher.Enqueued.ShouldHaveSingleItem();
+        enqueued.Attachments.ShouldNotBeNull().ShouldHaveSingleItem().ShouldBeOfType<DocumentContentPartDto>().FileName.ShouldBe("hi.eml");
+        var seen = handler.Turns.ShouldHaveSingleItem().Attachments.ShouldHaveSingleItem();
+        seen.ShouldBe(new CliTurnAttachment("message/rfc822", "hi.eml", 19, IsFile: true));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(null)]
+    public async Task AFile_ForATurnThatDoesNotTakeFiles_IsRefusedWith415_BeforeAnythingIsWritten(bool? acceptsFiles)
+    {
+        var threads = new RecordingThreadService();
+        var dispatcher = new ScriptedDispatcher([]);
+        var handler = new RecordingHandler(CliTurnDecision.Proceed());
+        var facade = CreateFacade(dispatcher, threads, handlers: [handler], acceptsFiles: acceptsFiles);
+
+        var error = await Should.ThrowAsync<BusinessException>(() => CollectAsync(facade.RunStreamingAsync(Request("read", ExistingThreadId,
+        [
+            new TextContentPartDto { Text = "read" },
+            new DocumentContentPartDto { Base64Data = Convert.ToBase64String("a,b"u8.ToArray()), MediaType = "text/csv", FileName = "t.csv" }
+        ]))));
+
+        error.HttpStatusCode.ShouldBe(415);
+        error.Code.ShouldBe(ErrorCodes.UnsupportedMediaType);
+        error.Message.ShouldContain("t.csv");
+        threads.Saved.ShouldBeEmpty();
+        handler.Turns.ShouldBeEmpty("the turn is refused before the consumer's handlers run");
         dispatcher.Enqueued.ShouldBeEmpty();
     }
 
@@ -429,6 +619,37 @@ public class DispatchFacadeExternalTurnTests
         handler.Turns.Single().RewoundTurns.ShouldBeTrue();
     }
 
+    // ---------------------------------------------------------------- titles
+
+    [Fact]
+    public async Task ANewThread_IsTitledWhenTheTurnIsAccepted_BeforeTheRunReplies()
+    {
+        var threads = new RecordingThreadService();
+        var titles = new Mock<IThreadTitleService>();
+        var dispatcher = new ScriptedDispatcher([Text(1, "hello")]);
+        var facade = CreateFacade(dispatcher, threads, titles: titles.Object);
+
+        await using var stream = facade.RunStreamingAsync(Request("plan my week", threadId: null)).GetAsyncEnumerator();
+        (await stream.MoveNextAsync()).ShouldBeTrue();
+
+        // only the run-started chunk has been read: the reply has not come back yet, the title is already on its way
+        stream.Current.EventType.ShouldBe(RunStreamEventTypes.RunStarted);
+        titles.Verify(t => t.StartAsync(
+            new ThreadTitleRequest(threads.CreatedThreadId, "plan my week", UserId, AgentId),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ATurnInAnExistingThread_DoesNotRetitleIt()
+    {
+        var titles = new Mock<IThreadTitleService>();
+        var facade = CreateFacade(new ScriptedDispatcher([Text(1, "hello")]), new RecordingThreadService(), titles: titles.Object);
+
+        await CollectAsync(facade.RunStreamingAsync(Request("second question", ExistingThreadId)));
+
+        titles.Verify(t => t.StartAsync(It.IsAny<ThreadTitleRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static readonly Guid UserId = Guid.NewGuid();
@@ -469,21 +690,34 @@ public class DispatchFacadeExternalTurnTests
     private static AgentDispatchFacade CreateFacade(
         ScriptedDispatcher dispatcher, RecordingThreadService threads,
         bool acceptsAttachments = true, long maxAttachmentBytes = 10 * 1024 * 1024,
-        IReadOnlyList<ICliAgentTurnHandler>? handlers = null)
+        IReadOnlyList<ICliAgentTurnHandler>? handlers = null, CliAttachmentKinds? accepted = null, IThreadTitleService? titles = null,
+        bool? acceptsFiles = null)
     {
         var services = new ServiceCollection();
         services.AddScoped<ICliAgentDispatcher>(_ => dispatcher);
         services.AddScoped<IAgentThreadInternalService>(_ => threads);
+        if (titles is not null)
+        {
+            services.AddScoped(_ => titles);
+        }
+
         foreach (var handler in handlers ?? [])
         {
             services.AddScoped(_ => handler);
+        }
+
+        if (acceptsFiles is { } filesAccepted)
+        {
+            var policy = new Mock<ICliFileAttachmentPolicy>();
+            policy.Setup(p => p.AcceptsFilesAsync(It.IsAny<CliFileAttachmentRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(filesAccepted);
+            services.AddScoped(_ => policy.Object);
         }
 
         var options = new AiChatOptions { Attachments = new ChatAttachmentOptions { MaxBytes = maxAttachmentBytes } };
 
         return new AgentDispatchFacade(
             Mock.Of<IAgentRuntime>(MockBehavior.Strict),
-            new BoundBindingService(acceptsAttachments),
+            new BoundBindingService(accepted ?? (acceptsAttachments ? CliAttachmentKinds.Images | CliAttachmentKinds.Documents : CliAttachmentKinds.None)),
             dispatcher,
             services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             NullLogger<AgentDispatchFacade>.Instance,
@@ -498,8 +732,14 @@ public class DispatchFacadeExternalTurnTests
 
         public Guid CreatedThreadId { get; } = Guid.NewGuid();
 
-        public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default)
-            => Task.FromResult(threadId is { } id ? (id, false) : (CreatedThreadId, true));
+        /// <summary>The origin each call asked for, in order (null = none).</summary>
+        public List<string?> Origins { get; } = [];
+
+        public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, string? origin, ThreadListing listing = ThreadListing.Listed, CancellationToken ct = default)
+        {
+            Origins.Add(origin);
+            return Task.FromResult(threadId is { } id ? (id, false) : (CreatedThreadId, true));
+        }
 
         public Task<Guid> SaveMessageAsync(Guid threadId, string role, string content,
             string? toolCalls = null, string? usage = null, Guid? messageId = null, CancellationToken ct = default)
@@ -546,6 +786,23 @@ public class DispatchFacadeExternalTurnTests
         }
 
         public CliRunQueryDto? LastQuery { get; private set; }
+
+        public IReadOnlyList<CliAgentEvent> Pending { get; init; } = [];
+
+        /// <summary>False: answers 501 for the pending list, as an implementation that does not relay permissions does.</summary>
+        public bool RelaysPermissions { get; init; } = true;
+
+        public Task<Result<List<CliAgentEvent>>> GetPendingPermissionsAsync(Guid runId, CancellationToken cancellationToken = default)
+        {
+            if (!RelaysPermissions)
+            {
+                return Task.FromResult(Result<List<CliAgentEvent>>.Failure("Not relayed.", 501, ErrorCodes.CliPermissionNotSupported));
+            }
+
+            return Task.FromResult(Visible
+                ? Result<List<CliAgentEvent>>.Success(Pending.ToList())
+                : Result<List<CliAgentEvent>>.Failure("CLI run not found.", 404, ErrorCodes.CliRunNotFound));
+        }
 
         public Task<Result<Guid>> EnqueueAsync(CliRunRequestDto request, CancellationToken cancellationToken = default)
         {
@@ -598,13 +855,13 @@ public class DispatchFacadeExternalTurnTests
         }
     }
 
-    private sealed class BoundBindingService(bool acceptsAttachments) : ICliAgentBindingService
+    private sealed class BoundBindingService(CliAttachmentKinds accepted) : ICliAgentBindingService
     {
         public Task<CliAgentBindingDto?> GetByAgentIdAsync(Guid agentId, CancellationToken cancellationToken = default)
             => Task.FromResult<CliAgentBindingDto?>(new CliAgentBindingDto
             {
                 Id = Guid.NewGuid(), AgentId = agentId, CliRuntimeId = Guid.NewGuid(), ProviderKey = "claude",
-                AcceptsAttachments = acceptsAttachments
+                AcceptedAttachments = accepted
             });
 
         public Task<Result<CliAgentBindingDto>> UpsertAsync(Guid agentId, UpsertCliAgentBindingDto input, CancellationToken cancellationToken = default)

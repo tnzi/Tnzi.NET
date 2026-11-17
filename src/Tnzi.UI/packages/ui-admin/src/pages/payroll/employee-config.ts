@@ -4,7 +4,7 @@ import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { formatDateOnly } from '@tnzi/core'
-import { TRelativeTime } from '@tnzi/ui'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 
 /** All-optional row shape (house pattern). */
 export interface EmployeeRow {

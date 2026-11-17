@@ -36,6 +36,8 @@ public class DefaultThreadAdminController : ApiAdminControllerBase
     [HttpPost("query")]
     public virtual async Task<ApiResult<IPagedList<AgentThreadDto>>> GetList([FromBody] ThreadListQueryDto query)
     {
+        // 管理端看全部线程，包括不在主人列表里的（服务端建的、还没等到主人说话的）；行上的 Listing 说明它在不在
+        query.IncludeUnlisted = true;
         var result = await ThreadService.GetListAsync(query);
         return result.ToApiResult();
     }

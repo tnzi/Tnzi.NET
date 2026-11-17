@@ -54,7 +54,6 @@ global using Tnzi.AI.Engine.Strategies;
 global using Tnzi.AI.Evaluation;
 global using Tnzi.AI.Events;
 global using Tnzi.AI.Events.Handlers;
-global using Tnzi.AI.Extensions;
 global using Tnzi.AI.Guardrails;
 global using Tnzi.AI.Infrastructure;
 global using Tnzi.AI.Infrastructure.ChatHistory;

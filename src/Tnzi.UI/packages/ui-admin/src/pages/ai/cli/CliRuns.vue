@@ -45,6 +45,7 @@
               :title="eventTitle(event)"
               :time="formatDateTime(event.creationTime)"
             >
+              <p v-if="event.task" class="cli-run-detail__event-body">{{ taskLine(event) }}</p>
               <p v-if="event.content" class="cli-run-detail__event-body">{{ event.content }}</p>
               <pre v-if="event.output" class="cli-run-detail__event-output">{{ event.output }}</pre>
             </NTimelineItem>
@@ -232,8 +233,16 @@ function eventTone(type: CliAgentEventType) {
 }
 
 function eventTitle(event: CliRunMessageDto) {
-  if (event.tool) return `${t(`eventType.${lowerFirst(event.type)}`)} · ${event.tool}`
-  return t(`eventType.${lowerFirst(event.type)}`)
+  const title = event.tool ? `${t(`eventType.${lowerFirst(event.type)}`)} · ${event.tool}` : t(`eventType.${lowerFirst(event.type)}`)
+  // A sub-agent's own words and calls say so: they are not the main agent's
+  return event.parentCallId && event.type !== CliAgentEventType.Task ? `${title} · ${t('eventType.inSubAgent')}` : title
+}
+
+/** A task event (a sub-agent, a background command): what it does (or is doing now), its state and its report. */
+function taskLine(event: CliRunMessageDto) {
+  const task = event.task
+  if (!task) return ''
+  return [task.description ?? task.activity ?? task.agentType ?? task.model, task.status, task.summary].filter((part) => !!part).join(' · ')
 }
 
 function lowerFirst(value: string) {

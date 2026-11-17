@@ -62,8 +62,8 @@ const CHAT_APP = 'src/components/chat/TChatApp.vue';
  * Body of the rule whose selector is exactly `selector`.
  *
  * Anchored on the end of the previous block (or the start of the stylesheet),
- * so `.t-thread-list__icon` matches its own rule and not the compound
- * `.t-thread-list__row.is-active .t-thread-list__icon` that appears earlier.
+ * so `.t-thread-list__row-act` matches its own rule and not a compound one
+ * ending in it (`.t-thread-list__row:hover .t-thread-list__row-act`).
  */
 function ruleBody(sfc: string, selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -110,15 +110,86 @@ describe('sidebar row geometry', () => {
     );
   });
 
-  it('conversation rows carry no leading icon, so their titles start where the nav icons do', () => {
-    /* The recent-conversations list is titles only (the nav keeps its icons).
-       Its rows share the nav's padding (checked above), so a title begins at
-       the x of the nav's icons. A leading icon coming back without its own
-       geometry check would put titles at a third x. */
-    expect(threads).not.toMatch(/\.t-thread-list__icon\b/);
-    const rowSlot = /<slot name="row"[^>]*>([\s\S]*?)<\/slot>/.exec(threads)?.[1] ?? '';
+  it("every conversation title starts at one x; a row's origin icon sits in the \"...\" button's place", () => {
+    /* An icon before the title only on the rows that have an origin left the
+       titles ragged. The titles now all begin at the x of the nav's icons (the
+       rows share the nav's padding, checked above), and the origin icon is drawn
+       at the row's end, stacked in one cell with the "..." button so the two
+       take turns in the same place. A conversation awaiting the user, running or
+       unread shows its state in that cell instead of the origin icon. */
+    const rowSlot = /<slot\s+name="row"[\s\S]*?>([\s\S]*?)<\/slot>/.exec(threads)?.[1] ?? '';
     expect(rowSlot).toMatch(/t-thread-list__title/);
     expect(rowSlot).not.toMatch(/<Icon\b/);
+    expect(rowSlot).not.toMatch(/<TThreadIcon\b/);
+
+    const end = /<span[^>]*class="t-thread-list__end"[\s\S]*?<\/span>\s*<\/template>/.exec(threads)?.[0] ?? '';
+    expect(end).toMatch(/<TThreadStatus\s+v-if="thread\.awaitingOwner \|\| thread\.running \|\| thread\.unread"/);
+    expect(end).toMatch(/<TThreadIcon\s+v-else-if=/);
+    expect(end).toMatch(/t-thread-list__row-act/);
+    expect(declaration(threads, '.t-thread-list__end', 'width')).toBe(declaration(threads, '.t-thread-list__row-act', 'width'));
+    expect(declaration(threads, '.t-thread-list__end', 'display')).toBe('grid');
+  });
+
+  it('sidebar rows are filled with the neutral sidebar tokens, never the brand colour', () => {
+    /* A selected row used to be an accent wash with accent text and a heavier
+       weight, which a yellow or green brand turns into a highlighter stroke.
+       Hover and selected are now two neutral fills shared by every row. */
+    /* The rail's buttons are `TRailButton` (TChatRail draws its nav items with it). */
+    const rail = read('src/components/layout/TRailButton.vue');
+    const cases: ReadonlyArray<readonly [string, string, string]> = [
+      [nav, '.t-sidebar-nav__item:hover', 'var(--tnzi-ai-sidebar-hover)'],
+      [nav, '.t-sidebar-nav__item.is-active', 'var(--tnzi-ai-sidebar-selected)'],
+      [rail, '.t-rail-button:hover', 'var(--tnzi-ai-sidebar-hover)'],
+      [rail, '.t-rail-button.is-active', 'var(--tnzi-ai-sidebar-selected)'],
+      // The open conversation is lifted by the hover fill, not the nav's selected one.
+      [threads, '.t-thread-list__row.is-active', 'var(--tnzi-ai-sidebar-hover)'],
+    ];
+    for (const [sfc, selector, fill] of cases) {
+      expect(declaration(sfc, selector, 'background')).toBe(fill);
+    }
+    for (const sfc of [nav, rail, threads]) {
+      expect(styleBlock(sfc)).not.toMatch(/--tnzi-ai-accent-(?:soft|text)/);
+      expect(styleBlock(sfc)).not.toMatch(/\.is-active[^{]*\{[^}]*font-weight/);
+    }
+    const sharedCss = stripComments(read('src/styles/tokens.css'));
+    expect(sharedCss).toMatch(/--tnzi-ai-sidebar-hover:\s*rgba\(0, 0, 0, 0\.05\)/);
+    expect(sharedCss).toMatch(/--tnzi-ai-sidebar-selected:\s*rgba\(0, 0, 0, 0\.10\)/);
+    expect(sharedCss).toMatch(/--tnzi-ai-sidebar-hover:\s*rgba\(255, 255, 255, 0\.075\)/);
+    expect(sharedCss).toMatch(/--tnzi-ai-sidebar-selected:\s*rgba\(255, 255, 255, 0\.15\)/);
+  });
+
+  it('every sidebar heading uses the one shared heading style', () => {
+    /* The conversation list's heading and a titled nav group's heading used to
+       be two styles (13px / 400 against 11px / 500 / letter-spaced) that read
+       as two different things. Both now carry `.t-sidebar-heading`, whose rules
+       live once in styles/index.css; a component that restyles the heading box,
+       label or chevron in its own scoped CSS is a second copy being born. */
+    for (const [sfc, head, label, chevron] of [
+      [threads, 't-thread-list__head', 't-thread-list__head-label', 't-thread-list__head-chevron'],
+      [nav, 't-sidebar-nav__head', 't-sidebar-nav__head-label', 't-sidebar-nav__chevron'],
+    ] as const) {
+      expect(sfc).toMatch(new RegExp(`class="${head} t-sidebar-heading"`));
+      expect(sfc).toMatch(new RegExp(`class="${label} t-sidebar-heading__label"`));
+      expect(sfc).toMatch(new RegExp(`class="${chevron} t-sidebar-heading__chevron"`));
+      const css = styleBlock(sfc);
+      /* The heading box may still be a hover scope for its own actions
+         (`.t-thread-list__head:hover .t-thread-list__head-actions`), so only a
+         rule that styles the box itself counts; label and chevron get none. */
+      expect(css).not.toMatch(new RegExp(`\\.${head}\\s*\\{`));
+      for (const local of [label, chevron]) {
+        expect(css).not.toMatch(new RegExp(`\\.${local}(?![\\w-])`));
+      }
+    }
+
+    const shared = stripComments(read('src/styles/index.css'));
+    const rule = (selector: string) =>
+      new RegExp(`(?:^|\\})\\s*${selector.replace(/[.]/g, '\\.')}\\s*\\{([^}]*)\\}`).exec(shared)?.[1] ?? '';
+    const label = rule('.t-sidebar-heading__label');
+    /* Told from the rows by colour alone: the rows' size, the rows' weight. */
+    expect(label).toMatch(/color:\s*var\(--tnzi-ai-sidebar-heading\)/);
+    expect(label).toMatch(/font-size:\s*var\(--tnzi-ai-row-font-size, 14px\)/);
+    expect(label).toMatch(/font-weight:\s*400/);
+    expect(declaration(threads, '.t-thread-list__row', 'color')).toBe('var(--tnzi-ai-text)');
   });
 
   it('TChatApp declares no row style of its own', () => {
@@ -165,16 +236,16 @@ describe('sidebar row geometry', () => {
     expect(chatApp).toMatch(/label: newChatText\.value/);
   });
 
-  it('the shell theme provider renders no element', () => {
-    /* `NConfigProvider` renders a `<div class="n-config-provider">` unless it
-       is `abstract`. Wrapping the shell in one broke the height chain: the div
-       is `display:block` with no height, so `.t-chat-app` resolved to its
+  it('nothing wraps the shell in an element of its own', () => {
+    /* A provider rendering a block element around the shell (as a non-abstract
+       `NConfigProvider` once did: `<div class="n-config-provider">`) breaks the
+       height chain: the div has no height, so `.t-chat-app` resolved to its
        content - measured 1467px inside a 711px viewport, composer and account
-       bar pushed off screen. The theme reaches descendants either way, because
-       provide/inject follows the component tree rather than the DOM, so
-       `abstract` costs nothing and is the only correct form here. */
+       bar pushed off screen. The template's root is the shell itself. */
     const chatApp = read(CHAT_APP);
-    expect(chatApp).toMatch(/<NConfigProvider\s+abstract\b/);
+    const template = chatApp.slice(chatApp.indexOf('<template>') + '<template>'.length);
+    const firstElement = template.replace(/<!--[\s\S]*?-->/g, '').trimStart();
+    expect(firstElement).toMatch(/^<div\s+ref="rootRef"\s+class="t-chat-app"/);
   });
 
   it('wired settings sections are hidden when nothing can fill them', () => {

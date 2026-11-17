@@ -301,10 +301,12 @@ public class AnthropicThinkingChatClientTests : IDisposable
             .Callback<IEnumerable<ChatMessage>, ChatOptions?, CancellationToken>((_, opts, _) => capturedOptions = opts)
             .ReturnsAsync(new ChatResponse([]));
 
-        await client.GetResponseAsync([], new ChatOptions { AllowMultipleToolCalls = false, Temperature = 0.2f });
+        await client.GetResponseAsync([], new ChatOptions { AllowMultipleToolCalls = false, MaxOutputTokens = 2000, Temperature = 0.2f });
 
         capturedOptions!.AllowMultipleToolCalls.ShouldBe(false);
-        capturedOptions.Temperature.ShouldBe(0.2f);
+        capturedOptions.MaxOutputTokens.ShouldBe(2000);
+        // the one deliberate exception: Anthropic rejects a temperature while thinking is on
+        capturedOptions.Temperature.ShouldBeNull();
     }
 
     [Fact]

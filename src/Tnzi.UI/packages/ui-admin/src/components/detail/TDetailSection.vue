@@ -57,7 +57,8 @@
  * node in `<template>` makes the component multi-root and breaks fallthrough.)
  */
 import { computed, inject, type CSSProperties } from 'vue'
-import { THint, TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
+import THint from '../display/THint.vue'
 import { DETAIL_ACTIVE_SECTION_ICON } from './active-section-icon'
 
 /**

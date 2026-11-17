@@ -113,6 +113,10 @@ public class MailKitEmailSender : IEmailSender
             mimeMessage.Body = bodyBuilder.ToMessageBody();
 
             using var client = new MailKit.Net.Smtp.SmtpClient();
+            var proxy = MailProxySelector.Apply(client, _options.Proxy, _options.UseEnvironmentProxy, _options.SmtpServer, _options.SmtpPort);
+            if (proxy != null)
+                _logger.LogDebug("Connecting to SMTP {Host}:{Port} through proxy {Proxy}", _options.SmtpServer, _options.SmtpPort, proxy);
+
             await client.ConnectAsync(_options.SmtpServer, _options.SmtpPort, SocketOptionsFor(_options), cancellationToken);
             if (ShouldAuthenticate(_options))
                 await client.AuthenticateAsync(_options.Username, _options.Password, cancellationToken);

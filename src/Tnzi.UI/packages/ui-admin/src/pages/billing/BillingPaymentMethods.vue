@@ -87,7 +87,8 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { NAlert, NButton, NPopconfirm, NTag } from 'naive-ui'
-import { TEmpty, THint, TSvgIcon } from '@tnzi/ui'
+import { TEmpty, TSvgIcon } from '@tnzi/ui'
+import THint from '../../components/display/THint.vue'
 import type { StoredPaymentMethodDto, SubscriptionDto } from '@tnzi/core/services/payment'
 import TDetailBlock from '../../components/detail/TDetailBlock.vue'
 import { useSafeMessage } from '../_shared/safe-message'

@@ -118,7 +118,8 @@
  */
 import { computed, ref, watch } from 'vue'
 import { NButton, NPopconfirm, NProgress, NSpin, NTag } from 'naive-ui'
-import { TEmpty, TSvgIcon, useSafeMessage } from '@tnzi/ui'
+import { TEmpty, TSvgIcon } from '@tnzi/ui'
+import { useSafeMessage } from '../../headless/useSafeMessage'
 import { formatDateTime } from '@tnzi/core/utils'
 import { UsageLimitWindow, type SaveUsagePolicyDto, type UserUsageLimitsDto } from '@tnzi/core/services/ai'
 import TDetailBlock from '../detail/TDetailBlock.vue'
@@ -204,6 +205,9 @@ const inherited = computed<InheritedUsagePolicy>(() => {
     weeklyLimitUsd: d?.weeklyLimitUsd ?? null,
     allowedModels: d?.allowedModels.map((m) => m.id) ?? [],
     defaultModel: d?.defaultModel ?? null,
+    modelEfforts: Object.fromEntries(
+      (d?.allowedModels ?? []).map((m) => [m.id, { efforts: m.efforts ?? [], defaultEffort: m.defaultEffort ?? null }]),
+    ),
   }
 })
 

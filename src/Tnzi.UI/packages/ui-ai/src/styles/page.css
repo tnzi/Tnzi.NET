@@ -1,0 +1,148 @@
+/* ===========================================================================
+ * Page-wide rules of an app built on ui-ai, and the page-level pieces its
+ * pages share.
+ *
+ * Everything that would touch the whole page is written under
+ * `:root[data-tnzi-ai-app]`, the marker `defineChatApp`, `TChatApp` and
+ * `markAiApp()` put on `<html>` (headless/app-root.ts). Importing the package
+ * stylesheet alone restyles nothing: a page that embeds a ui-ai widget, or an
+ * admin app that lazy-loads one ui-ai component, keeps its own look. The thin
+ * scrollbar of the same app is in `index.css`, with the other scrollbar hooks.
+ * ========================================================================= */
+
+/* Native controls (a date field, a checkbox, the page's own scrollbar in
+   Firefox) follow the mode. */
+:root[data-tnzi-ai-app] {
+  color-scheme: light;
+}
+:root[data-tnzi-ai-app]:is(.dark, [data-theme='dark']) {
+  color-scheme: dark;
+}
+
+/* The app's canvas and body face. `@tnzi/ui`'s reset paints the body in the
+   admin palette (a cool grey canvas); an ai app is on its own warm one. */
+:root[data-tnzi-ai-app] body {
+  margin: 0;
+  background: var(--tnzi-ai-bg);
+  color: var(--tnzi-ai-text);
+  font-family: var(--tnzi-ai-font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A visible line for whoever moves with the keyboard, nothing for a click.
+   `:where()` keeps it at the specificity of a bare `:focus-visible`, so a
+   component's own focus style (an inset line, a field's ring) wins over it. */
+:where(:root[data-tnzi-ai-app]) :focus-visible {
+  outline: var(--tnzi-ai-focus-outline);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Flowing tabs: on a grey strip of actions, the chosen tab is the content's
+ * surface, with no line between them, and curves out into it at its foot.
+ *
+ *   <div class="t-flow-tabs">
+ *     <button class="t-flow-tab is-on">Files</button>
+ *     <button class="t-flow-tab">Changes</button>
+ *   </div>
+ *
+ * The strip keeps 8px each side for the curves at its ends. The tabs' own
+ * size, padding and text are the page's; this draws only the join.
+ * `.t-flow-tabs--bottom` is the same strip under the content (below).
+ * ------------------------------------------------------------------------- */
+.t-flow-tabs {
+  padding-inline: 8px;
+  margin-inline: -8px;
+}
+.t-flow-tab {
+  position: relative;
+  border-radius: 8px 8px 0 0;
+}
+.t-flow-tabs .t-flow-tab.is-on {
+  background: var(--tnzi-ai-surface);
+  color: var(--tnzi-ai-text);
+}
+.t-flow-tab.is-on::before,
+.t-flow-tab.is-on::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+}
+.t-flow-tab.is-on::before {
+  left: -8px;
+  background: radial-gradient(circle at 0 0, transparent 7.5px, var(--tnzi-ai-surface) 8px);
+}
+.t-flow-tab.is-on::after {
+  right: -8px;
+  background: radial-gradient(circle at 100% 0, transparent 7.5px, var(--tnzi-ai-surface) 8px);
+}
+
+/* Tabs under the content (a terminal's sessions at the foot of its panel):
+   `.t-flow-tabs--bottom` turns the join over. The chosen tab hangs from the
+   content above it, rounded at its foot, and its curves open upwards into it.
+
+     <div class="t-flow-tabs t-flow-tabs--bottom">
+       <button class="t-flow-tab is-on">bash</button>
+     </div>
+*/
+.t-flow-tabs--bottom .t-flow-tab {
+  border-radius: 0 0 8px 8px;
+}
+.t-flow-tabs--bottom .t-flow-tab.is-on::before,
+.t-flow-tabs--bottom .t-flow-tab.is-on::after {
+  top: 0;
+  bottom: auto;
+}
+.t-flow-tabs--bottom .t-flow-tab.is-on::before {
+  background: radial-gradient(circle at 0 100%, transparent 7.5px, var(--tnzi-ai-surface) 8px);
+}
+.t-flow-tabs--bottom .t-flow-tab.is-on::after {
+  background: radial-gradient(circle at 100% 100%, transparent 7.5px, var(--tnzi-ai-surface) 8px);
+}
+
+/* ---------------------------------------------------------------------------
+ * The wavy hairline between parts of a page or a conversation.
+ *
+ *   <div class="t-wave-divider" role="separator"></div>
+ *   <div class="t-wave-divider"><span>Continued after a background task</span></div>
+ *
+ * The line is `--tnzi-ai-wave` used as a mask over `currentColor`, so it is
+ * drawn in the element's colour (the border colour by default) in either mode.
+ * With words inside, the line runs on both sides of them and the words take
+ * the tertiary text colour.
+ * ------------------------------------------------------------------------- */
+.t-wave-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 6px;
+  color: var(--tnzi-ai-border-strong);
+  font-size: 12px;
+  line-height: 18px;
+}
+.t-wave-divider::before,
+.t-wave-divider::after {
+  content: '';
+  flex: 1 1 0;
+  min-width: 12px;
+  height: 6px;
+  background: currentColor;
+  -webkit-mask: var(--tnzi-ai-wave) repeat-x left center / 12px 6px;
+  mask: var(--tnzi-ai-wave) repeat-x left center / 12px 6px;
+}
+/* No words: one line, not two halves with a gap between them. */
+.t-wave-divider:empty {
+  gap: 0;
+}
+.t-wave-divider:empty::after {
+  display: none;
+}
+.t-wave-divider > * {
+  flex: none;
+  max-width: 80%;
+  color: var(--tnzi-ai-text-tertiary);
+  text-align: center;
+}

@@ -162,7 +162,7 @@
 import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { NPopconfirm, NSwitch } from 'naive-ui'
-import { useSafeMessage } from '@tnzi/ui'
+import { useSafeMessage } from '../../headless/useSafeMessage'
 import { MemberRole, ConversationType } from '@tnzi/core/services/chat'
 import type { ConversationDto, ChatContactDto } from '@tnzi/core/services/chat'
 import { useChatStore } from '../../stores/useChatStore'

@@ -13,14 +13,17 @@
  * 前端据此换到下一件 —— 而不是把人退回登录页重来一遍。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
-import { NForm, NFormItem, NInput, NButton, NSpace, NAlert, NQrCode, NSpin, type FormRules } from 'naive-ui'
-import { useFormRules, useLoginContext } from '@tnzi/ui'
+import { NForm, NFormItem, NInput, NButton, NAlert, NQrCode, NSpin, type FormRules } from 'naive-ui'
+import { useLoginContext, usePasswordRequirements } from '@tnzi/ui'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
+import { useNaiveFormRules } from '../../../headless/useNaiveFormRules'
 
 defineOptions({ name: 'PendingActions' })
 
 const { translate, toggleLoginModule, callbacks, ui, pendingAction, helpers } = useLoginContext()
-const { rules: r } = useFormRules(translate)
+const { rules: r } = useNaiveFormRules(translate)
+// 改密时把密码要求先说出来，而不是等用户输错才知道；与 `r.password()` 读同一份策略。
+const passwordRequirements = usePasswordRequirements(translate)
 const { formRef, validate } = useNaiveForm()
 
 const model = reactive({ password: '', confirmPassword: '', code: '' })
@@ -235,6 +238,9 @@ function handleCancel(): void {
               ? translate('admin.login.pendingActions.enrollTotp', 'You must set up an authenticator app before continuing.')
               : translate('admin.login.pendingActions.confirmEmail', 'You must confirm your email address before continuing.')
         }}
+        <div v-if="current === 'ChangePassword'" class="mt-4px" data-testid="password-requirements">
+          {{ passwordRequirements() }}
+        </div>
       </NAlert>
 
       <div v-if="account" class="text-14px op-70">
@@ -306,14 +312,14 @@ function handleCancel(): void {
 
         <div v-if="submitError" class="mb-12px text-14px c-error">{{ submitError }}</div>
 
-        <NSpace vertical :size="16">
+        <div class="flex flex-col gap-16px">
           <NButton type="primary" size="large" block :round="ui.pill" :loading="submitting" @click="handleSubmit">
             {{ translate('admin.login.pendingActions.submit', 'Continue') }}
           </NButton>
           <NButton quaternary size="large" block :round="ui.pill" @click="handleCancel">
             {{ translate('admin.login.back', 'Back') }}
           </NButton>
-        </NSpace>
+        </div>
       </NForm>
     </div>
   </NSpin>

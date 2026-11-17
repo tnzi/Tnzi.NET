@@ -17,11 +17,11 @@
  * without limits is not something broken.
  */
 import { onMounted, computed } from 'vue'
-import { NProgress } from 'naive-ui'
 import { Icon } from '@iconify/vue'
 import { UsageLimitWindow, type MyUsageWindowDto } from '@tnzi/core/services/ai'
 import TSettingGroup from '../layout/TSettingGroup.vue'
 import TSettingRow from '../layout/TSettingRow.vue'
+import TProgress from '../controls/TProgress.vue'
 import { usageBarPercent, type UseAiUsageReturn } from '../../headless/useAiUsage'
 import { formatResetLabel, formatWindowDuration, wholePercent } from '../../headless/usage-limits'
 import { useAiI18n, formatAiMessage } from '../../i18n'
@@ -59,10 +59,10 @@ function usedLine(w: MyUsageWindowDto): string {
 
 /* The colour follows the server's own judgement (it owns the threshold), not
    a second number here that could disagree with the one enforcing it. */
-function meterStatus(w: MyUsageWindowDto): 'success' | 'warning' | 'error' {
-  if (w.exceeded) return 'error'
+function meterTone(w: MyUsageWindowDto): 'accent' | 'warning' | 'danger' {
+  if (w.exceeded) return 'danger'
   if (w.warningReached) return 'warning'
-  return 'success'
+  return 'accent'
 }
 
 const lastUpdated = computed(() => {
@@ -91,13 +91,7 @@ const hasReading = computed(() => props.controller.status.value !== null)
         stacked
       >
         <div v-if="w.limited" class="t-usage-settings__meter">
-          <NProgress
-            type="line"
-            :percentage="usageBarPercent(w.usedPercent)"
-            :status="meterStatus(w)"
-            :show-indicator="false"
-            :height="8"
-          />
+          <TProgress :value="usageBarPercent(w.usedPercent)" :tone="meterTone(w)" :height="8" />
           <div class="t-usage-settings__meter-line">
             <span>{{ resetLine(w) }}</span>
             <span class="t-usage-settings__percent">{{ usedLine(w) }}</span>

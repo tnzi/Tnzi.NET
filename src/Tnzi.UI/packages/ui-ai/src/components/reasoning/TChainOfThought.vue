@@ -99,7 +99,7 @@ defineProps<{
 .t-cot__connector--default { background-color: var(--tnzi-border); }
 .t-cot__dot {
   position: relative;
-  z-index: 10;
+  z-index: 1; /* over its connector, within this component */
   display: flex;
   width: 24px;
   height: 24px;

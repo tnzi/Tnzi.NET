@@ -72,4 +72,12 @@ public class CliRuntime : FullAuditedEntity<Guid>
     /// 过了 <c>AI:Cli:Activation:Timeout</c> 还没上线，排在它上面的运行以 <see cref="CliRunFailureReason.TargetUnavailable"/> 结束。
     /// </summary>
     public DateTime? ActivationStartedAt { get; set; }
+
+    /// <summary>
+    /// CLI 最近一次握手时自己报的能力（<see cref="CliAgentCapabilities"/> 的 JSON）。每次报了就整份覆盖：CLI 升级后能力跟着变。
+    /// </summary>
+    public string? CapabilitiesJson { get; set; }
+
+    /// <summary><see cref="CapabilitiesJson"/> 的时间。</summary>
+    public DateTime? CapabilitiesReportedAt { get; set; }
 }

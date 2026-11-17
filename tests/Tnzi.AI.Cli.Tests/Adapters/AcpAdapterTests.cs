@@ -92,7 +92,7 @@ public class AcpAdapterTests
     [Fact]
     public async Task Run_WithAReasoningEffortOnTheBinding_SaysItIsNotApplied()
     {
-        // 管理端对所有运行时都提供推理强度，ACP 一路没有地方投递它：照常运行，但不能静默丢掉。
+        // 运行时没报推理强度的会话选项：照常运行，但不能静默丢掉（管理端对所有运行时都提供这个字段）。
         var logger = new Mock<ILogger<AcpAdapter>>();
         var transport = new FakeCliAgentTransport([], onWrite: Server());
 
@@ -134,6 +134,29 @@ public class AcpAdapterTests
         result.Status.ShouldBe(CliRunStatus.Completed);
         result.SessionId.ShouldBe("acp-1");
         result.Usage.Values.Single().InputTokens.ShouldBe(11);
+    }
+
+    /// <summary>
+    /// <c>session/prompt</c> 已经答完：之后进程没自己退出、被执行器终止（143），回答照常交付，这一轮是完成的。
+    /// </summary>
+    [Theory]
+    [InlineData(143)]
+    [InlineData(1)]
+    public async Task GetResult_NonZeroExitAfterTheAnsweredPrompt_IsCompleted(int exitCode)
+    {
+        var transport = new FakeCliAgentTransport([], stderrTail: "Terminated", onWrite: Server(
+        [
+            """{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"All done."}}}}"""
+        ]));
+
+        var adapter = Adapter();
+        await DrainAsync(adapter, transport, Context());
+
+        var result = adapter.GetResult(new CliSessionOutcome { ExitCode = exitCode, StderrTail = "Terminated" });
+        result.Status.ShouldBe(CliRunStatus.Completed);
+        result.FailureReason.ShouldBeNull();
+        result.Output.ShouldBe("All done.");
+        result.ResumeRejected.ShouldBeFalse();
     }
 
     [Fact]

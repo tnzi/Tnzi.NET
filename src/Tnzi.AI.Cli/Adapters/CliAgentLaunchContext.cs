@@ -12,7 +12,25 @@ public sealed record CliAgentLaunchContext
     public required string ExecutablePath { get; init; }
 
     /// <summary>提示词。经 stdin 投递，绝不作为命令行参数。</summary>
+    /// <remarks>用户这一轮说的话（或重试时的续接说明），不含 <see cref="TurnContext"/>：交给 CLI 时怎么带上下文由适配器决定。</remarks>
     public required string Prompt { get; init; }
+
+    /// <summary>
+    /// 这一轮的易变上下文（消费方处理器给的、中断说明之类）；没有时为 null。
+    /// </summary>
+    /// <remarks>
+    /// 缺省追加在提示尾部（<see cref="PromptWithTurnContext"/>）。用户这一轮是一条斜杠命令时，追加会让整段上下文变成命令的参数：
+    /// 能接收「只进会话、不开一轮」用户帧的 provider（<see cref="CliProviderDescriptor.AcceptsContextFrames"/>）把它单独发在命令之前。
+    /// </remarks>
+    public string? TurnContext { get; init; }
+
+    /// <summary>提示加上这一轮的上下文（以 <c>---</c> 分隔、追加在尾部）：不分开投递上下文的协议用它。</summary>
+    public string PromptWithTurnContext => string.IsNullOrWhiteSpace(TurnContext) ? Prompt : $"{Prompt}\n\n---\n\n{TurnContext}";
+
+    /// <summary>
+    /// 一轮结束时 CLI 还有后台任务在跑，最多等多久让它跑完、接着出下一轮的回答；<see cref="TimeSpan.Zero"/> = 不等（一轮结束即结束运行，后台任务随进程结束）。
+    /// </summary>
+    public TimeSpan BackgroundTaskWait { get; init; }
 
     /// <summary>子进程工作目录（执行目标上的路径）。</summary>
     public required string WorkingDirectory { get; init; }
@@ -36,6 +54,12 @@ public sealed record CliAgentLaunchContext
     /// 随提示一起投递的附件（已校验过的图片与 PDF）。只对 <see cref="CliProviderDescriptor.AcceptsAttachments"/> 的 provider 给出。
     /// </summary>
     public IReadOnlyList<CliPromptAttachment> Attachments { get; init; } = [];
+
+    /// <summary>
+    /// 这一轮的文件附件（不是图片或 PDF）：不随提示投递，agent 用自己的工具打开。执行器已把它们的名字、大小与位置写进
+    /// <see cref="TurnContext"/>；适配器不必再做什么，这里给出是为了让适配器与测试看得到这一轮带了哪些文件。
+    /// </summary>
+    public IReadOnlyList<CliPromptFile> Files { get; init; } = [];
 
     /// <summary>
     /// 内联在提示前面的 agent 说明。两种情况才有值：provider 没有原生记忆文件（每一轮都带）；
@@ -73,8 +97,17 @@ public sealed record CliAgentLaunchContext
     /// true = 档位不自动放行的权限请求交给使用方批准：适配器产出 <see cref="CliAgentEventType.PermissionRequest"/> 事件、不应答，
     /// 等执行器经 <see cref="ICliProtocolAdapter.AnswerPermissionAsync"/> 把回答交回来。false = 按档位当场应答（此前的行为）。
     /// </summary>
-    /// <remarks>执行器只在 <see cref="CliPermissionMode.Ask"/> 且这一轮有人值守时置 true。</remarks>
+    /// <remarks>执行器只在 <see cref="CliPermissionMode.Ask"/> 或 <see cref="CliPermissionMode.Plan"/> 且这一轮有人值守时置 true。</remarks>
     public bool AsksForApproval { get; init; }
+
+    /// <summary>
+    /// true = agent 的交互请求（问用户问题、交出计划等批准）交给使用方：适配器产出 <see cref="CliInteractionKinds.Question"/> /
+    /// <see cref="CliInteractionKinds.Plan"/> 种类的 <see cref="CliAgentEventType.PermissionRequest"/> 事件，回答同样经
+    /// <see cref="ICliProtocolAdapter.AnswerPermissionAsync"/> 交回。与档位无关，全权档也一样。
+    /// false = 没有人能回答：agent 拿不到这些工具，万一问到也当场拒绝，绝不交给它一份空回答。
+    /// </summary>
+    /// <remarks>执行器在这一轮有人值守、且 provider 声明了 <see cref="CliProviderDescriptor.HostPromptArgs"/> 时置 true。</remarks>
+    public bool RelaysInteractions { get; init; }
 
     /// <summary>
     /// 有受管 MCP 配置时是否只用它（stream-json 的 <c>--strict-mcp-config</c>）。执行器按启动档案设置；
@@ -127,6 +160,16 @@ public sealed record CliPromptAttachment(string MediaType, string? FileName, byt
     /// <summary>是否图片（否则是 PDF 文档）。</summary>
     public bool IsImage => MediaType.StartsWith("image/", StringComparison.Ordinal);
 }
+
+/// <summary>
+/// 这一轮的一个文件附件（不随提示投递，agent 用自己的工具打开）。
+/// </summary>
+/// <param name="AttachmentId">存下的附件 id（<c>AgentAttachment.Id</c>）。</param>
+/// <param name="FileName">文件名。</param>
+/// <param name="MediaType">媒体类型（客户端声明的，或 <c>application/octet-stream</c>）。</param>
+/// <param name="Size">字节数。</param>
+/// <param name="Path">它在执行目标上的位置（启动档案的 <see cref="Hosting.CliLaunchProfile.AttachmentPaths"/>）；没有放时为 null。</param>
+public sealed record CliPromptFile(Guid AttachmentId, string FileName, string MediaType, long Size, string? Path);
 
 /// <summary>
 /// 一次会话结束时，进程层面的观测结果。

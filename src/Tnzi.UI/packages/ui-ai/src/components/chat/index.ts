@@ -36,13 +36,24 @@ export { default as TFollowUpList } from './TFollowUpList.vue';
 export type { FollowUpItem } from './TFollowUpList.vue';
 export { default as TUpgradeBanner } from './TUpgradeBanner.vue';
 export { default as TThreadComposer } from './TThreadComposer.vue';
+export { default as TQueuedMessages } from './TQueuedMessages.vue';
+export { default as TSlashCommandMenu } from './TSlashCommandMenu.vue';
+export type { SlashCommandsState } from './TSlashCommandMenu.vue';
 export { default as TThreadMessage } from './TThreadMessage.vue';
 export { default as TUsageLimitNotice } from './TUsageLimitNotice.vue';
 export { default as TComposerModelPicker } from './TComposerModelPicker.vue';
 export type { ComposerModelOption } from './TComposerModelPicker.vue';
 export { default as TThreadLoading } from './TThreadLoading.vue';
 export type { ComposerAction } from './composer-types';
-export { DEFAULT_COMPOSER_ACCEPT } from './composer-types';
+export type { ComposerSuggestionContext, ComposerTextRange } from './composer-suggestions';
+export { tokenBeforeCaret, replaceTextRange } from './composer-suggestions';
+export { DEFAULT_COMPOSER_ACCEPT, DEFAULT_SEND_ICON } from './composer-types';
+export { canQueueContent, composerPrimaryAction } from './composer-primary-action';
+export type {
+  ComposerPrimaryAction,
+  ComposerPrimaryActionInput,
+  ComposerPrimaryActionKind,
+} from './composer-primary-action';
 export { default as TMessageActions } from './TMessageActions.vue';
 export type { MessageAction } from './TMessageActions.vue';
 export { default as TCitation } from './TCitation.vue';
@@ -58,11 +69,19 @@ export type { ThemePref, ChatAppView, BuiltinViewId, ChatAppAttachmentsResult } 
 export { default as TThreadList } from './TThreadList.vue';
 export type { ThreadItem } from './TThreadList.vue';
 export { default as TRecentsPage } from './TRecentsPage.vue';
+export { default as TRailThreadList } from './TRailThreadList.vue';
+export type { RailThreadItem } from './TRailThreadList.vue';
+export { default as TThreadIcon } from './TThreadIcon.vue';
+export { default as TThreadStatus } from './TThreadStatus.vue';
+export { resolveThreadIcon } from './thread-icon';
+export type { ThreadIcon, ThreadIconResolver } from './thread-icon';
 export { default as TThreadTitle } from './TThreadTitle.vue';
 export { default as TLandingPage } from './TLandingPage.vue';
 export type { LandingChip } from './TLandingPage.vue';
 export { default as TFileCard } from './TFileCard.vue';
 export { default as TAttachmentImage } from './TAttachmentImage.vue';
+export { provideImageGroup, createImageGroup, useImageGroup } from './image-group';
+export type { ImageGroup, ImageGroupMember, ViewerImage } from './image-group';
 export {
   provideChatRenderContext,
   provideToolRenderers,

@@ -176,7 +176,7 @@
 <script setup lang="ts">
 import { ref, computed, h, nextTick, watch, onBeforeUnmount } from 'vue'
 import { NDropdown } from 'naive-ui'
-import { useDraggableComponent } from '@tnzi/ui/headless'
+import { useDraggableComponent } from '../../headless/useReorderable'
 import { useAdminTabStore, type AdminTab } from '../../stores/useAdminTabStore'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { useAdminThemeStore } from '../../stores/useAdminThemeStore'

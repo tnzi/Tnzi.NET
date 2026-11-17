@@ -26,6 +26,7 @@ public class ChatService : ApplicationService, IChatService
     private readonly IOptionsMonitor<AiChatOptions>? _chatOptions;
     private readonly IUsageLimitService? _usageLimits;
     private readonly IUsagePolicyService? _usagePolicy;
+    private readonly IThreadOriginPolicy? _originPolicy;
 
     public ChatService(
         IAgentDispatchFacade runtime,
@@ -37,7 +38,8 @@ public class ChatService : ApplicationService, IChatService
         IAgentAttachmentService? attachments = null,
         IOptionsMonitor<AiChatOptions>? chatOptions = null,
         IUsageLimitService? usageLimits = null,
-        IUsagePolicyService? usagePolicy = null)
+        IUsagePolicyService? usagePolicy = null,
+        IThreadOriginPolicy? originPolicy = null)
         : base(serviceProvider)
     {
         _runtime = Check.NotNull(runtime);
@@ -49,6 +51,7 @@ public class ChatService : ApplicationService, IChatService
         _chatOptions = chatOptions;
         _usageLimits = usageLimits;
         _usagePolicy = usagePolicy;
+        _originPolicy = originPolicy;
     }
 
     public async Task<Result<ChatResponseDto>> ChatAsync(ChatRequestDto request, CancellationToken ct = default)
@@ -172,6 +175,38 @@ public class ChatService : ApplicationService, IChatService
         => _runtime.CancelRunAsync(runId, ct);
 
     /// <inheritdoc />
+    public async Task<Result> StopTaskAsync(Guid threadId, Guid userId, string taskId, CancellationToken ct = default)
+    {
+        if (_threadService is null || !await _threadService.IsOwnerAsync(threadId, userId))
+        {
+            return Fail("Thread not found", 404, ErrorCodes.ThreadNotFound);
+        }
+
+        return await _runtime.StopTaskAsync(threadId, taskId, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<List<ChatPermissionRequestDto>>> GetPendingPermissionsAsync(Guid threadId, Guid userId, CancellationToken ct = default)
+    {
+        if (_threadService is null || !await _threadService.IsOwnerAsync(threadId, userId))
+        {
+            return Fail<List<ChatPermissionRequestDto>>("Thread not found", 404, ErrorCodes.ThreadNotFound);
+        }
+
+        var pending = await _runtime.GetPendingPermissionsAsync(threadId, ct);
+        return Ok(pending.ToList());
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<List<ChatPermissionRequestDto>>> GetRunPendingPermissionsAsync(Guid runId, CancellationToken ct = default)
+    {
+        var pending = await _runtime.GetRunPendingPermissionsAsync(runId, ct);
+        return pending is null
+            ? Fail<List<ChatPermissionRequestDto>>("Run not found.", 404, ErrorCodes.ChatRunNotFound)
+            : Ok(pending.ToList());
+    }
+
+    /// <inheritdoc />
     public Task<Result> AnswerRunPermissionAsync(Guid runId, Guid requestId, CliPermissionAnswerDto answer, CancellationToken ct = default)
         => _runtime.AnswerRunPermissionAsync(runId, requestId, Check.NotNull(answer), ct);
 
@@ -202,6 +237,14 @@ public class ChatService : ApplicationService, IChatService
             return Fail<AgentRunRequest>(metadata.Message!, metadata.Code ?? 400, metadata.ErrorCode);
         }
 
+        // 线程来源同理：页面声明的值只有应用允许的才能写进线程（不然任何人都能把手动开始的对话标成「邮件规则发起」），
+        // 只有服务端知道的来源由策略在这里给出，建线程时一并写入
+        var origin = await ResolveOriginAsync(request, metadata.Data!, ct);
+        if (!origin.Succeeded)
+        {
+            return Fail<AgentRunRequest>(origin.Message!, origin.Code ?? 400, origin.ErrorCode);
+        }
+
         // 用量上限同理，排在回退与任何写入之前：被拦下的一轮不留线程、不留用户消息，编辑 / 重新生成也不先删掉被替换的那几轮。
         // 这里只查不开窗口：窗口在这一轮真的开始时才开（内建路径在 QuotaMiddleware，外部 CLI 路径在执行器认领之后）
         if (request.UserId is { } userId && _usageLimits is not null
@@ -210,17 +253,31 @@ public class ChatService : ApplicationService, IChatService
             return Fail<AgentRunRequest>(UsageLimitMessage(denial), 429, ErrorCodes.UsageLimitReached, denial);
         }
 
-        // 这一轮用哪个模型：请求点名的必须在这个用户被允许的模型里，没点名用他的默认模型（没配模型清单时原样不动）
+        // 这一轮用哪个模型：请求点名的必须在这个用户被允许的模型里，没点名用他的默认模型（没配模型清单时原样不动）。
+        // 强度同理：必须是这个模型可选的档位之一，没带就是 null（用 Agent 自己的设置）
         var model = request.Model;
+        string? effort = null;
         if (_usagePolicy is not null)
         {
-            var resolved = await _usagePolicy.ResolveChatModelAsync(request.UserId, request.AgentId, request.Provider, request.Model, ct);
+            var resolved = await _usagePolicy.ResolveChatTurnAsync(
+                new ChatModelsRequest(request.UserId, request.AgentId, request.Provider, request.ThreadId)
+                {
+                    Metadata = await TurnSelectionMetadataAsync(request, metadata.Data!, ct)
+                },
+                request.Model, request.Effort, ct);
             if (!resolved.Succeeded)
             {
                 return Fail<AgentRunRequest>(resolved.Message!, resolved.Code ?? 403, resolved.ErrorCode ?? ErrorCodes.ModelNotAllowed);
             }
 
-            model = resolved.Data;
+            model = resolved.Data!.Model;
+            effort = resolved.Data.Effort;
+        }
+        else if (!string.IsNullOrWhiteSpace(request.Effort))
+        {
+            // 没有策略服务就没有可选档位：不让一个没校验过的值交给运行时
+            return Fail<AgentRunRequest>(
+                $"The reasoning effort '{request.Effort.Trim()}' cannot be chosen here.", 403, ErrorCodes.EffortNotAllowed);
         }
 
         var message = request.Message;
@@ -246,6 +303,13 @@ public class ChatService : ApplicationService, IChatService
             }
         }
 
+        // 主人在一条已有线程里说话：服务端建的、等着主人说话的线程从此进列表。排在所有拒绝之后，被拦下的一轮不改变它；
+        // 归属在那条 UPDATE 的条件里，别人的线程 id 在这里什么都不改（随后的线程解析照常答 404）
+        if (request.ThreadId is { } existingThread && request.UserId is { } speaker)
+        {
+            await ListOnUserMessageAsync(existingThread, speaker, ct);
+        }
+
         return Ok(new AgentRunRequest
         {
             OperationType = AIOperationType.Chat,
@@ -256,11 +320,81 @@ public class ChatService : ApplicationService, IChatService
             UserMessage = message,
             ContentParts = content,
             ThreadId = request.ThreadId,
+            ThreadOrigin = request.ThreadId is null ? origin.Data : null,
             UserId = request.UserId,
-            ReasoningEffort = request.ReasoningEffort,
+            ReasoningEffort = request.ReasoningEffort ?? ChatModelEfforts.ToBuiltIn(effort),
+            Effort = effort,
             RewoundTurns = rewound,
-            TurnMetadata = turnMetadata.Count > 0 ? turnMetadata : null
+            TurnMetadata = turnMetadata.Count > 0 ? turnMetadata : null,
+            SentAt = request.SentAt
         });
+    }
+
+    /// <summary>
+    /// 把主人说了话的线程放进列表（见 <see cref="IAgentThreadInternalService.ListOnUserMessageAsync"/>）。只是列表上的事：
+    /// 写不进去时这一轮照常进行，线程留在列表外，下一轮再试。
+    /// </summary>
+    private async Task ListOnUserMessageAsync(Guid threadId, Guid userId, CancellationToken ct)
+    {
+        if (_threadInternal is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _threadInternal.ListOnUserMessageAsync(threadId, userId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Could not list thread {ThreadId} after its owner wrote in it", threadId);
+        }
+    }
+
+    /// <summary>
+    /// 这一轮新线程的来源，由 <see cref="IThreadOriginPolicy"/> 给出：页面声明的值先校验形状，再交给策略放行、换掉或拒绝；
+    /// 新建线程的一轮即使页面没有声明也问策略，服务端才能给出只有它知道的来源。续接已有线程时只在页面声明了来源时问（值用不上，
+    /// 但一个不被允许的值不该因为这一次没用上就被当成合法）。没有注册策略时页面的声明一律拒绝，没有声明就没有来源。
+    /// </summary>
+    private async Task<Result<string?>> ResolveOriginAsync(
+        ChatRequestDto request, IReadOnlyDictionary<string, JsonElement> metadata, CancellationToken ct)
+    {
+        var declared = ThreadOrigin.Normalize(request.Origin);
+        if (!declared.Succeeded)
+        {
+            return declared;
+        }
+
+        var startsThread = request.ThreadId is null;
+        if (!startsThread && declared.Data is null)
+        {
+            return declared;
+        }
+
+        if (_originPolicy is null)
+        {
+            return declared.Data is { } origin ? ConfiguredThreadOriginPolicy.NotAllowed(origin) : declared;
+        }
+
+        var resolved = await _originPolicy.ResolveAsync(
+            new ThreadOriginRequest(declared.Data, request.AgentId, request.UserId, startsThread, metadata), ct);
+        if (!resolved.Succeeded)
+        {
+            return Result<string?>.Failure(
+                resolved.Message ?? "This thread origin is not allowed.",
+                resolved.Code ?? 400,
+                resolved.ErrorCode ?? ErrorCodes.ThreadOriginNotAllowed);
+        }
+
+        // 策略给的值是服务端的值：形状不合规是应用的缺陷，不是请求的错
+        var given = ThreadOrigin.Normalize(resolved.Data);
+        if (!given.Succeeded)
+        {
+            Logger.LogError("The thread origin policy {Policy} returned a malformed origin '{Origin}'", _originPolicy.GetType().Name, resolved.Data);
+            return Result<string?>.Failure("The thread origin policy returned a malformed origin.", 500, ErrorCodes.InvalidThreadOrigin);
+        }
+
+        return given;
     }
 
     /// <summary>用量上限的拒绝说明（英文：面向用户的错误消息；客户端按错误码与详情显示本地化的提示）。</summary>
@@ -290,6 +424,23 @@ public class ChatService : ApplicationService, IChatService
     /// 它的回复会写到一个不存在的提问后面。
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// 校验这一轮的模型与强度时交给应用的元数据：这一轮实际带的那份。重新生成没带元数据时这一轮沿用被重发那条消息存下的（见下文的回退），
+    /// 校验也看它，否则用户在输入框旁的「运行选择」只在第一次生效、重新生成时按默认选择校验。
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, JsonElement>> TurnSelectionMetadataAsync(
+        ChatRequestDto request, IReadOnlyDictionary<string, JsonElement> metadata, CancellationToken ct)
+    {
+        if (!request.Regenerate || metadata.Count > 0 || request.ThreadId is not { } threadId || request.UserId is not { } userId
+            || _threadService is null || _threadInternal is null || !await _threadService.IsOwnerAsync(threadId, userId))
+        {
+            return metadata;
+        }
+
+        var last = await _threadInternal.FindUserMessageAsync(threadId, null, ct);
+        return ChatTurnMetadata.Parse(last?.MetadataJson) ?? metadata;
+    }
+
     private async Task<Result<RewoundTurn>> RewindAsync(ChatRequestDto request, CancellationToken ct)
     {
         if (request.EditMessageId.HasValue && request.Regenerate)
@@ -349,7 +500,7 @@ public class ChatService : ApplicationService, IChatService
     }
 
     /// <summary>
-    /// 一条已存的用户消息原样还原成请求内容：文本，加上随它存档的附件（图片与 PDF 以内联数据带回）。
+    /// 一条已存的用户消息原样还原成请求内容：文本，加上随它存档的附件（图片、PDF 与文件都以内联数据带回，再经同一套规则读一遍）。
     /// </summary>
     private async Task<(string? Message, List<ContentPartDto>? Content)> RebuildContentAsync(ThreadMessageRef target, CancellationToken ct)
     {

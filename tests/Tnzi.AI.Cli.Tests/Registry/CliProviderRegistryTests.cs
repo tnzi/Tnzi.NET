@@ -15,7 +15,7 @@ public class CliProviderRegistryTests
 
         providers.ShouldContain(p => p.Key == "claude" && p.Protocol == CliAgentProtocol.StreamJson);
         providers.ShouldContain(p => p.Key == "kimi" && p.Protocol == CliAgentProtocol.Acp);
-        providers.ShouldContain(p => p.Key == "codex" && p.Protocol == CliAgentProtocol.VendorAppServer);
+        providers.ShouldContain(p => p.Key == "codex" && p.Protocol == CliAgentProtocol.Acp && p.DefaultExecutable == "codex-acp");
     }
 
     [Fact]
@@ -471,10 +471,10 @@ public class CliAgentOptionsValidatorTests
         var options = new CliAgentOptions
         {
             Enabled = true,
-            Providers = { ["kimi"] = new CliProviderOptions { UserConfigIsolation = CliUserConfigIsolation.IsolatedConfigDirectory } }
+            Providers = { ["hermes"] = new CliProviderOptions { UserConfigIsolation = CliUserConfigIsolation.IsolatedConfigDirectory } }
         };
 
-        Validate(options).ShouldContain(e => e.Contains("'kimi'") && e.Contains("IsolatedConfigDirectory"));
+        Validate(options).ShouldContain(e => e.Contains("'hermes'") && e.Contains("IsolatedConfigDirectory"));
     }
 
     [Fact]
@@ -483,10 +483,10 @@ public class CliAgentOptionsValidatorTests
         var options = new CliAgentOptions
         {
             Enabled = true,
-            Providers = { ["kimi"] = new CliProviderOptions { UserConfigIsolation = CliUserConfigIsolation.PerWorkspaceConfigDirectory } }
+            Providers = { ["hermes"] = new CliProviderOptions { UserConfigIsolation = CliUserConfigIsolation.PerWorkspaceConfigDirectory } }
         };
 
-        Validate(options).ShouldContain(e => e.Contains("'kimi'") && e.Contains("PerWorkspaceConfigDirectory"));
+        Validate(options).ShouldContain(e => e.Contains("'hermes'") && e.Contains("PerWorkspaceConfigDirectory"));
     }
 
     /// <summary>每工作区配置目录里永远没有存储的登录：看不出任何令牌来源时告警（只告警，凭据可能来自校验器看不到的地方）。</summary>

@@ -161,7 +161,7 @@ describe('code line height', () => {
   const read = (rel: string) => readFileSync(resolve(import.meta.dirname, '../../src', rel), 'utf8');
 
   it('is one token, 1.5', () => {
-    expect(read('styles/index.css')).toMatch(/--tnzi-ai-code-line-height:\s*1\.5;/);
+    expect(read('styles/tokens.css')).toMatch(/--tnzi-ai-code-line-height:\s*1\.5;/);
   });
 
   it('every multi-line code surface reads it', () => {

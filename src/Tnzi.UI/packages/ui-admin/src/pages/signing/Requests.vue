@@ -128,7 +128,8 @@
  */
 import { computed, h, ref, watch } from 'vue'
 import { NAlert, NButton, NInput, NInputGroup, NProgress, NSelect } from 'naive-ui'
-import { TModalShell, TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
+import TModalShell from '../../components/overlay/TModalShell.vue'
 import { formatDateOnly } from '@tnzi/core'
 import TItemPage from '../../components/crud/TItemPage.vue'
 import TItemCard, { type ItemCardTag } from '../../components/data/TItemCard.vue'

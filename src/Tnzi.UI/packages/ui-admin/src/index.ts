@@ -50,6 +50,31 @@ export * from './presets/index'
 // into any consumer that wanted one display component.
 export * from './components/widgets/index'
 
+// Naive UI bridge: the palette of the `@tnzi/ui` theme context as naive theme
+// overrides (with the consumer's raw `naiveOverrides` merged over them), the
+// compact density, and naive's own locale objects for a locale code.
+export {
+  ADMIN_NAIVE_OVERRIDES_KEY,
+  COMPACT_NAIVE_OVERRIDES,
+  buildNaiveThemeOverrides,
+  resolveNaiveOverrides,
+  useNaiveThemeOverrides,
+  type NaiveOverridesContext,
+  type NaiveOverridesSource,
+} from './theme/naive-bridge'
+export { getNaiveLocale, type NaiveLocaleBundle } from './i18n/naive-locale'
+
+// @tnzi/core adapters over naive's message / dialog / notification / loading-bar
+// APIs (registered by `createTnziUiAdmin`; they call the window handles
+// `TAdminAppRoot` publishes), and the converters from neutral menu / form-rule
+// shapes to naive's.
+export { createMessageAdapter } from './adapters/message'
+export { createDialogAdapter } from './adapters/dialog'
+export { createNotificationAdapter } from './adapters/notification'
+export { createLoadingBarAdapter } from './adapters/loading-bar'
+export { createUiAdapter } from './adapters/create-ui-adapter'
+export * from './utils/naive-helpers'
+
 // Account security, hostable: an account's second factor as one list of
 // methods, for the signed-in account (`mode="self"`, the User Center's own
 // block) or for another account (`mode="admin"` + `userId`, the block inside

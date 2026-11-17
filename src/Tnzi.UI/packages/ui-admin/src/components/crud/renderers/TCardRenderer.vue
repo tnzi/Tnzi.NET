@@ -8,18 +8,13 @@
       <slot name="empty">
         <!-- First-load empty on a creatable list → small Create CTA;
              search/filter misses keep the plain empty visual. -->
-        <TEmpty :text="emptyText">
-          <NButton
-            v-if="showCreateCta"
-            class="t-crud-empty-cta"
-            size="small"
-            tertiary
-            type="primary"
-            @click="onEmptyCreate"
-          >
-            {{ createCtaLabel }}
-          </NButton>
-        </TEmpty>
+        <TListEmpty
+          :text="emptyLine"
+          :hint="emptyHintLine"
+          :show-create="showCreateCta"
+          :create-label="createCtaLabel"
+          @create="onEmptyCreate"
+        />
       </slot>
     </div>
 
@@ -65,14 +60,13 @@
 
 <script setup lang="ts" generic="T, TId extends string | number = string | number">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { TEmpty } from '@tnzi/ui'
-import { useReorderable } from '@tnzi/ui/headless'
+import { useReorderable } from '../../../headless/useReorderable'
 import type { UseCrudPageReturn } from '../../../headless/useCrudPage'
 import type { RowAction } from '../../../headless/row-actions'
 import { useBreakpoint } from '../../../headless/useBreakpoint'
 import { useEmptyCreateCta } from '../../../headless/useEmptyCreateCta'
+import TListEmpty from './TListEmpty.vue'
 import type { CardReorderPayload } from './card-reorder'
 
 export interface TCardRendererProps<T, TId extends string | number = string | number> {
@@ -129,6 +123,10 @@ export interface TCardRendererProps<T, TId extends string | number = string | nu
    * refresh. Turn it on only if the page's sort and its stored order agree.
    */
   dragWhileSorted?: boolean
+  /** The page's own empty line (already translated), on a first-load empty list. */
+  emptyText?: string
+  /** A muted sentence under it: what the page is for (already translated). */
+  emptyHint?: string
   translate?: (key: string) => string
 }
 
@@ -153,6 +151,8 @@ const props = withDefaults(defineProps<TCardRendererProps<T, TId>>(), {
   dragFilter: undefined,
   dragDisabled: undefined,
   dragWhileSorted: false,
+  emptyText: undefined,
+  emptyHint: undefined,
   translate: undefined,
 })
 
@@ -171,19 +171,12 @@ defineSlots<{
 
 const bp = useBreakpoint()
 
-function t(key: string): string {
-  return props.translate ? props.translate(key) : key
-}
-
-/** Translated empty text; without a translator let TEmpty fall back to
- *  'No data' instead of leaking the raw `admin.crud.empty` key. */
-const emptyText = computed(() => (props.translate ? t('admin.crud.empty') : undefined))
-
 /** First-load empty on a creatable list → offer a small Create CTA inside
  *  the default empty visual. Search/filter misses stay plain. */
-const { showCreateCta, createCtaLabel, onEmptyCreate } = useEmptyCreateCta<T, TId>(
+const { showCreateCta, createCtaLabel, onEmptyCreate, emptyText: emptyLine, emptyHint: emptyHintLine } = useEmptyCreateCta<T, TId>(
   () => props.state,
   () => props.translate,
+  () => ({ text: props.emptyText, hint: props.emptyHint }),
 )
 
 const items = computed<T[]>(() => props.state.items.value)

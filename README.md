@@ -90,8 +90,8 @@ longs, whichever suits the provider.
 | Package | Contents |
 |---|---|
 | `@tnzi/core` | API client, auth and state matching the backend contract. No UI dependency |
-| `@tnzi/ui` | General components (on Naive UI) |
-| `@tnzi/ui-admin` | Admin console: layout, menu permissions, CRUD page scaffolding, settings centre |
+| `@tnzi/ui` | Common layer: theme context and tokens, login stack, library-neutral components |
+| `@tnzi/ui-admin` | Admin console on Naive UI: layout, menu permissions, CRUD page scaffolding, settings centre |
 | `@tnzi/ui-ai` | AI chat surface: streaming, tool-call display, workflow editor |
 | `@tnzi/mobile` | Mobile components (on Vant) |
 

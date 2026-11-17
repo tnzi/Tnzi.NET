@@ -1,0 +1,42 @@
+/* ===========================================================================
+ * Tooltip: the one bubble `vTooltip` / `createTooltip` (headless/tooltip.ts)
+ * draws on `<body>` for whichever control is showing its label.
+ *
+ * Global, not scoped: the element is created by script outside any component.
+ * Placed by script with `top` / `left`, `position: fixed` on the tooltip
+ * layer, so no `overflow: hidden` ancestor can clip it. `data-open` shows it
+ * with a short fade and nothing else: no shadow, no nudge, the words wrap
+ * past 280px. The bubble is the text colour on the canvas colour
+ * (`--tnzi-ai-tooltip-bg` / `-fg`), so it inverts with the mode. It never
+ * takes the pointer, so it cannot stand between the pointer and the control
+ * it labels.
+ * ======================================================================== */
+.t-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: var(--tnzi-ai-z-tooltip, 3100);
+  box-sizing: border-box;
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 4px 8px;
+  border-radius: var(--tnzi-ai-radius-sm, 6px);
+  background: var(--tnzi-ai-tooltip-bg);
+  color: var(--tnzi-ai-tooltip-fg);
+  font-family: var(--tnzi-ai-font-body, inherit);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 90ms linear, visibility 0s linear 90ms;
+}
+.t-tooltip[data-open] {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-tooltip { transition: none; }
+}

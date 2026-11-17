@@ -320,8 +320,9 @@ function summaryColumnsOf(srow: Record<string, VNodeChild>): CardColumn[] {
 }
 .t-data-cards__field {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
-  gap: 12px;
+  gap: 6px 12px;
   min-width: 0;
 }
 .t-data-cards__label {
@@ -332,13 +333,29 @@ function summaryColumnsOf(srow: Record<string, VNodeChild>): CardColumn[] {
   color: var(--tnzi-base-text-muted, #6b7280);
 }
 .t-data-cards__value {
-  flex: 1 1 auto;
-  min-width: 0;
+  /* The value sits beside its label while it fits and takes a line of its own
+     (full card width) when it does not. The trigger is the content's
+     min-content width: `min-width` stays `auto` so a control that cannot
+     shrink (a segmented button group, a row of chips that do not wrap) moves
+     under the label instead of overflowing the card, while text, whose
+     min-content is one word (`overflow-wrap: anywhere` makes even an id or a
+     URL break), stays beside it. */
+  flex: 1 1 8em;
+  max-width: 100%;
   margin: 0;
   font-size: 13px;
   color: var(--tnzi-base-text, #374151);
   text-align: right;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+/* Whatever a cell renders may not be wider than the card: a control on its own
+   line still wider than the card (a segmented group with long labels) wraps its
+   items: `flex-wrap` for a flex control, `white-space` for one built of
+   inline-blocks (naive's radio-button group is `inline-block` + `nowrap`). */
+.t-data-cards__value > :deep(*) {
+  max-width: 100%;
+  flex-wrap: wrap;
+  white-space: normal;
 }
 
 .t-data-cards__actions {

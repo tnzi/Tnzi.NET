@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { ref } from 'vue'
 import { mount } from '@vue/test-utils'
-import { THint } from '@tnzi/ui'
+import THint from '../../../src/components/display/THint.vue'
 import TDetailSection from '../../../src/components/detail/TDetailSection.vue'
 import { DETAIL_ACTIVE_SECTION_ICON } from '../../../src/components/detail/active-section-icon'
 

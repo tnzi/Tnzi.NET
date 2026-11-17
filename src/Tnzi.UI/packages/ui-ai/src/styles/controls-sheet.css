@@ -1,0 +1,13 @@
+/* The controls stylesheet, `@tnzi/ui-ai/controls.css`: what a page built from
+ * `@tnzi/ui-ai/controls` and `@tnzi/ui-ai/dialogs` needs (the menus, popovers,
+ * toasts and tooltip the controls open, and the dialogs with their shared
+ * chrome), and nothing of the conversation, the sidebar or the other domains.
+ * The build (`vite.controls-css.config.ts`) adds the scoped styles of every
+ * component the two entries reach.
+ * Gate: `__tests__/conventions/controls-stylesheet.test.ts`. */
+@import './tnzi-defaults.css';
+@import './scrollbars.css';
+@import '../components/overlay/tooltip.css';
+@import '../components/overlay/dialog.css';
+@import '../components/controls/controls.css';
+@import './tokens.css';

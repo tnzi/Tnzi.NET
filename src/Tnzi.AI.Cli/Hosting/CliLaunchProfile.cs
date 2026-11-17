@@ -44,8 +44,10 @@ public sealed record CliLaunchProfile
     /// 这一轮有没有人在等：null = 按调用方入队时给的（<c>CliRunRequestDto.Attended</c>，聊天路径对有登录用户的一轮是 true）。
     /// </summary>
     /// <remarks>
-    /// 只对 <see cref="CliPermissionMode.Ask"/> 起作用：true 时权限请求以 <c>PermissionRequest</c> 事件交给使用方批准，
-    /// false 时没有人能回答，要权限的操作按只读档直接拒绝。例如定时任务给 false，免得每个请求都挂到超时。
+    /// true 时 agent 的问题（<c>AskUserQuestion</c>）与计划（<c>ExitPlanMode</c>）在任何档位下都以 <c>PermissionRequest</c> 事件交给使用方
+    /// （provider 支持时，见 <see cref="CliProviderDescriptor.HostPromptArgs"/>），<see cref="CliPermissionMode.Ask"/> 与
+    /// <see cref="CliPermissionMode.Plan"/> 档的权限请求也交给使用方批准；false 时没有人能回答：提问工具不给 agent，
+    /// 要权限的操作按只读档直接拒绝。例如定时任务给 false，免得每个请求都挂到超时。
     /// </remarks>
     public bool? Attended { get; init; }
 
@@ -132,6 +134,21 @@ public sealed record CliLaunchProfile
     /// 服务器的凭据不进用户的工作区，contributor 不能把它打开。
     /// </remarks>
     public bool UseFallbackAuthToken { get; init; } = true;
+
+    /// <summary>
+    /// 这一轮的文件附件放在了执行目标上的哪里：上传附件的 id（<c>AgentAttachment.Id</c>）→ 路径（绝对路径，或相对工作目录）。
+    /// 空 = 没有放（缺省）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 文件附件（不是图片或 PDF，见 <c>ICliFileAttachmentPolicy</c>）不交给模型，由消费方放到 agent 读得到的地方：
+    /// contributor 按 <see cref="CliHostScope.RunId"/> 取出这一轮的上传附件（<c>IAgentAttachmentService.GetForRunAsync</c>，
+    /// <c>AttachmentOrigin.Upload</c>），写到执行目标上，再把每个文件的路径记在这里。框架在交给 CLI 的这一轮里写明每个文件的名字、
+    /// 大小与这里给的路径，agent 据此用自己的工具打开它；没有路径的文件只写名字与大小。
+    /// </para>
+    /// <para>只在起一个新进程、发这一轮的提示时用到；接着上一次的会话跑（续接说明）时这一轮的提示已经在会话里，不再写一遍。</para>
+    /// </remarks>
+    public IReadOnlyDictionary<Guid, string> AttachmentPaths { get; init; } = new Dictionary<Guid, string>();
 }
 
 /// <summary>为哪件事询问启动档案。</summary>

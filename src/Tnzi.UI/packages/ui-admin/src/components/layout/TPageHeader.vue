@@ -81,6 +81,9 @@
         </slot>
       </div>
     </div>
+    <!-- Under the bar, still inside the header (and its surface): a phone
+         search form that expands downward from the bar's toggles. -->
+    <slot name="below" />
   </header>
 </template>
 
@@ -214,6 +217,7 @@ defineSlots<{
   title?: () => unknown
   actions?: () => unknown
   extra?: () => unknown
+  below?: () => unknown
 }>()
 
 // useRoute/useRouter return undefined when no router is installed (e.g. unit

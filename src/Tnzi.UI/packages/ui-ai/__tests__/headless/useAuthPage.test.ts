@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { useAuthPage, type UseAuthPageOptions } from '../../src/headless/useAuthPage';
-import type { LoginCallbacks, LoginFeatures } from '@tnzi/ui';
+import type { LoginCallbacks, LoginFeatures } from '@tnzi/ui/headless';
 
 const FEATURES: LoginFeatures = {
   passwordLogin: true,

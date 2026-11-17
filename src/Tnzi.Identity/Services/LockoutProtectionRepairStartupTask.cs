@@ -21,9 +21,16 @@ namespace Tnzi.Identity.Services;
 /// 每次启动跑一遍、幂等（修完之后 0 行命中）。绕过变更跟踪的整表 UPDATE：
 /// 一条语句，不逐行加载，也不触发审计字段。
 /// </para>
+/// <para>
+/// ★ <b>完成之前不该接流量</b>（<see cref="RequiredForReadiness"/>）：没修到的账号密码可以无限次猜。
+/// 启动那一刻数据库不可达时它在后台重试，健康检查 <c>startup-tasks</c> 在此之前报 Unhealthy，
+/// <c>/health/ready</c> 答 503。
+/// </para>
 /// </remarks>
 internal sealed class LockoutProtectionRepairStartupTask : IPostMigrationStartupTask
 {
+    public bool RequiredForReadiness => true;
+
     public async Task ExecuteAsync(IServiceProvider serviceProvider, CancellationToken cancellationToken = default)
     {
         Check.NotNull(serviceProvider);

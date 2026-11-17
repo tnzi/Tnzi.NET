@@ -122,4 +122,26 @@ describe('TAdminHeader', () => {
     const wrapper = mount(TAdminHeader)
     expect(wrapper.find('.t-admin-header__chat').exists()).toBe(false)
   })
+
+  // The chrome's names come from the admin locale, not English literals.
+  it('labels its buttons from the admin locale (zh-cn and en)', async () => {
+    const store = useAdminAppStore()
+    const props = { showToggler: true, showSearch: true, showReload: true, showThemeBtn: true, showThemeSchemaBtn: true }
+    const labels = (w: ReturnType<typeof mount>) =>
+      w.findAll('button[aria-label]').map((b) => b.attributes('aria-label'))
+
+    store.setLocale('zh-cn')
+    const zh = mount(TAdminHeader, { props })
+    expect(labels(zh)).toEqual(expect.arrayContaining(['收起侧栏', '搜索', '刷新', '主题：浅色', '主题设置']))
+    store.toggleSiderCollapse()
+    await zh.vm.$nextTick()
+    expect(labels(zh)).toContain('展开侧栏')
+    zh.unmount()
+
+    store.setLocale('en')
+    const en = mount(TAdminHeader, { props })
+    expect(labels(en)).toEqual(expect.arrayContaining(['Expand sidebar', 'Search', 'Reload', 'Theme: Light', 'Theme settings']))
+    en.unmount()
+  })
 })
+

@@ -64,6 +64,29 @@ describe('PendingActions', () => {
     expect(wrapper.findAll('input[type="password"]').length).toBe(2)
   })
 
+  it('states the password requirements before the user types', async () => {
+    const { ctx } = makeContext({
+      describe: vi.fn(async () => ({ requiredActions: ['ChangePassword'], userName: 'owing' })),
+    })
+
+    const wrapper = mountPanel(ctx)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="password-requirements"]').text())
+      .toBe('Use at least 6 characters, including a lowercase letter (a-z) and a digit (0-9).')
+  })
+
+  it('states no password requirements on a step that sets no password', async () => {
+    const { ctx } = makeContext({
+      describe: vi.fn(async () => ({ requiredActions: ['ConfirmEmail'], userName: 'owing' })),
+    })
+
+    const wrapper = mountPanel(ctx)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="password-requirements"]').exists()).toBe(false)
+  })
+
   /**
    * ★★★ 读不到待办清单时不能猜一个表单出来。
    *

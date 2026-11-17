@@ -150,7 +150,8 @@ export function mixColor(from: string, to: string, ratio: number): string {
 // A brand colour can be anything a person picks at runtime, light or dark, so
 // neither "white on the primary" nor "the primary as text" can be a constant.
 // These two functions answer both questions for any colour; the theme layer
-// (`buildCssVars`, `buildNaiveThemeOverrides`) applies them to the primary.
+// (`buildCssVars` here, and the component-library bridges that build on this
+// package, such as `buildNaiveThemeOverrides` in `@tnzi/ui-admin`) applies them to the primary.
 //
 // Ratios follow WCAG 2.x (relative luminance, (L1 + 0.05) / (L2 + 0.05)).
 // Alpha is ignored: a ratio is only defined between two opaque colours.

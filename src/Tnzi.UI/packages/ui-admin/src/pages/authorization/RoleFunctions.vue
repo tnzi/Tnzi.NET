@@ -115,7 +115,7 @@
                 {{ selectedRole?.name ?? t('selectRole') }}
                 <template #icon><TSvgIcon icon="mdi:chevron-down" :size="14" /></template>
               </NButton>
-              <NSpace v-else-if="!selectedIsSuper" :size="8">
+              <div v-else-if="!selectedIsSuper" class="flex flex-wrap items-center gap-8px">
                 <NButton size="small" :disabled="!isDirty || treeLoading" @click="reset">
                   {{ t('reset') }}
                 </NButton>
@@ -128,7 +128,7 @@
                 >
                   {{ t('save') }}
                 </NButton>
-              </NSpace>
+              </div>
             </header>
             <!-- Super-admin: a bypass role holds the whole catalogue, so the matrix
                  below is shown READ-ONLY (all granted, locked) rather than replaced by
@@ -454,7 +454,6 @@ import { useDialog } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
 import {
   NCard,
-  NSpace,
   NButton,
   NInput,
   NSpin,
@@ -477,7 +476,8 @@ import { createAuthorizationBridge } from '../../services/bridges/authorization-
 import { useAdminClient } from '../../plugin/client'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { makePageTranslator } from '../_shared/translate'
-import { TSvgIcon, createDialogAdapter } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
+import { createDialogAdapter } from '../../adapters/dialog'
 import type {
   AssignableRoleDto,
   FunctionModuleDto,

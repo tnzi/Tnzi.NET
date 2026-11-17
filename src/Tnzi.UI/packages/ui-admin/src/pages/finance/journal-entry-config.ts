@@ -2,7 +2,7 @@ import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import { TRelativeTime } from '@tnzi/ui'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 
 import { JournalEntryStatus } from '../../services/bridges/finance-bridge'
 import { fmtDate } from './money'

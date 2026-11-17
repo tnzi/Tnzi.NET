@@ -1,12 +1,8 @@
 /**
- * Overlay chrome primitives.
- *
- * **Sunk to `@tnzi/ui` on 2026-08-05** - this module now re-exports them so the
- * ~30 call sites in this package (and any consuming app importing from
- * `@tnzi/ui-admin`) keep working unchanged. They were never admin-specific:
- * measured zero coupling to admin stores / routes / permissions, while the
- * ecosystem carried three parallel implementations of the same chrome.
- *
- * Prefer importing from `@tnzi/ui` in new code.
+ * Overlay chrome primitives: the modal and drawer shells, and the renderless
+ * provider that resets a hand-rolled NModal / NDrawer to the global theme and
+ * the overlay control size (`headless/useOverlayTheme`).
  */
-export { TModalShell, TDrawerShell, TOverlayTheme } from '@tnzi/ui'
+export { default as TModalShell } from './TModalShell.vue'
+export { default as TDrawerShell } from './TDrawerShell.vue'
+export { default as TOverlayTheme } from './TOverlayTheme.vue'

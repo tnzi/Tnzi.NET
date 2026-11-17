@@ -5,7 +5,7 @@
  * tell you whether only three records were due or twenty-seven were skipped by
  * a litigation hold.
  */
-import type { FormSchemaItem } from '@tnzi/ui'
+import type { FormSchemaItem } from '../../components/forms/TSchemaForm'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 
 export const destructionColumns: ColumnDef[] = [

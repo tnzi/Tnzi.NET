@@ -5,7 +5,7 @@
  * record" and "what did this person open". Everything else (hash, sequence)
  * belongs in the detail drawer - it is evidence, not something you scan a list by.
  */
-import type { FormSchemaItem } from '@tnzi/ui'
+import type { FormSchemaItem } from '../../components/forms/TSchemaForm'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 
 export const recordAccessColumns: ColumnDef[] = [

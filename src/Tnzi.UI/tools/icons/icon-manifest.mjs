@@ -45,7 +45,8 @@ export const ICON_PREFIXES = Object.freeze([
  * @tnzi package it depends on, and is done. `@tnzi/mobile` is absent on
  * purpose: it renders Vant icons and never touches Iconify.
  *
- * `bundler` says whether the package also ships {@link BUNDLER_SOURCE}. Every
+ * `bundler` says whether the package also ships {@link BUNDLER_SOURCE} and
+ * {@link REMOTE_ICONS_SOURCE} (or, with `remoteIconsModule`, re-exports the latter). Every
  * package does except `@tnzi/core`: the helper calls `addCollection` from
  * `@iconify/vue`, and core is the headless package - it has no Vue-side
  * dependency and must not gain one for a list of six device glyphs. Core's
@@ -54,7 +55,12 @@ export const ICON_PREFIXES = Object.freeze([
 export const ICON_PACKAGES = Object.freeze([
   { name: 'core', dependsOn: [], includeBackend: false, bundler: false },
   { name: 'ui', dependsOn: ['core'], includeBackend: false, bundler: true },
-  { name: 'ui-ai', dependsOn: ['core', 'ui'], includeBackend: false, bundler: true },
+  /**
+   * `disableRemoteIcons` lives in `src/controls-icons.ts` so the controls entry can
+   * export it: a page built from controls alone must not pull this manifest's
+   * name list and `@iconify/utils` in to switch remote fetching off.
+   */
+  { name: 'ui-ai', dependsOn: ['core', 'ui'], includeBackend: false, bundler: true, remoteIconsModule: '../controls-icons' },
   /**
    * The backend names land here: `[RuntimeSettingGroup(Icon = "mdi:...")]`
    * reaches the browser as `SettingsCenterGroupDto.icon` and is rendered by
@@ -176,9 +182,16 @@ export function bundleTnziIcons(collections: readonly IconifyJSON[]): TnziIconBu
   const { subsets, ...report } = selectTnziIcons(collections)
   for (const subset of subsets) addCollection(subset)
   return report
-}
+}`;
 
 /**
+ * The remote-fetch switch, embedded verbatim into every generated manifest that
+ * sets `bundler` and no `remoteIconsModule`. A package that also needs the
+ * switch outside its icon manifest (where the manifest's name list and
+ * `@iconify/utils` would come with it) keeps it in a module of its own and
+ * names that module in `remoteIconsModule`; its manifest then re-exports it.
+ */
+export const REMOTE_ICONS_SOURCE = `/**
  * Stops \`@iconify/vue\` from asking the public Iconify API for an icon it does
  * not have. Registering the framework's icons (above) makes them local; this
  * makes that the only source: an icon nobody registered (the application's

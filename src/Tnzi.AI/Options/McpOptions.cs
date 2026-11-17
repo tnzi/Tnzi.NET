@@ -83,6 +83,22 @@ public class McpServerConfig
     public List<string> AllowedTools { get; set; } = [];
 
     /// <summary>
+    /// 禁用的工具列表（空表示不禁用任何工具）。写服务器原名或前缀名都认，忽略大小写。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 名单里的工具不交给模型（<see cref="AllowedTools"/> 同时点名时以禁用为准），也不进入审批：
+    /// <see cref="NeverRequireApprovalTools"/> 不能把它放回来。这台服务器的其余工具照常提供。
+    /// </para>
+    /// <para>
+    /// 调用时再查一次：即使一个被禁用的工具绕过清单过滤到了调用方手里，调用也在发往服务器之前被拒绝，
+    /// 结果是以 <c>Tool call rejected:</c> 开头的错误文本。名单在每次取工具清单（每次 agent 运行、每次
+    /// <c>tools/list</c>）时生效；已经在跑的运行沿用它开始时拿到的清单。
+    /// </para>
+    /// </remarks>
+    public List<string> DeniedTools { get; set; } = [];
+
+    /// <summary>
     /// 审批模式
     /// </summary>
     public McpApprovalMode ApprovalMode { get; set; } = McpApprovalMode.AlwaysRequire;
@@ -90,7 +106,7 @@ public class McpServerConfig
     /// <summary>
     /// 是否在工具名前加 Server 名（避免多服务器时重名）。名字为 <c>{server}__{tool}</c>，只含 <c>[a-zA-Z0-9_-]</c>、
     /// 不超过 64 字符（见 <see cref="McpToolNames"/>）；调用时仍以原名发给服务器。
-    /// <see cref="AllowedTools"/> 与审批名单写原名或前缀名都认。
+    /// <see cref="AllowedTools"/>、<see cref="DeniedTools"/> 与审批名单写原名或前缀名都认。
     /// </summary>
     public bool PrefixToolNameWithServer { get; set; } = false;
 

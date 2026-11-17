@@ -9,18 +9,33 @@
  *   - `open` v-model + outside-click auto-close
  *   - Optional header label slot
  *   - Default slot for menu items (use `.t-popover-menu__item` class)
- *   - Anchored positioning relative to the closest positioned ancestor
+ *   - Anchored to the closest positioned ancestor, like an absolutely
+ *     positioned menu, but drawn `position: fixed` on the popover layer
+ *     (`--tnzi-ai-z-popover`): a menu inside a scrolling list or a dialog's
+ *     body is not clipped by them and sits above the dialog. It stays where it
+ *     is in the DOM, so a consumer that finds its items or handles keys from
+ *     an ancestor keeps working. `teleport` moves it to `<body>` for the rare
+ *     ancestor that traps a fixed element (a stacking context below the
+ *     content it must cover)
  *
- * Items are NOT a separate component - consumers compose them with raw
- * buttons styled by the `.t-popover-menu__item` / `__item-toggle` /
- * `__item-check` classes. This keeps the API minimal while letting
- * consumers add icons, badges, dividers, and toggles freely.
+ * On a narrow screen (below 768px, the shell's phone layout) the back button
+ * or gesture closes the menu instead of leaving the page (`useBackLayer`).
+ *
+ * The menu itself is a `TMenuPanel`, which this places: the entries are
+ * `TMenuItem` / `TMenuSeparator`, or raw buttons wearing the item classes
+ * (`.t-popover-menu__item` / `__item-value` / `__item-check` ...). A menu
+ * that does not float (a tray window) uses `TMenuPanel` directly and looks
+ * the same.
  *
  * The component does NOT manage trigger button state - wrap your trigger
  * + this menu in a positioned parent and toggle `open` from the trigger's
  * click handler.
  */
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import TMenuPanel from './TMenuPanel.vue'
+import { useBackLayer } from '../../headless/back-layers'
+import { enableTouchPress } from '../../headless/touch-press'
+import { useViewportBelow } from '../../headless/useViewportBelow'
 
 const props = withDefaults(
   defineProps<{
@@ -34,15 +49,15 @@ const props = withDefaults(
     maxWidth?: number
     /**
      * Anchor side. `'right'` aligns the menu's right edge with the
-     * parent's right edge; `'left'` aligns the left edges. Default
+     * anchor's right edge; `'left'` aligns the left edges. Default
      * `'right'` since most action menus open from a right-side trigger.
      */
     align?: 'left' | 'right'
     /**
      * Which way the menu opens. `'bottom'` (default) drops below the
-     * trigger; `'top'` rises above it, which is what a trigger pinned to
-     * the bottom of a sidebar needs - dropping down would render the menu
-     * off-screen.
+     * anchor; `'top'` rises above it, which is what a trigger pinned to
+     * the bottom of a sidebar needs. Either flips when there is no room on
+     * its side and there is on the other.
      */
     placement?: 'top' | 'bottom'
     /**
@@ -59,6 +74,20 @@ const props = withDefaults(
      * (e.g. nested menus that need a click-through pattern).
      */
     closeOnOutsideClick?: boolean
+    /**
+     * Render the menu on `<body>`. Off by default, so the menu stays inside
+     * the component that opened it. Turn it on only when an ancestor makes a
+     * stacking context lower than what the menu must cover; the menu's items
+     * are then no longer inside that component's element.
+     */
+    teleport?: boolean
+    /**
+     * Open at a point of the viewport (`clientX` / `clientY` of a right click)
+     * instead of beside the anchor's box: the menu's top left corner goes
+     * there, and it opens up or to the left of the point when it does not fit
+     * below or to the right. `TContextMenu` sets it.
+     */
+    at?: { x: number; y: number } | null
   }>(),
   {
     label: '',
@@ -68,6 +97,8 @@ const props = withDefaults(
     placement: 'bottom',
     fullWidth: false,
     closeOnOutsideClick: true,
+    teleport: false,
+    at: null,
   },
 )
 
@@ -75,7 +106,77 @@ const emit = defineEmits<{
   'update:modelValue': [open: boolean]
 }>()
 
-const root = ref<HTMLDivElement | null>(null)
+/* `class` and the like belong on the menu, not on the zero-size anchor. */
+defineOptions({ inheritAttrs: false })
+
+const anchor = ref<HTMLSpanElement | null>(null)
+const panel = ref<InstanceType<typeof TMenuPanel> | null>(null)
+const root = computed<HTMLDivElement | null>(() => (panel.value?.$el as HTMLDivElement | undefined) ?? null)
+const placed = ref(false)
+
+const GAP = 6
+const EDGE = 8
+/** Below this width back closes the menu: the shell's phone layout (`sidebarMobileBreakpoint`). */
+const NARROW_BREAKPOINT = 768
+
+/* The box the menu lines up with: the anchor's offset parent, the box an
+   absolutely positioned menu used to be placed in. */
+type ReferenceBox = Pick<DOMRect, 'left' | 'right' | 'top' | 'bottom' | 'width'>
+
+function referenceRect(): ReferenceBox | null {
+  if (props.at) return { left: props.at.x, right: props.at.x, top: props.at.y, bottom: props.at.y, width: 0 }
+  const parent = anchor.value?.offsetParent ?? anchor.value?.parentElement
+  return parent instanceof HTMLElement ? parent.getBoundingClientRect() : null
+}
+
+/**
+ * Lines the menu up with its reference box, in viewport coordinates, flipped
+ * to the other side when it does not fit and kept inside the window. A fixed
+ * element is placed relative to its containing block, which is the viewport
+ * unless an ancestor is transformed or filtered (a dialog's backdrop blur is);
+ * the menu is measured at the origin first, so either way it lands where
+ * intended.
+ */
+function place(): void {
+  const menu = root.value
+  const box = referenceRect()
+  if (!menu || !box || typeof window === 'undefined') return
+  menu.style.top = '0px'
+  menu.style.left = '0px'
+  if (props.fullWidth) menu.style.width = `${box.width}px`
+  const origin = menu.getBoundingClientRect()
+  const width = menu.offsetWidth
+  const height = menu.offsetHeight
+  const viewportW = window.innerWidth
+  const viewportH = window.innerHeight
+
+  let left = props.fullWidth || props.align === 'left' ? box.left : box.right - width
+  /* At a point: to the left of it when there is no room to its right. */
+  if (props.at && left + width > viewportW - EDGE && box.left - width >= EDGE) left = box.left - width
+  left = Math.min(Math.max(EDGE, left), Math.max(EDGE, viewportW - width - EDGE))
+
+  const gap = props.at ? 0 : GAP
+  const below = box.bottom + gap
+  const above = box.top - gap - height
+  const fitsBelow = below + height <= viewportH - EDGE
+  const fitsAbove = above >= EDGE
+  const wantsTop = props.placement === 'top'
+  let top = wantsTop ? (fitsAbove || !fitsBelow ? above : below) : fitsBelow || !fitsAbove ? below : above
+  top = Math.max(EDGE, Math.min(top, viewportH - height - EDGE))
+
+  menu.style.top = `${top - origin.top}px`
+  menu.style.left = `${left - origin.left}px`
+  placed.value = true
+}
+
+let frame = 0
+function schedulePlace(): void {
+  if (frame || typeof window === 'undefined') return
+  frame = window.requestAnimationFrame(() => {
+    frame = 0
+    place()
+  })
+}
 
 function onDocumentClick(e: MouseEvent): void {
   if (!props.modelValue) return
@@ -86,179 +187,102 @@ function onDocumentClick(e: MouseEvent): void {
   }
 }
 
+function listen(): void {
+  // Defer one tick so the click that OPENED the menu doesn't
+  // immediately bubble up and close it on the same event loop.
+  setTimeout(() => document.addEventListener('click', onDocumentClick), 0)
+  window.addEventListener('resize', schedulePlace)
+  // Capture: a scroll in any ancestor moves the anchor.
+  window.addEventListener('scroll', schedulePlace, true)
+  void nextTick(place)
+}
+
+function unlisten(): void {
+  document.removeEventListener('click', onDocumentClick)
+  window.removeEventListener('resize', schedulePlace)
+  window.removeEventListener('scroll', schedulePlace, true)
+  if (frame) window.cancelAnimationFrame(frame)
+  frame = 0
+  placed.value = false
+}
+
 watch(
   () => props.modelValue,
   (open) => {
-    if (open) {
-      // Defer one tick so the click that OPENED the menu doesn't
-      // immediately bubble up and close it on the same event loop.
-      setTimeout(() => document.addEventListener('click', onDocumentClick), 0)
-    } else {
-      document.removeEventListener('click', onDocumentClick)
-    }
+    if (open) listen()
+    else unlisten()
+  },
+)
+/* Opened again at another point while open: move there. */
+watch(
+  () => props.at,
+  () => {
+    if (props.modelValue) void nextTick(place)
   },
 )
 
 onMounted(() => {
-  if (props.modelValue) {
-    setTimeout(() => document.addEventListener('click', onDocumentClick), 0)
-  }
+  if (props.modelValue) listen()
+  /* A press on an item shows on iOS too (`styles/touch.css`). */
+  enableTouchPress()
 })
 
-onBeforeUnmount(() => {
-  document.removeEventListener('click', onDocumentClick)
-})
+/* Back closes the menu on a phone, where back is how a layer is dismissed. */
+const narrowViewport = useViewportBelow(NARROW_BREAKPOINT)
+useBackLayer(() => props.modelValue, () => emit('update:modelValue', false), { enabled: narrowViewport })
+
+onBeforeUnmount(unlisten)
+
+defineExpose({ place })
 </script>
 
 <template>
-  <div
-    v-if="modelValue"
-    ref="root"
-    class="t-popover-menu"
-    :class="[
-      fullWidth ? 't-popover-menu--full' : `t-popover-menu--${align}`,
-      `t-popover-menu--place-${placement}`,
-    ]"
-    :style="fullWidth ? undefined : { minWidth: `${minWidth}px`, maxWidth: `${maxWidth}px` }"
-    role="menu"
-    @click.stop
-  >
-    <div v-if="label" class="t-popover-menu__head">{{ label }}</div>
-    <slot />
-  </div>
+  <span ref="anchor" class="t-popover-menu-anchor">
+    <Teleport to="body" :disabled="!teleport">
+      <TMenuPanel
+        v-if="modelValue"
+        ref="panel"
+        v-bind="$attrs"
+        class="t-popover-menu t-ai-scroll"
+        :class="{ 't-popover-menu--placing': !placed }"
+        :style="fullWidth ? undefined : { minWidth: `${minWidth}px`, maxWidth: `${maxWidth}px` }"
+        :label="label"
+        :keyboard="false"
+        @click.stop
+      >
+        <slot />
+      </TMenuPanel>
+    </Teleport>
+  </span>
 </template>
 
 <style scoped>
-.t-popover-menu {
+/* A zero-size box where the component sits. Its offset parent (the closest
+   positioned ancestor) is the box the menu lines up with, as an absolutely
+   positioned menu used to. */
+.t-popover-menu-anchor {
   position: absolute;
-  z-index: 20;
-  background: var(--tnzi-ai-surface, #ffffff);
-  border: 1px solid var(--tnzi-ai-border, #e5e5e5);
-  border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08);
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
 }
-.t-popover-menu--right {
-  right: 0;
-}
-.t-popover-menu--left {
+/* Fixed, not absolute: an absolutely positioned menu was clipped by any
+   scrolling or `overflow: hidden` ancestor between it and its anchor (a menu
+   near the bottom of a dialog's body was cut off by the body and the panel).
+   Placed by script, on the popover layer. */
+/* The panel and its entries are `TMenuPanel`'s; this adds the floating. */
+.t-popover-menu {
+  position: fixed;
+  top: 0;
   left: 0;
+  z-index: var(--tnzi-ai-z-popover, 2000);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  pointer-events: auto;
+  box-shadow: var(--tnzi-ai-popover-shadow);
 }
-/* Both edges pinned, so the menu takes the anchor's width. */
-.t-popover-menu--full {
-  left: 0;
-  right: 0;
-}
-.t-popover-menu--place-bottom {
-  top: 100%;
-  margin-top: 6px;
-}
-.t-popover-menu--place-top {
-  bottom: 100%;
-  margin-bottom: 6px;
-}
-.t-popover-menu__head {
-  padding: 6px 10px 4px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--tnzi-ai-text-tertiary, #9a9a9a);
-  letter-spacing: 0.02em;
-}
-
-/* Item primitives - exposed via :deep so consumers can use them on raw
-   button / label elements inside the default slot without needing to
-   wrap them in another component. */
-.t-popover-menu :deep(.t-popover-menu__item) {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 34px;
-  padding: 0 10px;
-  border: none;
-  background: transparent;
-  border-radius: 8px;
-  color: var(--tnzi-ai-text, #1a1a1a);
-  font-family: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  width: 100%;
-}
-.t-popover-menu :deep(.t-popover-menu__item:hover) {
-  background: var(--tnzi-ai-hover, rgba(55, 53, 47, 0.04));
-}
-.t-popover-menu :deep(.t-popover-menu__item .iconify) {
-  color: var(--tnzi-ai-text-secondary, #6a6a6a);
-  font-size: 15px;
-  flex-shrink: 0;
-}
-.t-popover-menu :deep(.t-popover-menu__item-check) {
-  color: var(--tnzi-ai-accent-text);
-  margin-left: auto;
-  flex-shrink: 0;
-}
-.t-popover-menu :deep(.t-popover-menu__sep) {
-  height: 1px;
-  background: var(--tnzi-ai-divider, #ececec);
-  margin: 4px 4px;
-}
-
-/* Trailing affordances. All three sit at the right edge via `margin-left:auto`
-   so an item can carry a value, a badge or a hint icon without the consumer
-   adding a spacer element. */
-.t-popover-menu :deep(.t-popover-menu__item-value) {
-  margin-left: auto;
-  flex-shrink: 0;
-  font-size: 13px;
-  color: var(--tnzi-ai-text-secondary, #6a6a6a);
-}
-.t-popover-menu :deep(.t-popover-menu__item-hint) {
-  margin-left: auto;
-  flex-shrink: 0;
-  color: var(--tnzi-ai-text-tertiary, #9a9a9a);
-  font-size: 14px;
-}
-/* A value plus a hint (e.g. "300 ›") - the value already claimed the auto
-   margin, so the hint only needs its own gap. */
-.t-popover-menu :deep(.t-popover-menu__item-value + .t-popover-menu__item-hint) {
-  margin-left: 0;
-}
-.t-popover-menu :deep(.t-popover-menu__item-badge) {
-  margin-left: auto;
-  flex-shrink: 0;
-  height: 26px;
-  padding: 0 12px;
-  border: none;
-  border-radius: 999px;
-  background: var(--tnzi-ai-accent-contrast, #1a1a1a);
-  color: var(--tnzi-ai-on-accent-contrast, #ffffff);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-/* Destructive items (Sign out, Delete). The icon inherits the danger colour
-   too, otherwise it reads as a normal item with oddly red text. */
-.t-popover-menu :deep(.t-popover-menu__item--danger),
-.t-popover-menu :deep(.t-popover-menu__item--danger .iconify) {
-  color: var(--tnzi-ai-danger, #e5484d);
-}
-.t-popover-menu :deep(.t-popover-menu__item--danger:hover) {
-  background: var(--tnzi-ai-danger-soft, rgba(229, 72, 77, 0.08));
-}
-
-/* Non-interactive label row (e.g. a plan name beside an Upgrade badge). */
-.t-popover-menu :deep(.t-popover-menu__row) {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 10px;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--tnzi-ai-text, #1a1a1a);
+.t-popover-menu--placing {
+  visibility: hidden;
 }
 </style>

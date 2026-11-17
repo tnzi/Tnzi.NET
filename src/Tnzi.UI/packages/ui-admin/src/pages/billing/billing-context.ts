@@ -2,7 +2,7 @@
  * Shared pieces of the billing UI: the bridge for the current admin client and
  * the label / tone of each standing and subscription status.
  */
-import type { StatusType } from '@tnzi/ui'
+import type { StatusType } from '../../components/display/TStatusBadge.vue'
 import { BillingStanding, InvoiceType, SubscriptionStatus, type InvoiceDto, type SubscriptionDto } from '@tnzi/core/services/payment'
 import { createBillingBridge, type BillingBridge } from '../../services/bridges/billing-bridge'
 import { useAdminClient } from '../../plugin/client'

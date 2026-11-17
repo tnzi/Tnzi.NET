@@ -1039,9 +1039,8 @@ public partial class UserServiceTests
 
     #endregion
 
-    // Note: FindByPhoneNumberAsync 测试需要 EF Core 的异步查询提供者，在单元测试中难以模拟
-    // 建议使用集成测试或使用 EF Core InMemory 数据库进行测试
-    // 这里暂时跳过这些测试
+    // Note: 按手机号解析账号的规则（ResolveByPhoneNumberAsync → PhoneNumberAccountLookup）
+    // 由 AuthServiceTests 的「按手机号认账号」一节覆盖。
 }
 
 /// <summary>

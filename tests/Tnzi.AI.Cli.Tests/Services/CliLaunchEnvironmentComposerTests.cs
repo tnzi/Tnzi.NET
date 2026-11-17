@@ -107,9 +107,9 @@ public class CliLaunchEnvironmentComposerTests : IDisposable
     [Fact]
     public async Task IsolatedConfigDirectory_OnAProviderWithoutSupport_Throws()
     {
-        var kimi = CliBuiltInProviders.All["kimi"] with { UserConfigIsolation = CliUserConfigIsolation.IsolatedConfigDirectory };
+        var hermes = CliBuiltInProviders.All["hermes"] with { UserConfigIsolation = CliUserConfigIsolation.IsolatedConfigDirectory };
 
-        await Should.ThrowAsync<CliProviderConfigurationException>(() => ComposeAsync(kimi, Options()));
+        await Should.ThrowAsync<CliProviderConfigurationException>(() => ComposeAsync(hermes, Options()));
     }
 
     [Fact]
@@ -255,9 +255,9 @@ public class CliLaunchEnvironmentComposerTests : IDisposable
     [Fact]
     public async Task PerWorkspaceConfigDirectory_OnAProviderWithoutSupport_Throws()
     {
-        var kimi = CliBuiltInProviders.All["kimi"] with { UserConfigIsolation = CliUserConfigIsolation.PerWorkspaceConfigDirectory };
+        var hermes = CliBuiltInProviders.All["hermes"] with { UserConfigIsolation = CliUserConfigIsolation.PerWorkspaceConfigDirectory };
 
-        await Should.ThrowAsync<CliProviderConfigurationException>(() => ComposeAsync(kimi, Options()));
+        await Should.ThrowAsync<CliProviderConfigurationException>(() => ComposeAsync(hermes, Options()));
     }
 
     /// <summary>
@@ -396,13 +396,13 @@ public class CliLaunchEnvironmentComposerTests : IDisposable
 
         var result = await ComposeAsync(Claude(), Options(), workspace, new CliLaunchProfile
         {
-            AdditionalDirectories = ["/home/u/.tuanzi/projects/demo", "/opt/platform"]
+            AdditionalDirectories = ["/home/u/.platform/projects/demo", "/opt/platform"]
         });
 
         result.Args.ShouldBe(
         [
             "--setting-sources", "project,local",
-            "--add-dir", "/home/u/.tuanzi/projects/demo",
+            "--add-dir", "/home/u/.platform/projects/demo",
             "--add-dir", "/opt/platform",
             "--add-dir", "/ws/run/.tnzi/context",
             "--append-system-prompt-file", "/ws/run/.tnzi/system-prompt.md"

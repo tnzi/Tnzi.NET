@@ -14,11 +14,15 @@
  * Collapsing them into one "off" switch is how people lose their enrolment
  * while meaning to pause it for an afternoon.
  */
-import { onMounted, ref } from 'vue'
-import { NQrCode, NInput, NButton } from 'naive-ui'
+import { computed, onMounted, ref } from 'vue'
+import { TwoFactorType } from '@tnzi/core/services/identity'
+import { isImeComposing } from '@tnzi/core/utils'
 import TSettingGroup from '../layout/TSettingGroup.vue'
 import TSettingRow from '../layout/TSettingRow.vue'
 import TStepUpPrompt from './TStepUpPrompt.vue'
+import TButton from '../controls/TButton.vue'
+import TTag from '../controls/TTag.vue'
+import TQrCode from '../controls/TQrCode.vue'
 import type { UseAccountSettingsReturn } from '../../headless/useAccountSettings'
 import { useAiI18n } from '../../i18n'
 
@@ -28,22 +32,48 @@ const props = defineProps<{
 
 const t = useAiI18n()
 
+const emailMethod = computed(() => props.controller.twoFactor.value?.methods?.find((m) => m.type === TwoFactorType.Email) ?? null)
+// A deployment that switched passkeys off omits the entry; a browser without
+// WebAuthn cannot run the ceremony, so the rows are not offered there either.
+const passkeyMethod = computed(() =>
+  props.controller.passkeySupported
+    ? (props.controller.twoFactor.value?.methods?.find((m) => m.type === TwoFactorType.Passkey) ?? null)
+    : null,
+)
+
 onMounted(() => {
-  void props.controller.load()
+  void props.controller.load().then(() => {
+    if (passkeyMethod.value) void props.controller.loadPasskeys()
+  })
   void props.controller.loadSessions()
 })
 
 const totpCode = ref('')
+
+function onTotpEnter(event: KeyboardEvent): void {
+  if (isImeComposing(event) || !totpCode.value.trim() || props.controller.busy.value) return
+  void onConfirmTotp()
+}
 const confirmingAllSessions = ref(false)
 // Two-step confirmation per row. The current session's row carries no Revoke
 // at all when the hook can tell which row that is; the confirmation is for
 // every other row, because on a deployment without session-bound tokens the
 // marker is unknown and any row might still be this device.
 const confirmingSessionId = ref<string | null>(null)
+const confirmingKeyId = ref<string | null>(null)
 
 async function onConfirmTotp(): Promise<void> {
   const ok = await props.controller.confirmTotp(totpCode.value.trim())
   if (ok) totpCode.value = ''
+}
+
+async function onRemoveKey(credentialId: string): Promise<void> {
+  if (confirmingKeyId.value !== credentialId) {
+    confirmingKeyId.value = credentialId
+    return
+  }
+  confirmingKeyId.value = null
+  await props.controller.removePasskey(credentialId)
 }
 
 async function onRevokeAll(): Promise<void> {
@@ -82,12 +112,9 @@ function formatWhen(value: Date | string | undefined | null): string {
       :label="t.securitySettings.authenticator"
       :description="t.securitySettings.authenticatorHint"
     >
-      <span
-        class="t-settings-field__pill"
-        :class="{ 't-settings-field__pill--on': controller.twoFactor.value?.isTotpEnabled }"
-      >
+      <TTag :tone="controller.twoFactor.value?.isTotpEnabled ? 'success' : 'neutral'">
         {{ controller.twoFactor.value?.isTotpEnabled ? t.securitySettings.on : t.securitySettings.off }}
-      </span>
+      </TTag>
     </TSettingRow>
 
     <!-- Enrolment. The secret is shown as a QR plus its text form, because a
@@ -95,44 +122,48 @@ function formatWhen(value: Date | string | undefined | null): string {
     <template v-if="!controller.twoFactor.value?.isTotpEnabled">
       <TSettingRow v-if="controller.totpSetup.value" :label="t.securitySettings.scan" stacked>
         <div class="t-security__enrol">
-          <NQrCode :value="controller.totpSetup.value.authenticatorUri" :size="152" />
+          <TQrCode
+            :value="controller.totpSetup.value.authenticatorUri"
+            :label="t.securitySettings.qrLabel"
+            data-totp-qr
+          />
           <div class="t-security__enrol-side">
             <p class="t-settings-field__hint">{{ t.securitySettings.cantScan }}</p>
             <code class="t-security__secret">{{ controller.totpSetup.value.sharedKey }}</code>
-            <NInput
-              v-model:value="totpCode"
-              size="small"
-              :maxlength="8"
+            <input
+              v-model="totpCode"
+              class="t-input t-input--md t-input--code t-security__code"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              spellcheck="false"
+              maxlength="8"
               :placeholder="t.securitySettings.codePlaceholder"
+              :aria-label="t.securitySettings.codePlaceholder"
+              @keydown.enter="onTotpEnter"
             />
           </div>
         </div>
       </TSettingRow>
 
-      <p v-if="controller.error.value" class="t-settings-field__error" role="alert">
-        {{ controller.error.value }}
-      </p>
-
       <div class="t-settings-field__actions">
-        <NButton
+        <TButton
           v-if="!controller.totpSetup.value"
-          size="small"
-          type="primary"
+          variant="primary"
           :loading="controller.busy.value"
           @click="controller.beginTotp()"
         >
           {{ t.securitySettings.setUp }}
-        </NButton>
-        <NButton
+        </TButton>
+        <TButton
           v-else
-          size="small"
-          type="primary"
+          variant="primary"
           :loading="controller.busy.value"
           :disabled="!totpCode.trim()"
           @click="onConfirmTotp"
         >
           {{ t.securitySettings.turnOn }}
-        </NButton>
+        </TButton>
       </div>
     </template>
 
@@ -143,29 +174,89 @@ function formatWhen(value: Date | string | undefined | null): string {
         :label="t.securitySettings.paused"
         :description="t.securitySettings.pausedHint"
       >
-        <NButton size="small" :loading="controller.busy.value" @click="controller.resumeTwoFactor()">
+        <TButton :loading="controller.busy.value" @click="controller.resumeTwoFactor()">
           {{ t.securitySettings.resume }}
-        </NButton>
+        </TButton>
       </TSettingRow>
 
-      <p v-if="controller.error.value" class="t-settings-field__error" role="alert">
-        {{ controller.error.value }}
-      </p>
-
       <div class="t-settings-field__actions">
-        <NButton
+        <TButton
           v-if="controller.twoFactor.value?.isEnabled !== false"
-          size="small"
           :loading="controller.busy.value"
           @click="controller.suspendTwoFactor()"
         >
           {{ t.securitySettings.pause }}
-        </NButton>
-        <NButton size="small" type="error" ghost :loading="controller.busy.value" @click="controller.disableTotp()">
+        </TButton>
+        <TButton variant="danger" :loading="controller.busy.value" @click="controller.disableTotp()">
           {{ t.securitySettings.remove }}
-        </NButton>
+        </TButton>
       </div>
     </template>
+
+    <!-- The other second factors. Each row exists only when the status endpoint
+         lists the method, i.e. the deployment has it switched on. -->
+    <TSettingRow
+      v-if="emailMethod"
+      :label="t.securitySettings.emailCode"
+      :description="emailMethod.requiresAddress ? t.securitySettings.emailNeedsAddress : t.securitySettings.emailCodeHint"
+    >
+      <span class="t-security__method-control">
+        <TTag :tone="emailMethod.enabled ? 'success' : 'neutral'">
+          {{ emailMethod.enabled ? t.securitySettings.on : t.securitySettings.off }}
+        </TTag>
+        <TButton
+          :variant="emailMethod.enabled ? 'secondary' : 'soft'"
+          :loading="controller.busy.value"
+          :disabled="!emailMethod.enabled && !emailMethod.available"
+          @click="controller.setEmailTwoFactor(!emailMethod.enabled)"
+        >
+          {{ emailMethod.enabled ? t.securitySettings.turnOff : t.securitySettings.turnOn }}
+        </TButton>
+      </span>
+    </TSettingRow>
+
+    <template v-if="passkeyMethod">
+      <TSettingRow :label="t.securitySettings.passkey" :description="t.securitySettings.passkeyHint">
+        <span class="t-security__method-control">
+          <TTag :tone="passkeyMethod.enabled ? 'success' : 'neutral'">
+            {{ passkeyMethod.enabled ? t.securitySettings.on : t.securitySettings.off }}
+          </TTag>
+          <TButton
+            v-if="controller.passkeys.value.length > 0"
+            :variant="passkeyMethod.enabled ? 'secondary' : 'soft'"
+            :loading="controller.busy.value"
+            @click="controller.setPasskeyTwoFactor(!passkeyMethod.enabled)"
+          >
+            {{ passkeyMethod.enabled ? t.securitySettings.turnOff : t.securitySettings.turnOn }}
+          </TButton>
+        </span>
+      </TSettingRow>
+
+      <TSettingRow
+        v-for="key in controller.passkeys.value"
+        :key="key.credentialId"
+        :label="key.name || t.securitySettings.unnamedPasskey"
+        :description="[formatWhen(key.createdAt), key.isBackedUp ? t.securitySettings.passkeyBackedUp : ''].filter(Boolean).join(' · ')"
+      >
+        <TButton
+          :variant="confirmingKeyId === key.credentialId ? 'danger' : 'secondary'"
+          :loading="controller.busy.value"
+          @click="onRemoveKey(key.credentialId)"
+        >
+          {{ confirmingKeyId === key.credentialId ? t.securitySettings.removeKeyConfirm : t.securitySettings.removeKey }}
+        </TButton>
+      </TSettingRow>
+
+      <div class="t-settings-field__actions">
+        <TButton :loading="controller.busy.value" @click="controller.addPasskey()">
+          {{ controller.passkeys.value.length > 0 ? t.securitySettings.passkeyAddAnother : t.securitySettings.passkeyAdd }}
+        </TButton>
+      </div>
+    </template>
+
+    <p v-if="controller.error.value" class="t-settings-field__error" role="alert">
+      {{ controller.error.value }}
+    </p>
   </TSettingGroup>
 
   <TSettingGroup :title="t.securitySettings.sessionsTitle">
@@ -177,21 +268,17 @@ function formatWhen(value: Date | string | undefined | null): string {
     >
       <!-- The row this tab is signed in with is labelled instead of revocable:
            revoking it signs the user out of the page they are standing on. -->
-      <span
-        v-if="controller.isCurrentSession(session)"
-        class="t-settings-field__pill t-settings-field__pill--on"
-      >
+      <TTag v-if="controller.isCurrentSession(session)" tone="accent">
         {{ t.securitySettings.thisDevice }}
-      </span>
-      <NButton
+      </TTag>
+      <TButton
         v-if="!controller.isCurrentSession(session)"
-        size="small"
-        :type="confirmingSessionId === session.id ? 'error' : undefined"
+        :variant="confirmingSessionId === session.id ? 'danger' : 'secondary'"
         :loading="controller.busy.value"
         @click="onRevokeSession(session.id)"
       >
         {{ confirmingSessionId === session.id ? t.securitySettings.revokeConfirm : t.securitySettings.revoke }}
-      </NButton>
+      </TButton>
     </TSettingRow>
 
     <p v-if="controller.sessions.value.length === 0" class="t-settings-field__hint">
@@ -202,10 +289,8 @@ function formatWhen(value: Date | string | undefined | null): string {
       <!-- Disabled off `otherSessions`: the list always includes the caller's
            own session while signed in, so `sessions.length === 0` never
            disabled anything and the button was live with nobody to sign out. -->
-      <NButton
-        size="small"
-        type="error"
-        ghost
+      <TButton
+        :variant="confirmingAllSessions ? 'danger' : 'secondary'"
         :loading="controller.busy.value"
         :disabled="controller.otherSessions.value.length === 0"
         @click="onRevokeAll"
@@ -216,12 +301,17 @@ function formatWhen(value: Date | string | undefined | null): string {
              auth / leave the page, which this component has no access to;
              that is a product decision, not a label. -->
         {{ confirmingAllSessions ? t.securitySettings.signOutOthersConfirm : t.securitySettings.signOutOthers }}
-      </NButton>
+      </TButton>
     </div>
   </TSettingGroup>
 </template>
 
 <style scoped>
+.t-security__method-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 .t-security__enrol {
   display: flex;
   gap: 16px;
@@ -235,6 +325,9 @@ function formatWhen(value: Date | string | undefined | null): string {
   gap: 8px;
   min-width: 220px;
   flex: 1;
+}
+.t-security__code {
+  max-width: 220px;
 }
 .t-security__secret {
   padding: 7px 10px;

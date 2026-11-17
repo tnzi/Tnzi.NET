@@ -33,6 +33,23 @@
  *     the server (closing the stream alone leaves it running, and its reply
  *     would land in the thread anyway); opening a thread whose run is still
  *     going reattaches to it, so a refresh mid-answer picks the answer up again.
+ *   - **Moving away is not stopping**: opening another conversation, New chat
+ *     or leaving the page closes the stream on screen and never cancels
+ *     anything. A run goes on and is picked up again on coming back; a turn
+ *     whose run is not named yet keeps its request open until the run is named
+ *     (then closes it) or, on a built-in agent, which answers on the request
+ *     itself, until the server has finished the turn. Only Stop (`abort()`)
+ *     cancels, and a Stop pressed before the run was named cancels the run as
+ *     soon as the stream names it.
+ *   - **A run waiting on background tasks** (the CLI answered, and answers again
+ *     when its background tasks finish, e.g. a dev server it started) is not a
+ *     turn in progress: its answer is done, `isStreaming` is false and the
+ *     composer works. A quiet row with status `'waiting'` (not streaming) names
+ *     the tasks the server reported, the same after a reload. Its stream stays
+ *     open: when the CLI answers by itself that answer streams in as a reply of
+ *     its own (the turn is busy again while it does). A message sent meanwhile
+ *     lets that stream go without cancelling anything; the server hands the
+ *     still-running process, tasks included, to the new turn.
  *   - **A broken stream is not a failed turn**: when the connection drops (a
  *     phone froze the page in the background, the network went away) the
  *     server may have finished the turn, or still be on it. The hook asks it:
@@ -45,7 +62,17 @@
  *     session lose the replaced turns too, not just the screen.
  *   - **History in pages**: the sidebar list pages and searches, and a thread
  *     opens on its newest messages and pages back on demand.
- *   - **Recents**: the sidebar list's filter (archive status, last activity),
+ *   - **Awaiting, running and unread**: the list rows carry `awaitingOwner` (a turn waits for the
+ *     user: a permission request, a question, a confirmation card), `running` (a turn of the
+ *     conversation is going on on the server) and `unread` (a reply landed that the user has not
+ *     seen), from the backend's attention summary (`attention`, polled; see `useThreadAttention`),
+ *     the turn on screen and the approvals it shows. The conversation on screen is marked read when
+ *     it opens, when its turn ends with the page in view, and when the page comes back to it.
+ *   - **Order**: the rows are kept in the server's order (`compareThreads`: awaiting the user, then
+ *     running, then the rest, each by when the user last wrote), applied here too, so a row moves
+ *     the moment the user sends, edits, regenerates or queues a message, or the conversation enters
+ *     or leaves the first two tiers; a reply, a turn ending or opening a conversation does not move it.
+ *   - **Recents**: the sidebar list's filter (archive status, the user's last message),
  *     order and grouping are kept per browser and sent with every page; rename,
  *     archive and unarchive keep the sidebar and the full Recents page in step
  *     (`recents`, for `TChatApp`'s `recents` prop).
@@ -63,13 +90,23 @@ import {
   ChatStreamRequestError,
   type ChatRequestDto,
   type ChatStreamEvent,
+  type ChatTurnCompletedEventData,
+  type ChatUserMessageEventData,
+  type ChatCompactedEventData,
+  type ChatPermissionRequestEventData,
+  type ChatPermissionResolvedEventData,
   type useChatApi,
   type useThreadApi,
 } from '@tnzi/core/services/ai';
 import { createPagedQuery } from '@tnzi/core/types';
-import type { ChatMessage, ToolCallInfo } from './useChat';
+import type { ChatCompaction, ChatMessage, ToolCallInfo } from './useChat';
 import { filesToContentParts, type UploadedAttachment } from './attachment-parts';
 import { takeWelcomeMessage } from './welcome-message';
+import { createApprovalQueue, type ApprovalQueue, type ApprovalSource } from './approval-queue';
+import { provideChatThreads } from './chat-approvals-key';
+import { createMessageQueue, type MessageQueue, type MessageQueueOperation } from './message-queue';
+import { useThreadAttention, type ThreadAttention } from './useThreadAttention';
+import { createRunRequestSource, runRequestFromEvent, runRequestKey } from './run-requests';
 import { toChatThreadsError, type ChatThreadsError, type ChatThreadsOperation } from './chat-errors';
 import {
   CLI_USAGE_LIMIT_ERROR_CODE,
@@ -79,9 +116,11 @@ import {
 } from './usage-limits';
 import type { ThreadItem } from '../components/chat/TThreadList.vue';
 import { toChatMessages, toMessageRole, toThreadItem, toThreadItems } from '../adapters/index';
+import { findToolCallOwner, mergeTaskCalls, mergeToolCall, upsertToolCalls } from './cli-tasks';
 import {
   RECENTS_STORAGE_KEY,
   changesRecentsQuery,
+  sortThreads,
   matchesRecentsStatus,
   normalizeRecentsPreferences,
   readRecentsPreferences,
@@ -137,6 +176,13 @@ export interface UseChatThreadsOptions {
    */
   model?: () => string | undefined | null;
   /**
+   * The reasoning effort the user picked for the next turn, read per turn (typically
+   * `useChatModels().effort`). Omitted or null: the turn carries none and the agent's own setting
+   * applies. The server checks it against the turn's model and refuses others
+   * (`AI_EFFORT_NOT_ALLOWED`). Queued messages carry it too.
+   */
+  effort?: () => string | undefined | null;
+  /**
    * A turn ran into a usage limit (see `usageLimit`). A product that shows
    * usage figures refreshes them here.
    */
@@ -171,15 +217,26 @@ export interface UseChatThreadsOptions {
    * Upload a non-image attachment and return its storage id, so the turn can
    * reference it as a `file` content part (images and PDFs travel inline as base64 and
    * need nothing). Typically `useStorageApi(http).upload` unwrapped. Without
-   * it any other file is REFUSED through `onError` and the turn is not sent:
+   * it (or `inlineFiles`) any other file is REFUSED through `onError` and the turn is not sent:
    * the endpoint has no inline form for such a file, and sending the text
    * alone would answer "I don't see a document" to a user who attached one.
    * The framework's default backend does not load file contents and answers a
    * `file` part with 501, so pass this only to a backend that resolves them.
    */
   uploadFile?: (file: File) => Promise<UploadedAttachment>;
-  /** Per-attachment ceiling in bytes. Default 10 MB. */
+  /**
+   * Send files that are not images or PDFs inline (`document` parts with the
+   * file's name and type) instead of refusing them or uploading them. For an
+   * agent that runs as an external CLI on a backend whose turns accept files
+   * (`ICliFileAttachmentPolicy`): the agent opens them with its own tools. A
+   * turn that does not take files is refused by the backend (415) through
+   * `onError`. Takes precedence over `uploadFile`. Default false.
+   */
+  inlineFiles?: boolean;
+  /** Per-attachment ceiling in bytes for images and PDFs. Default 10 MB. */
   maxAttachmentBytes?: number;
+  /** Per-file ceiling in bytes for files sent with `inlineFiles`. Default `maxAttachmentBytes`. */
+  maxFileAttachmentBytes?: number;
   /**
    * Send the message a signed-out visitor typed on the welcome screen before signing in
    * (`defineChatApp({ guestWelcome })`), once. Default true; it does nothing unless such a
@@ -192,6 +249,28 @@ export interface UseChatThreadsOptions {
    * `sendWelcomeMessage: false`, then `takeWelcomeMessage()` and `send()`.
    */
   sendWelcomeMessage?: boolean;
+  /**
+   * The application's own things a conversation waits on its user for (a high-risk call to
+   * confirm, say), beside the external agent's permission requests, questions and plans, which are
+   * always followed: each source is asked when a conversation opens, running or not (a card can
+   * outlive the turn that left it), every `approvalPollMs` while a turn runs and once more when it
+   * ends, and answers its own items. See `approvals`.
+   */
+  approvalSources?: readonly ApprovalSource[];
+  /** How often the approval sources are asked while a turn runs. Default `APPROVAL_POLL_MS` (2 s); 0 asks only on opening and when a turn ends. */
+  approvalPollMs?: number;
+  /**
+   * How often the conversation's queued messages are read while one of them waits to go. Default
+   * `QUEUE_POLL_MS` (2 s); 0 reads only when a conversation opens and when its turn ends. See `messageQueue`.
+   */
+  messageQueuePollMs?: number;
+  /**
+   * The running / unread summary (`attention`): how often it is read while a conversation runs and while
+   * none does (defaults `ATTENTION_RUNNING_POLL_MS` and `ATTENTION_IDLE_POLL_MS`; 0 = only on the hook's
+   * own events and when the page comes back). `false` turns it off: the rows keep only what the list
+   * read said, and nothing is marked read.
+   */
+  attention?: false | { runningPollMs?: number; idlePollMs?: number };
 }
 
 /** Per-turn options of `send`, `regenerate` and `editMessage`. */
@@ -203,6 +282,14 @@ export interface ChatTurnOptions {
    * message. A regenerate without it sends the stored metadata again.
    */
   metadata?: Record<string, unknown> | null;
+  /**
+   * Where the conversation came from (`ChatRequestDto.origin`), for a `send` that starts a new
+   * one: stored on the thread, and shown at once on its optimistic sidebar row. Only values the
+   * application allows clients to declare are accepted by the server (otherwise the turn fails
+   * with `AI_THREAD_ORIGIN_NOT_ALLOWED`). Ignored when a conversation is open, and by
+   * `regenerate` / `editMessage`.
+   */
+  origin?: string | null;
 }
 
 export interface UseChatThreadsReturn {
@@ -248,6 +335,8 @@ export interface UseChatThreadsReturn {
    * `messages` together. `openingThreadId` names it while it loads. A failed
    * load leaves the open conversation as it was (and reports through
    * `onError`). When the thread has a run still going, the hook reattaches to it.
+   * The turn in progress in the conversation being left is not stopped: its
+   * stream on screen closes and its run goes on (coming back reattaches to it).
    *
    * Selecting the conversation already on screen (the active thread, or the
    * optimistic row of a new one) cancels an open still loading, so that click
@@ -256,9 +345,26 @@ export interface UseChatThreadsReturn {
    * being opened returns that open's promise rather than loading it again.
    */
   selectThread: (id: string) => Promise<void>;
+  /**
+   * Read the open thread again and follow a run that is going on in it, for a turn started
+   * somewhere else than this hook (the app's server sending a queued message once the last turn
+   * ended, another tab or device). The newest page replaces the messages when it arrives, with no
+   * empty state in between, and the latest active run is followed from its start as when the
+   * thread is opened. A turn that only waits on background tasks is let go first (nothing is
+   * cancelled; the reattach picks its run up again while it still goes). Does nothing without a
+   * saved open thread. Asked while a thread is being opened or while a turn streams here, it is
+   * kept and done once that is over (if the same thread is still open), so a turn the server
+   * started meanwhile is not missed. Resolves once the transcript is shown, as `selectThread` does
+   * (at once when it was kept for later). A failed read leaves the screen as it was and reports
+   * through `onError`.
+   */
+  refreshThread: () => Promise<void>;
   /** Prepend the page of messages before the oldest one shown. */
   loadOlderMessages: () => Promise<void>;
-  /** Drop back to the empty state without creating anything server-side. */
+  /**
+   * Drop back to the empty state without creating anything server-side. A turn
+   * in progress is left running, as with `selectThread`; it is not stopped.
+   */
   newChat: () => void;
   /** Delete a thread: it leaves the sidebar and the Recents page; deleting the open one starts a new chat. */
   deleteThread: (id: string) => Promise<void>;
@@ -270,6 +376,14 @@ export interface UseChatThreadsReturn {
   /**
    * Send a turn and stream the answer. Resolves when the turn settles.
    * `files` are the composer's attachments; a turn may be files only.
+   *
+   * While a turn of an external agent runs (`messageQueue.available`) the message is queued on the
+   * server instead, with its attachments, the model and the turn's metadata: an agent whose turn
+   * can take messages while it works gets it at once and takes it in between two steps; otherwise it
+   * goes when the turn ends. Attachments follow the rules of a normal send (`inlineFiles`, the size
+   * limits; an upload by reference cannot wait in the queue). A refused message is reported through
+   * `onError` (operation `queue`, or `attachment`) and its text goes back into an empty composer.
+   * While a built-in agent's turn runs, `send` does nothing, as before.
    */
   send: (content: string, files?: readonly File[], options?: ChatTurnOptions) => Promise<void>;
   /**
@@ -282,8 +396,20 @@ export interface UseChatThreadsReturn {
    * are dropped (on the server too), and the edited message is sent for a new reply.
    */
   editMessage: (messageId: string, content: string, options?: ChatTurnOptions) => Promise<void>;
-  /** Cancel an in-flight turn (and its run on the server, when it has one). */
+  /**
+   * Stop the turn in progress: what the Stop button does. Its run is cancelled on
+   * the server, including a run not named yet when this is called (it is
+   * cancelled as soon as the stream names it). Moving away does not call this;
+   * call it only for a stop the person asked for.
+   */
   abort: () => void;
+  /**
+   * Stop one task of the open conversation's external agent (a sub-agent or a background command; the `taskId` of
+   * its `ToolCallInfo.task`) without stopping the turn. Resolves true once the server took the request; the task's
+   * stopped state arrives on the stream. A refusal (no run going on, a CLI that cannot stop a single task) goes to
+   * `onError` with operation `stop-task` and resolves false.
+   */
+  stopTask: (taskId: string) => Promise<boolean>;
   /** Patch one rendered message (feedback, edits). */
   updateMessage: (id: string, patch: Partial<ChatMessage>) => void;
   /**
@@ -292,6 +418,31 @@ export interface UseChatThreadsReturn {
    * URLs are released when the thread changes and when the hook's scope ends.
    */
   resolveAttachmentUrl: (attachmentId: string) => Promise<string | null>;
+  /**
+   * What the open conversation waits on its user for, as cards: the external agent's requests
+   * (from the stream as they appear and resolve, and from `chatApi.getPendingPermissions` for the
+   * ones a page opened later must find) and the items of `approvalSources`. `TChatApp` shows them
+   * above the composer by itself when the hook runs in the component that renders it (it is
+   * provided to descendants); elsewhere pass it as `TChatApp`'s `approvals`.
+   */
+  approvals: ApprovalQueue;
+  /**
+   * The open conversation's queued messages (on the server, `chat/threads/{threadId}/queue`). While a
+   * turn of an external agent runs (`messageQueue.available`), `send` queues the message instead of
+   * dropping it: it waits on the server, which hands it to the running agent when its turn can take
+   * messages, or sends it with the others as one turn when the turn ends, also with the page closed. When a queued message goes out as a turn this page did not start, the hook
+   * follows it (`refreshThread`). `TChatApp` lists the queue above the composer and queues behind a
+   * running turn by itself when the hook runs in the component that renders it (it registers with
+   * the approval queue and is picked by the same `messages`); elsewhere pass it as `TChatApp`'s
+   * `messageQueue`.
+   */
+  messageQueue: MessageQueue;
+  /**
+   * Which of the listed agents' conversations need the user (`listAgentIds` applies): `runningCount`
+   * and `unreadCount` over all of them, for a badge outside the list (a mode switch, a nav item), and
+   * `markRead`. The list rows already carry the same flags. Idle when the `attention` option is false.
+   */
+  attention: ThreadAttention;
 }
 
 /** What one streamed turn writes to: the rows it fills, and how it began. */
@@ -346,6 +497,26 @@ interface UnresolvedTurn {
  */
 type TurnOutcome = 'answered' | 'failed' | 'unanswered' | 'unresolved' | 'superseded';
 
+/**
+ * The request a turn streams on, as stopping and leaving see it from outside the turn.
+ */
+interface LiveStream {
+  turn: number;
+  controller: AbortController;
+  /** The run answering the turn, once an event named it. */
+  runId?: string;
+  /** The thread the server put the turn in, once an event named it. */
+  threadId?: string;
+  /** The request is still open (`streamChat` has not returned). */
+  open: boolean;
+  /**
+   * The turn was let go while its request was open and before any run was named:
+   * `'stop'` (Stop) or `'leave'` (the person moved to another conversation). The
+   * request then stays open until its next sign says what it is (`settleReleased`).
+   */
+  released: 'stop' | 'leave' | null;
+}
+
 /** Attempts at asking the server about a broken turn before it is left as an error. */
 const MAX_RECOVERY_ATTEMPTS = 2;
 /** Pause before the second attempt: a phone just back from the background may not have its network yet. */
@@ -367,7 +538,38 @@ function isConnectionFailure(err: unknown): err is Error {
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** Waits between reads of a conversation whose AI title is still coming (about 30 s in all). */
+export const TITLE_FOLLOW_DELAYS_MS: readonly number[] = [1500, 3000, 5000, 8000, 12000];
+
 export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsReturn {
+  return createChatThreads(options, 'chat');
+}
+
+/**
+ * What `createChatThreads` gives a reader (`useThreadReader`) on top of the chat surface:
+ * letting the turn on screen go without cancelling it, for "stop following".
+ */
+export interface ChatThreadsInternals extends UseChatThreadsReturn {
+  /** Close the stream on screen; nothing is cancelled and the rows are left as they are. */
+  leave: () => void;
+}
+
+/**
+ * The conversation loop behind `useChatThreads` and `useThreadReader` (internal: not exported
+ * from the package). `'chat'` is the whole loop. `'reader'` keeps what reading one conversation
+ * and following its turns needs (open by id, older pages, attach to a running turn, recovery of a
+ * broken stream) and leaves out everything else: the thread list and titles, attention and read
+ * marks, the approval and queue follow-ups, the welcome message and the context `TChatApp` reads.
+ * A reader never calls `send` / `regenerate` / `editMessage` / `abort` (`useThreadReader` does not
+ * expose them), so the turn paths that assume a list never run in it. `internal.attach`, when
+ * given, is asked before attaching to a thread's running turn (opening it, `refreshThread`).
+ */
+export function createChatThreads(
+  options: UseChatThreadsOptions,
+  mode: 'chat' | 'reader',
+  internal: { attach?: () => boolean } = {},
+): ChatThreadsInternals {
+  const reader = mode === 'reader';
   const { http, threadApi, chatApi } = options;
   const pageSize = options.pageSize ?? 50;
   const recentsKey = options.recentsStorageKey === undefined ? RECENTS_STORAGE_KEY : options.recentsStorageKey;
@@ -375,6 +577,16 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
   const untitled = options.untitledLabel ?? 'New chat';
 
   const threads = shallowRef<ThreadItem[]>([]);
+  const attentionEnabled = !reader && options.attention !== false;
+  const attention = useThreadAttention({
+    threadApi,
+    agentIds: options.listAgentIds,
+    immediate: attentionEnabled,
+    ...(options.attention ? options.attention : {}),
+  });
+  /** Conversations whose AI title is being waited for, with the pending re-read (see `followTitle`). */
+  const titleFollows = new Map<string, ReturnType<typeof setTimeout>>();
+  let disposed = false;
   const activeThreadId = ref<string | undefined>(undefined);
   const messages = shallowRef<ChatMessage[]>([]);
   const isStreaming = ref(false);
@@ -386,6 +598,19 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
   const activeRunId = ref<string | undefined>(undefined);
   const usageLimit = ref<UsageLimitNotice | null>(null);
   const recentsPreferences = ref<RecentsPreferences>(readRecentsPreferences(recentsKey));
+  const approvals = createApprovalQueue({
+    sources: [createRunRequestSource(chatApi), ...(options.approvalSources ?? [])],
+    intervalMs: options.approvalPollMs,
+  });
+  const messageQueue = createMessageQueue({
+    api: chatApi,
+    intervalMs: options.messageQueuePollMs,
+    // A queued message went out as a turn the server started: follow the conversation to stream it.
+    onDelivered: () => void refreshThread(),
+    onError: (operation, source) => fail(operation, QUEUE_FAILURES[operation], source),
+  });
+  // A reader sends nothing: it must not be the conversation `TChatApp` (or a composer) finds.
+  if (!reader) provideChatThreads({ messages, approvals, messageQueue, stopTask });
 
   /** Pages of the sidebar list loaded so far. */
   let threadPage = 1;
@@ -398,6 +623,10 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
   let oldestOrder: number | undefined;
 
   let abortController: AbortController | null = null;
+  /** The request of the turn in progress (null between turns). */
+  let liveStream: LiveStream | null = null;
+  /** Requests let go before their run was named, still open (see `settleReleased`); closed with the hook's scope. */
+  const releasedStreams = new Set<LiveStream>();
   /**
    * Increments on every turn AND on every abort, so a turn can tell whether it
    * is still the current one when its `await streamChat(...)` finally returns.
@@ -445,6 +674,11 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
   let visibleWaiters: Array<() => void> = [];
   /** The turn whose stream was closed on purpose to pick it up again (`turnSeq` of it). */
   let reconnectTurn: number | null = null;
+  /**
+   * The turn whose run only waits on background tasks (`turnSeq` of it): its answer is done and the
+   * conversation is free, but its stream stays open for the answer the CLI gives by itself later.
+   */
+  let parkedTurn: number | null = null;
 
   /** Object URLs of the open thread's attachments, by attachment id. */
   let attachmentUrls = new Map<string, Promise<string | null>>();
@@ -501,29 +735,86 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     }
   }
 
-  function abort(refreshThreads = true): void {
+  /**
+   * What stopping and leaving both do first: the turn stops being the hook's (its tail sees it
+   * is superseded), any recovery of it ends, and its request is handed back to the caller.
+   */
+  function releaseTurn(): LiveStream | null {
     turnSeq += 1;
-    // A recovery in flight or waiting is the turn being stopped too; it sees it is superseded.
+    parkedTurn = null;
+    // A recovery in flight or waiting is the turn being let go too; it sees it is superseded.
     unresolved.value = null;
     reconnectTurn = null;
     releaseVisibleWaiters();
-    // The run goes on without a client unless it is cancelled where it runs: its reply
-    // would still be written to the thread. What it had written stays as a stopped reply.
-    const runId = activeRunId.value;
+    const live = liveStream;
+    liveStream = null;
+    abortController = null;
     activeRunId.value = undefined;
+    return live;
+  }
+
+  async function stopTask(taskId: string): Promise<boolean> {
+    const threadId = activeThreadId.value;
+    if (!threadId || isPendingId(threadId) || !taskId) return false;
+    let result: Awaited<ReturnType<typeof chatApi.stopTask>>;
+    try {
+      result = await chatApi.stopTask(threadId, taskId);
+    } catch (err) {
+      fail('stop-task', 'Could not stop the task', err);
+      return false;
+    }
+    if (!result.succeeded) {
+      fail('stop-task', 'Could not stop the task', result);
+      return false;
+    }
+    return true;
+  }
+
+  function cancelRunOnServer(runId: string): void {
+    void chatApi.cancelRun(runId).then((result) => {
+      if (!result.succeeded) fail('stop-run', 'Could not stop the reply on the server', result);
+    });
+  }
+
+  /**
+   * A new turn while the last one only waits on background tasks: that run's stream is let go
+   * (nothing is cancelled: the run, its process and the tasks go on, and the server hands the
+   * process to the new turn) and its quiet waiting row goes; an answer it gives later is in the
+   * thread like any other. Without a waiting turn this does nothing.
+   */
+  function releaseParkedTurn(): void {
+    if (parkedTurn === null || parkedTurn !== turnSeq) return;
+    const live = releaseTurn();
+    live?.controller.abort();
+    messages.value = messages.value.filter((m) => m.status !== 'waiting');
+  }
+
+  /**
+   * Stop: the person ended the turn. The run goes on without a client unless it is cancelled
+   * where it runs (its reply would still be written to the thread), so a named run is cancelled.
+   * Before a run is named the request stays open for its first sign, because closing it then
+   * could lose the stop: an external CLI agent's run may already be queued with its id on the
+   * way. What the reply had written stays as a stopped reply.
+   */
+  function stopTurn(): void {
+    const runId = activeRunId.value ?? liveStream?.runId;
+    const hadStream = abortController !== null;
+    // Stopping a run that only waits on background tasks ends the tasks too: nothing is left to wait for
+    const wasParked = parkedTurn !== null && parkedTurn === turnSeq;
+    const live = releaseTurn();
+    if (wasParked) messages.value = messages.value.filter((m) => m.status !== 'waiting');
     if (runId) {
-      void chatApi.cancelRun(runId).then((result) => {
-        if (!result.succeeded) fail('stop-run', 'Could not stop the reply on the server', result);
-      });
+      cancelRunOnServer(runId);
+      live?.controller.abort();
+    } else if (live?.open) {
+      live.released = 'stop';
+      releasedStreams.add(live);
+    } else {
+      live?.controller.abort();
     }
-    if (abortController) {
-      abortController.abort();
-      abortController = null;
-      // The turn's tail returns early once superseded, so its own rollback
-      // never runs; the row would otherwise stay as a zombie that the next
-      // send does not replace.
-      dropPendingRow(refreshThreads);
-    }
+    // The turn's tail returns early once superseded, so its own rollback never runs; the
+    // optimistic row would otherwise stay as a zombie that the next send does not replace.
+    if (hadStream) dropPendingRow(true);
     if (isStreaming.value) {
       // Clear the flag on the row too - otherwise the caret keeps blinking on a
       // message nothing is writing to any more - and mark it stopped, which is
@@ -533,6 +824,77 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
       );
       isStreaming.value = false;
     }
+  }
+
+  /**
+   * Leave: the person moved to another conversation (or a new one). Nothing is cancelled: a
+   * named run goes on and its stream is closed (coming back reattaches to it); a request with no
+   * run named yet stays open until it says what it is (`settleReleased`). The rows are not
+   * marked, the caller replaces them. A new conversation's optimistic row becomes the thread the
+   * server named, so it can be opened again; without one it goes and the list is re-fetched.
+   */
+  function leaveTurn(): void {
+    const live = releaseTurn();
+    if (live?.open && !live.runId) {
+      live.released = 'leave';
+      releasedStreams.add(live);
+    } else {
+      live?.controller.abort();
+    }
+    if (pendingThreadId) {
+      const threadId = live?.threadId;
+      if (threadId) {
+        const pendingId = pendingThreadId;
+        threads.value = threads.value.map((t) =>
+          t.id === pendingId
+            ? toThreadItem({
+                id: threadId,
+                title: t.title,
+                lastActivityTime: t.updatedAt ?? new Date().toISOString(),
+                lastUserMessageTime: t.userMessageAt,
+                creationTime: t.createdAt,
+                origin: t.origin,
+              }, untitled)
+            : t,
+        );
+        pendingThreadId = null;
+        void loadThreads();
+      } else {
+        dropPendingRow(true);
+      }
+    }
+    isStreaming.value = false;
+  }
+
+  /**
+   * A request let go before its run was named shows a sign. A run named (an external CLI
+   * agent): it goes on without this request, so the request is closed, and after a Stop the run
+   * is cancelled. Any other sign means the agent answers on the request itself (a built-in
+   * agent): after a Stop it is closed, which is what ends the turn on the server; after leaving
+   * it stays open so the server finishes the turn, and nothing of it reaches the screen.
+   */
+  function settleReleased(live: LiveStream, runId: string | undefined): void {
+    if (runId) {
+      if (live.released === 'stop') cancelRunOnServer(runId);
+      // The server has the conversation by now (a new one included): the list shows it.
+      void loadThreads();
+      releasedStreams.delete(live);
+      live.controller.abort();
+    } else if (live.released === 'stop') {
+      releasedStreams.delete(live);
+      live.controller.abort();
+    }
+  }
+
+  /**
+   * A request let go before its run was named has ended. After leaving, that is the server
+   * finishing a built-in agent's turn: the list shows the conversation as it is now, and when
+   * the person is back in that conversation with nothing running its reply is shown.
+   */
+  function endReleased(live: LiveStream): void {
+    if (!releasedStreams.delete(live) || live.released !== 'leave') return;
+    void loadThreads();
+    if (live.threadId && live.threadId === activeThreadId.value && !isStreaming.value) void reloadTranscript();
   }
 
   /** The agents the lists are limited to, deduplicated; empty = no limit. */
@@ -554,6 +916,8 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
   }
 
   async function loadThreads(): Promise<void> {
+    // A reader has no list: the paths that refresh it (a stream let go, a new thread named) read nothing.
+    if (reader) return;
     const seq = ++listSeq;
     listStartedAt = new Date();
     const result = await threadApi.getList(listQuery(1));
@@ -565,9 +929,45 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
       threads.value = [...pending, ...items];
       threadPage = 1;
       hasMoreThreads.value = (result.data.totalCount ?? 0) > items.length;
+      for (const item of items) if (item.titlePending) followTitle(item.id);
     } else {
       fail('load-threads', 'Could not load conversations', result);
     }
+  }
+
+  /**
+   * A conversation whose AI title is still being generated (`titlePending`): read it again a
+   * few times, backing off, and put the title in the list as soon as it changes. The server
+   * starts the title when the first message is accepted, so it usually lands before the reply
+   * ends; this covers the slower case, without a reload. Gives up after about 30 seconds (a
+   * title that never comes keeps the fallback the list already shows).
+   */
+  function followTitle(threadId: string, attempt = 0): void {
+    if (disposed || (attempt === 0 && titleFollows.has(threadId))) return;
+    const wait = TITLE_FOLLOW_DELAYS_MS[attempt];
+    if (wait === undefined) {
+      titleFollows.delete(threadId);
+      return;
+    }
+    titleFollows.set(threadId, setTimeout(() => void readTitle(threadId, attempt), wait));
+  }
+
+  async function readTitle(threadId: string, attempt: number): Promise<void> {
+    const result = await threadApi.getDetail(threadId, 1);
+    if (disposed) return;
+    const detail = result.succeeded ? result.data : undefined;
+    if (detail) {
+      const title = detail.title || untitled;
+      const stillPending = !!detail.titlePending;
+      threads.value = threads.value.map((t) =>
+        t.id === threadId ? { ...t, title, titlePending: stillPending || undefined } : t,
+      );
+      if (!stillPending) {
+        titleFollows.delete(threadId);
+        return;
+      }
+    }
+    followTitle(threadId, attempt + 1);
   }
 
   async function loadMoreThreads(): Promise<void> {
@@ -674,16 +1074,18 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
       fail('load-thread', 'Could not load this conversation', result);
       return;
     }
-    abort();
+    // Moving to another conversation is not stopping the one on screen (see `leaveTurn`).
+    leaveTurn();
     releaseAttachmentUrls();
     activeThreadId.value = id;
     showPage(result.data.messages ?? [], result.data.hasMore ?? false);
+    if (attentionEnabled) void attention.markRead(id);
     void reattach(id, seq);
   }
 
   /** Show a thread's newest page. */
   function showPage(page: Parameters<typeof toChatMessages>[0], hasMore: boolean): void {
-    messages.value = toChatMessages(page);
+    messages.value = mergeTaskCalls(toChatMessages(page));
     oldestOrder = page[0]?.order;
     hasOlderMessages.value = hasMore && oldestOrder != null;
   }
@@ -702,7 +1104,7 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
       }
       const page = result.data.messages ?? [];
       const known = new Set(messages.value.map((m) => m.id));
-      messages.value = [...toChatMessages(page).filter((m) => !known.has(m.id)), ...messages.value];
+      messages.value = mergeTaskCalls([...toChatMessages(page).filter((m) => !known.has(m.id)), ...messages.value]);
       if (page[0]) oldestOrder = page[0].order;
       hasOlderMessages.value = (result.data.hasMore ?? false) && page.length > 0;
     } finally {
@@ -715,6 +1117,8 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
    * refresh or from another tab): show its reply as it streams, from the start.
    */
   async function reattach(threadId: string, seq: number): Promise<void> {
+    // A reader that stopped following reads the transcript only.
+    if (internal.attach && !internal.attach()) return;
     const runs = await chatApi.getActiveRuns(threadId);
     if (seq !== selectSeq || threadId !== activeThreadId.value || isStreaming.value) return;
     const run = runs.succeeded ? runs.data?.[runs.data.length - 1] : undefined;
@@ -732,6 +1136,49 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     );
   }
 
+  /**
+   * A refresh asked for while the page could not do it (a turn streaming here, a conversation
+   * opening): the conversation it was for, refreshed as soon as the page is free, so a turn the
+   * server started meanwhile is not missed.
+   */
+  let refreshOwed: string | null = null;
+
+  async function refreshThread(): Promise<void> {
+    const threadId = activeThreadId.value;
+    if (!threadId || isPendingId(threadId)) return;
+    if (openingThreadId.value !== undefined || isStreaming.value) {
+      refreshOwed = threadId;
+      return;
+    }
+    refreshOwed = null;
+    // A refresh is a new selection of the same thread: an older page or reattach still in flight
+    // must not land on top of it.
+    supersedeSelection();
+    const seq = selectSeq;
+    let result: Awaited<ReturnType<typeof threadApi.getMessages>>;
+    try {
+      result = await threadApi.getMessages(threadId, { limit: messageLimit });
+    } catch (err) {
+      if (seq === selectSeq) fail('load-thread', 'Could not refresh this conversation', err);
+      return;
+    }
+    if (seq !== selectSeq || threadId !== activeThreadId.value) return;
+    if (isStreaming.value) {
+      // A turn began here while the page read: refresh again once it ends.
+      refreshOwed = threadId;
+      return;
+    }
+    if (!result.succeeded || !result.data) {
+      fail('load-thread', 'Could not refresh this conversation', result);
+      return;
+    }
+    // The transcript is the truth now: a parked turn's stream would write into a row it replaces.
+    // The thread stays the same, so its attachment URLs are kept.
+    leaveTurn();
+    showPage(result.data.messages ?? [], result.data.hasMore ?? false);
+    void reattach(threadId, seq);
+  }
+
   /** Reload the open thread's newest page (after a rewind that failed: the server's thread is the truth). */
   async function reloadTranscript(): Promise<void> {
     const threadId = activeThreadId.value;
@@ -743,7 +1190,7 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
   }
 
   function newChat(): void {
-    abort();
+    leaveTurn();
     supersedeSelection();
     releaseAttachmentUrls();
     activeThreadId.value = undefined;
@@ -768,6 +1215,54 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
       // cancel it, or the load would open a conversation that no longer exists.
       supersedeSelection();
     }
+  }
+
+  /**
+   * A message written while an external agent's turn runs: it waits on the server, which hands it to
+   * the running agent or sends it when the turn ends. Its files are read under the rules of a normal
+   * send and travel inline (an upload by reference cannot wait in the queue).
+   * Refused (an attachment, a full queue, the server's rules): reported, and the words go back into an empty composer.
+   */
+  async function queueTurn(content: string, files: readonly File[], turnOptions: ChatTurnOptions): Promise<void> {
+    const giveBack = () => {
+      if (!inputText.value) inputText.value = content;
+    };
+    let parts: Awaited<ReturnType<typeof filesToContentParts>>['parts'] = null;
+    if (files.length > 0) {
+      try {
+        ({ parts } = await filesToContentParts(content, files, {
+          inlineFiles: options.inlineFiles,
+          maxBytes: options.maxAttachmentBytes,
+          maxFileBytes: options.maxFileAttachmentBytes,
+        }));
+      } catch (err) {
+        giveBack();
+        fail('attachment', 'The attachment could not be queued', err);
+        return;
+      }
+    }
+    const queued = await messageQueue.add({
+      text: content.trim(),
+      ...(parts ? { content: parts.filter((part) => part.type !== 'text') } : {}),
+      model: options.model?.() ?? null,
+      ...(options.effort?.() ? { effort: options.effort() } : {}),
+      metadata: turnOptions.metadata ?? null,
+    });
+    if (!queued) giveBack();
+    // Queued is sent, as far as the list goes: the server moved the conversation when it took the message
+    else if (activeThreadId.value && !isPendingId(activeThreadId.value)) noteUserMessage(activeThreadId.value);
+  }
+
+  /**
+   * The user just wrote in this conversation (a message, an edit, a regenerate, a queued message): its
+   * rows take the time now, which is what the server records, so the list moves it where its next read will.
+   */
+  function noteUserMessage(threadId: string): void {
+    const at = new Date().toISOString();
+    const touch = (items: ThreadItem[]): ThreadItem[] =>
+      items.some((t) => t.id === threadId) ? items.map((t) => (t.id === threadId ? { ...t, userMessageAt: at } : t)) : items;
+    threads.value = touch(threads.value);
+    recentPageThreads.value = touch(recentPageThreads.value);
   }
 
   // ---------------------------------------------------------------- recents
@@ -801,7 +1296,7 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
   function recentPageQuery(page: number) {
     const query = {
       ...createPagedQuery(page, pageSize),
-      ...recentsQuery({ status: recentPageStatus.value, lastActivity: 'all', sort: 'activity' }),
+      ...recentsQuery({ status: recentPageStatus.value, lastActivity: 'all', sort: 'lastMessage' }),
     };
     const keyword = recentPageKeyword.value.trim();
     return withAgentScope(keyword ? { ...query, keyword } : query);
@@ -910,7 +1405,7 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
   }
 
   // A scope read from reactive state follows it: the lists reload when the agents change.
-  if (options.listAgentIds) {
+  if (options.listAgentIds && !reader) {
     watch(
       () => scopedAgentIds().join(','),
       () => {
@@ -942,7 +1437,12 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
   };
 
   async function send(content: string, files: readonly File[] = [], turnOptions: ChatTurnOptions = {}): Promise<void> {
-    if ((!content.trim() && files.length === 0) || isStreaming.value) return;
+    if (!content.trim() && files.length === 0) return;
+    if (isStreaming.value) {
+      if (messageQueue.available.value) await queueTurn(content, files, turnOptions);
+      return;
+    }
+    releaseParkedTurn();
 
     // A thread still loading from a sidebar click is not switched to: the user
     // carried on in the conversation on screen, which is where this turn goes.
@@ -965,7 +1465,9 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
       try {
         parts = await filesToContentParts(content, files, {
           uploadFile: options.uploadFile,
+          inlineFiles: options.inlineFiles,
           maxBytes: options.maxAttachmentBytes,
+          maxFileBytes: options.maxFileAttachmentBytes,
         });
       } catch (err) {
         if (turn === turnSeq) {
@@ -984,10 +1486,21 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     // their context appear at once, not after the first token arrives.
     if (!activeThreadId.value) {
       pendingThreadId = newTempThreadId();
+      const sentAt = new Date().toISOString();
       threads.value = [
-        { id: pendingThreadId, title: previewTitle(content), updatedAt: new Date().toISOString(), pending: true },
+        {
+          id: pendingThreadId,
+          title: previewTitle(content),
+          updatedAt: sentAt,
+          userMessageAt: sentAt,
+          createdAt: sentAt,
+          pending: true,
+          ...(turnOptions.origin ? { origin: turnOptions.origin } : {}),
+        },
         ...threads.value,
       ];
+    } else {
+      noteUserMessage(activeThreadId.value);
     }
 
     const userId = newId();
@@ -1009,6 +1522,9 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
 
     const agentId = options.agentId?.() || undefined;
     const model = options.model?.() || undefined;
+    const effort = options.effort?.() || undefined;
+    // The origin belongs to the thread, so only a turn that starts one carries it.
+    const origin = !activeThreadId.value && turnOptions.origin ? turnOptions.origin : undefined;
     // `message` stays alongside `content`: the backend builds the model
     // input from the parts when present, but adds and persists the user
     // turn only from a non-blank `message`. A files-only turn sends the
@@ -1022,8 +1538,10 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
           threadId: activeThreadId.value ?? null,
           ...(agentId ? { agentId } : {}),
           ...(model ? { model } : {}),
+          ...(effort ? { effort } : {}),
           ...(parts.parts ? { content: parts.parts } : {}),
           ...(turnOptions.metadata ? { metadata: turnOptions.metadata } : {}),
+          ...(origin ? { origin } : {}),
         },
       },
       { userId, assistantId, titleHint: content, rewinds: false, draft: content },
@@ -1033,6 +1551,7 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
 
   async function regenerate(turnOptions: ChatTurnOptions = {}): Promise<void> {
     if (isStreaming.value) return;
+    releaseParkedTurn();
     // Retry on a reply whose stream broke: the server may have answered it, or still be on it.
     // Ask first, and only re-run it once the server says it has no reply and no run for it;
     // otherwise Retry would run a turn the server already has a second time.
@@ -1057,9 +1576,12 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
       ...messages.value.slice(0, lastUser + 1),
       { id: assistantId, role: 'assistant', content: '', reasoning: '', createdAt: new Date().toISOString(), isStreaming: true, status: 'streaming' },
     ];
+    // The server stores the question again (regenerate) or the edited one: the user wrote just now
+    noteUserMessage(threadId);
 
     const agentId = options.agentId?.() || undefined;
     const model = options.model?.() || undefined;
+    const effort = options.effort?.() || undefined;
     await runTurn(
       {
         url: chatApi.getChatStreamUrl(),
@@ -1069,6 +1591,7 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
           regenerate: true,
           ...(agentId ? { agentId } : {}),
           ...(model ? { model } : {}),
+          ...(effort ? { effort } : {}),
           ...(turnOptions.metadata ? { metadata: turnOptions.metadata } : {}),
         },
       },
@@ -1081,6 +1604,7 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     if (isStreaming.value || !threadId || !content.trim()) return;
     const index = messages.value.findIndex((m) => m.id === messageId && m.role === 'user');
     if (index < 0) return;
+    releaseParkedTurn();
     if (messageId.startsWith(LOCAL_MESSAGE_PREFIX)) {
       // Never stored (its turn ended before the server reported the message): nothing to replace.
       fail('edit', 'This message cannot be edited.');
@@ -1103,9 +1627,12 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
       },
       { id: assistantId, role: 'assistant', content: '', reasoning: '', createdAt: new Date().toISOString(), isStreaming: true, status: 'streaming' },
     ];
+    // The server stores the question again (regenerate) or the edited one: the user wrote just now
+    noteUserMessage(threadId);
 
     const agentId = options.agentId?.() || undefined;
     const model = options.model?.() || undefined;
+    const effort = options.effort?.() || undefined;
     await runTurn(
       {
         url: chatApi.getChatStreamUrl(),
@@ -1116,6 +1643,7 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
           message: content,
           ...(agentId ? { agentId } : {}),
           ...(model ? { model } : {}),
+          ...(effort ? { effort } : {}),
           ...(turnOptions.metadata ? { metadata: turnOptions.metadata } : {}),
         },
       },
@@ -1140,13 +1668,40 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     /** Whether this turn is still the one the hook is running. */
     const isCurrent = () => turn === turnSeq;
 
-    isStreaming.value = true;
+    /**
+     * The stream picks up a run that only waits on background tasks (its row says `'waiting'`):
+     * the conversation stays free until the run answers again.
+     */
+    let parked = !!resume && messages.value.some((m) => m.id === resume.progress.assistantId && m.status === 'waiting');
+    isStreaming.value = !parked;
+    if (parked) {
+      parkedTurn = turn;
+      activeRunId.value = undefined;
+    }
     // A new turn is a new attempt: the notice of the last refusal goes, and comes back if this one is refused too.
     usageLimit.value = null;
     // A new stream supersedes a turn left unresolved (a resumed one took it over already).
     unresolved.value = null;
     abortController = new AbortController();
     const signal = abortController.signal;
+    const live: LiveStream = {
+      turn,
+      controller: abortController,
+      runId: resume?.progress.runId,
+      threadId: resume?.progress.threadId,
+      open: true,
+      released: null,
+    };
+    liveStream = live;
+    /**
+     * The turn was let go before its run was named (`stopTurn` / `leaveTurn`): its signs go to
+     * `settleReleased`, none of them to the screen. `runId` is the run an event named.
+     */
+    const isReleased = (runIdNamed?: string | null): boolean => {
+      if (!live.released) return false;
+      if (releasedStreams.has(live)) settleReleased(live, runIdNamed ?? undefined);
+      return true;
+    };
 
     let bufferedText = resume?.progress.text ?? '';
     let bufferedReasoning = resume?.progress.reasoning ?? '';
@@ -1197,6 +1752,146 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
      * duplicate. `onEvent` runs before `onToolCall` for one event.
      */
     let startAlreadyDetailed = false;
+    /**
+     * Answers this run already finished inside it (`turn_completed`: the CLI went on after a
+     * background task). Once there was one, the stream's own text total covers every answer,
+     * so the last row is written from its own buffer only.
+     */
+    let finishedTurns = 0;
+    /** The context compaction this run did (`compacted`), if any. */
+    let compaction: ChatCompaction | null = null;
+    /**
+     * The row waits for the run's background tasks (status `'waiting'`, after `turn_completed`)
+     * until the next answer begins. A stream picking the turn up again starts from the row.
+     */
+    let waiting = messages.value.some((m) => m.id === liveAssistantId && m.status === 'waiting');
+    /**
+     * A patch to the reply that is the next answer beginning: the wait is over, and the turn is
+     * busy again while the run answers (Stop shows, a send waits for it).
+     */
+    const answering = (patch: Partial<ChatMessage>): Partial<ChatMessage> => {
+      if (!waiting) return patch;
+      waiting = false;
+      if (parked) {
+        parked = false;
+        parkedTurn = null;
+        isStreaming.value = true;
+        if (runId) activeRunId.value = runId;
+      }
+      return { ...patch, isStreaming: true, status: 'streaming', backgroundTasks: null };
+    };
+    /** Another row than the live one has this id: the answer is already on screen. */
+    const shownElsewhere = (id: string) => messages.value.some((m) => m.id === id && m.id !== liveAssistantId);
+
+    /**
+     * One answer ended and the run goes on (the CLI starts another turn when its background
+     * tasks finish): the row is done and takes the stored message's id; what follows streams
+     * into a new row after it.
+     */
+    const startNextAnswer = (event: ChatStreamEvent) => {
+      const data = (event.eventData ?? {}) as Partial<ChatTurnCompletedEventData>;
+      const stored = data.assistantMessageId;
+      const liveRow = messages.value.find((m) => m.id === liveAssistantId);
+      if (!stored && liveRow && !bufferedText && !bufferedReasoning && toolCalls.length === 0 && !liveRow.compaction) {
+        // The turn said nothing and stored nothing (the CLI woke for a background task and stayed
+        // quiet): the row goes on waiting for the next answer, rather than staying behind empty.
+        updateMessage(liveAssistantId, {
+          isStreaming: false,
+          status: 'waiting',
+          backgroundTasks: (data.backgroundTasks ?? []).map((task) => ({ ...task })),
+        });
+        finishedTurns += 1;
+        waiting = true;
+        parked = true;
+        parkedTurn = turn;
+        isStreaming.value = false;
+        activeRunId.value = undefined;
+        return;
+      }
+      if (stored && shownElsewhere(stored)) {
+        // The thread's transcript already shows this answer: the stream was picked up from the
+        // start (a reload, coming back to the conversation) and replayed it. The copy goes.
+        messages.value = messages.value.filter((m) => m.id !== liveAssistantId);
+      } else {
+        updateMessage(liveAssistantId, {
+          content: bufferedText,
+          reasoning: bufferedReasoning || null,
+          isStreaming: false,
+          status: 'done',
+          backgroundTasks: null,
+        });
+        if (stored) replaceMessageId(liveAssistantId, stored);
+      }
+      const previousId = stored ?? liveAssistantId;
+      const nextId = newId();
+      const index = messages.value.findIndex((m) => m.id === previousId);
+      // Until the next answer begins, the run only waits on its background tasks: the row says
+      // so quietly, with the tasks the server reported, and is not streaming. The conversation is
+      // free meanwhile (the composer works); the stream stays open for the answer the run gives
+      // when its tasks finish.
+      const row: ChatMessage = {
+        id: nextId,
+        role: 'assistant',
+        content: '',
+        reasoning: '',
+        createdAt: new Date().toISOString(),
+        isStreaming: false,
+        status: 'waiting',
+        backgroundTasks: (data.backgroundTasks ?? []).map((task) => ({ ...task })),
+      };
+      messages.value = index === -1
+        ? [...messages.value, row]
+        : [...messages.value.slice(0, index + 1), row, ...messages.value.slice(index + 1)];
+      liveAssistantId = nextId;
+      bufferedText = '';
+      bufferedReasoning = '';
+      toolCalls = [];
+      finishedTurns += 1;
+      waiting = true;
+      parked = true;
+      parkedTurn = turn;
+      isStreaming.value = false;
+      activeRunId.value = undefined;
+    };
+
+    /**
+     * A message the user queued reached the agent mid-turn (`user_message`). Taken in: the answer
+     * so far is done (it takes the stored message's id; nothing was said yet, it goes), the user's
+     * message follows it, and what the agent says next streams into a new row after that: the same
+     * order the thread has after a reload. Declined: nothing here changes (the queue shows it held).
+     */
+    const takeUserMessage = (event: ChatStreamEvent) => {
+      const data = (event.eventData ?? {}) as Partial<ChatUserMessageEventData>;
+      if (!data.taken) return;
+      const stored = data.assistantMessageId;
+      const index = messages.value.findIndex((m) => m.id === liveAssistantId);
+      const silent = !stored && !bufferedText && !bufferedReasoning && toolCalls.length === 0;
+      // Already in the transcript (the stream was picked up from the start), or nothing said yet: the live row goes.
+      const dropLive = (!!stored && shownElsewhere(stored)) || silent;
+      const before = dropLive
+        ? messages.value.filter((m) => m.id !== liveAssistantId)
+        : messages.value.map((m) => (m.id === liveAssistantId
+          ? { ...m, id: stored ?? m.id, content: bufferedText, reasoning: bufferedReasoning || null, isStreaming: false, status: 'done' as const }
+          : m));
+      const userId = data.threadMessageId;
+      // The user's message already on screen (the stream was picked up from the start) is where the
+      // answer to it goes: right after it, not where the replayed live row happened to be.
+      const shownUser = userId ? before.findIndex((m) => m.id === userId) : -1;
+      const at = shownUser !== -1 ? shownUser + 1 : index === -1 ? before.length : dropLive ? index : index + 1;
+      const now = new Date().toISOString();
+      const rows: ChatMessage[] = [];
+      if (!userId || !shownElsewhere(userId)) {
+        rows.push({ id: userId ?? newId(), role: 'user', content: data.text ?? '', createdAt: now });
+      }
+      const nextId = newId();
+      rows.push({ id: nextId, role: 'assistant', content: '', reasoning: '', createdAt: now, isStreaming: true, status: 'streaming' });
+      messages.value = [...before.slice(0, at), ...rows, ...before.slice(at)];
+      liveAssistantId = nextId;
+      bufferedText = '';
+      bufferedReasoning = '';
+      toolCalls = [];
+      finishedTurns += 1;
+    };
 
     const adoptUserMessageId = (id: string | null | undefined) => {
       if (!id || !liveUserId || id === liveUserId) return;
@@ -1221,61 +1916,107 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       signal,
       onDelta: (text) => {
+        if (isReleased() || !isCurrent()) return;
         bufferedText += text;
-        updateMessage(liveAssistantId, { content: bufferedText });
+        updateMessage(liveAssistantId, answering({ content: bufferedText }));
       },
       onReasoningDelta: (text) => {
+        if (isReleased() || !isCurrent()) return;
         bufferedReasoning += text;
-        updateMessage(liveAssistantId, { reasoning: bufferedReasoning });
+        updateMessage(liveAssistantId, answering({ reasoning: bufferedReasoning }));
       },
       onToolCall: (names) => {
-        if (!isCurrent()) return;
+        if (isReleased() || !isCurrent()) return;
         if (startAlreadyDetailed) {
           startAlreadyDetailed = false;
           return;
         }
         toolCalls = [...toolCalls, ...names.map((name) => ({ name }))];
-        updateMessage(liveAssistantId, { toolCalls });
+        updateMessage(liveAssistantId, answering({ toolCalls }));
       },
       onEvent: (event) => {
         startAlreadyDetailed = false;
+        if (event.threadId && (live.released || isCurrent())) live.threadId = event.threadId;
+        if (isReleased(event.eventType === 'run_started' ? event.runId : undefined)) return;
         if (!isCurrent()) return;
         // Where to pick the turn up again if this stream breaks.
         if (typeof event.sequence === 'number' && event.sequence > sequence) sequence = event.sequence;
-        if (event.threadId) streamThreadId = event.threadId;
+        if (event.threadId) {
+          streamThreadId = event.threadId;
+          // A new conversation is that thread from the moment the server names it, not from the
+          // end of its first turn: what is keyed on the conversation (the URL, a message queued
+          // while the turn runs) works during that turn too. Nothing is reloaded; the stream goes on.
+          adoptThread(event.threadId, rows.titleHint);
+        }
         if (event.eventType === 'run_started') {
           // The run outlives this request: keep its id so Stop can cancel it on the server.
           if (event.runId) {
             runId = event.runId;
-            activeRunId.value = event.runId;
+            live.runId = event.runId;
+            if (!parked) activeRunId.value = event.runId;
           }
           adoptUserMessageId(event.userMessageId);
+          return;
+        }
+        if (event.eventType === 'turn_completed') {
+          startNextAnswer(event);
+          return;
+        }
+        if (event.eventType === 'user_message') {
+          takeUserMessage(event);
+          return;
+        }
+        // A request the run waits on is a card at once; its outcome (answered here or elsewhere,
+        // timed out, the run over) takes the card off
+        if (event.eventType === 'permission_request' && runId && event.eventData) {
+          approvals.push('run', runRequestFromEvent(runId, event.eventData as unknown as ChatPermissionRequestEventData));
+          return;
+        }
+        if (event.eventType === 'permission_resolved' && event.eventData) {
+          const requestId = (event.eventData as unknown as ChatPermissionResolvedEventData).requestId;
+          if (requestId) approvals.remove(runRequestKey(requestId));
+          return;
+        }
+        if (event.eventType === 'compacted') {
+          compaction = { ...((event.eventData ?? {}) as ChatCompactedEventData) } as ChatCompaction;
+          updateMessage(liveAssistantId, answering({ compaction }));
           return;
         }
         if (!event.toolCalls?.length) return;
         startAlreadyDetailed = !!event.isToolCall;
         let next = toolCalls;
+        let liveChanged = false;
         for (const detail of event.toolCalls) {
+          // A background task outlives the answer that started it: its progress updates that answer's call
+          if (!next.some((c) => c.id && c.id === detail.id)) {
+            const owner = findToolCallOwner(messages.value, detail, liveAssistantId);
+            if (owner) {
+              updateMessage(owner.id, { toolCalls: upsertToolCalls(owner.toolCalls ?? [], [detail]) });
+              continue;
+            }
+          }
           const byId = detail.id ? next.findIndex((c) => c.id === detail.id) : -1;
           const idx = byId !== -1
             ? byId
             : next.findIndex((c) => c.name === detail.name && !c.id && isPendingCall(c));
           next = idx === -1
             ? [...next, { ...detail }]
-            : next.map((c, i) => (i === idx ? { ...c, ...detail } : c));
+            : next.map((c, i) => (i === idx ? mergeToolCall(c, detail) : c));
+          liveChanged = true;
         }
+        if (!liveChanged) return;
         toolCalls = next;
-        updateMessage(liveAssistantId, { toolCalls });
+        updateMessage(liveAssistantId, answering({ toolCalls }));
       },
       onAgentSwitch: (name) => {
-        if (!isCurrent()) return;
+        if (isReleased() || !isCurrent()) return;
         updateMessage(liveAssistantId, { agentName: name });
       },
       onDone: (event) => {
         // Defence in depth: aborting should stop the stream before this fires,
         // but a late `done` frame writing `activeThreadId` would drag the user
         // out of the conversation they just opened.
-        if (!isCurrent()) return;
+        if (live.released || !isCurrent()) return;
         sawDone = true;
         if (event.isError) noteFailure(event);
         // The backend may have created the thread for this turn.
@@ -1283,13 +2024,16 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
         // Swap local ids for persisted ones so feedback / regenerate address
         // real rows.
         adoptUserMessageId(event.userMessageId);
-        if (event.assistantMessageId) {
+        // After a turn boundary the run's stored answer can be one already on screen (the last
+        // turn said nothing of its own): the live row keeps its local id, and goes below.
+        if (event.assistantMessageId && !shownElsewhere(event.assistantMessageId)) {
           replaceMessageId(liveAssistantId, event.assistantMessageId);
           liveAssistantId = event.assistantMessageId;
         }
         if (event.usage) updateMessage(liveAssistantId, { usage: event.usage });
       },
       onError: (err) => {
+        if (live.released) return;
         if (err instanceof ChatStreamRequestError && err.status === 401) {
           // Not a failure yet: the turn decides after the refresh attempt.
           unauthorized = true;
@@ -1322,15 +2066,19 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
         if (unauthorized) http.reportUnauthorized();
       }
     }
+    live.open = false;
     if (unauthorized && isCurrent()) {
       streamFailed = true;
       failure = { operation: 'turn', message: 'Session expired, please login again', code: null, details: null, status: 401 };
     }
 
-    // Superseded turn (aborted, or the user already started another one): its
+    // Superseded turn (stopped, left, or the user already started another one): its
     // tail must not touch shared state. `isStreaming = false` here would clear
     // the flag of the turn that is currently running.
-    if (!isCurrent()) return 'superseded';
+    if (!isCurrent()) {
+      endReleased(live);
+      return 'superseded';
+    }
 
     const limit = limitStop as { code: string; resetsAt: string | null; window: UsageLimitNotice['window'] } | null;
     const failed = failure as ChatThreadsError | null;
@@ -1382,10 +2130,17 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     // its own outcome: the renderers say whose limit was reached, and when it resets.
     /* The code travels with the row, so a renderer (or `describeError`) can word it. */
     const errorFields = failed
-      ? { error: wordingOf(failed), errorCode: failed.code, errorDetails: failed.details }
-      : { error: null, errorCode: limit ? limit.code : null, errorDetails: null };
+      ? { error: wordingOf(failed), errorCode: failed.code, errorDetails: failed.details, backgroundTasks: null }
+      : { error: null, errorCode: limit ? limit.code : null, errorDetails: null, backgroundTasks: null };
     if (limit?.code === USAGE_LIMIT_REACHED_ERROR_CODE) noteUsageLimit({ window: limit.window, resetsAt: limit.resetsAt });
-    updateMessage(
+    // The run answered before a turn boundary and nothing after it (its background tasks ended,
+    // or the wait for them ran out): no answer is stored for that, so the row goes, as a reload
+    // would show it.
+    const noAnswerAfterBoundary = finishedTurns > 0 && !streamFailed && !limit && !bufferedText
+      && !bufferedReasoning && toolCalls.length === 0 && !compaction;
+    if (noAnswerAfterBoundary) {
+      messages.value = messages.value.filter((m) => m.id !== liveAssistantId);
+    } else updateMessage(
       liveAssistantId,
       limit
         ? {
@@ -1400,11 +2155,14 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
           ? { isStreaming: false, status: 'error', ...errorFields }
           : {
               // The buffer holds the whole reply; a stream that picked the turn up again
-              // only returns what it carried itself.
-              content: bufferedText || result.text,
-              reasoning: bufferedReasoning || result.reasoning || null,
+              // only returns what it carried itself. After a turn boundary the stream's total
+              // also holds the earlier answers, which already have rows of their own.
+              content: bufferedText || (finishedTurns > 0 ? '' : result.text),
+              reasoning: bufferedReasoning || (finishedTurns > 0 ? null : result.reasoning || null),
               isStreaming: false,
-              status: 'done',
+              backgroundTasks: null,
+              // A turn that only compacted the conversation has no answer: say so instead of an empty reply
+              status: compaction && !bufferedText && !(finishedTurns === 0 && result.text) && toolCalls.length === 0 ? 'compacted' : 'done',
             },
     );
     endTurn();
@@ -1423,8 +2181,10 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
 
   /** The turn is over: clear what it held while in flight. */
   function endTurn(): void {
+    parkedTurn = null;
     isStreaming.value = false;
     abortController = null;
+    liveStream = null;
     activeRunId.value = undefined;
   }
 
@@ -1434,15 +2194,23 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
    */
   function adoptThread(threadId: string, titleHint: string): void {
     if (activeThreadId.value) return;
-    activeThreadId.value = threadId;
+    // The row first: whoever watches `activeThreadId` finds the list already naming it.
     if (pendingThreadId) {
       threads.value = threads.value.map((t) =>
         t.id === pendingThreadId
-          ? toThreadItem({ id: threadId, title: previewTitle(titleHint), lastActivityTime: new Date().toISOString() }, untitled)
+          ? toThreadItem({
+              id: threadId,
+              title: previewTitle(titleHint),
+              lastActivityTime: new Date().toISOString(),
+              lastUserMessageTime: t.userMessageAt,
+              creationTime: t.createdAt,
+              origin: t.origin,
+            }, untitled)
           : t,
       );
       pendingThreadId = null;
     }
+    activeThreadId.value = threadId;
     // Refresh in the background so server-side state (an auto-generated
     // title, for one) replaces the local guess.
     void loadThreads();
@@ -1703,6 +2471,7 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     messages.value = messages.value.filter((m) => !gone.has(m.id));
     isStreaming.value = false;
     abortController = null;
+    liveStream = null;
     activeRunId.value = undefined;
     dropPendingRow(false);
     // Only into an empty box: text typed while the request was in flight is newer.
@@ -1732,20 +2501,143 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     return pending;
   }
 
+  // The cards follow the conversation on screen, asked again on an interval while a turn of it runs. Synchronous: a request
+  // the stream announces right after naming a new conversation must not be cleared by a late follow.
+  if (!reader) {
+    watch([activeThreadId, isStreaming], ([threadId, running]) => approvals.follow(threadId && !isPendingId(threadId) ? threadId : null, running), {
+      immediate: true,
+      flush: 'sync',
+    });
+  }
+
+  // A refresh the page could not do when asked runs once it is free, on the conversation it was for.
+  watch([activeThreadId, isStreaming, openingThreadId], ([threadId, running, opening]) => {
+    if (refreshOwed === null) return;
+    if (refreshOwed !== threadId) refreshOwed = null;
+    else if (!running && opening === undefined) void refreshThread();
+  });
+
+  // The queued messages follow the conversation on screen; only a turn with a server run can be queued behind.
+  if (!reader) {
+    watch(
+      [activeThreadId, isStreaming, activeRunId],
+      ([threadId, running, runId]) => messageQueue.follow(threadId && !isPendingId(threadId) ? threadId : null, running, !!runId),
+      { immediate: true, flush: 'sync' },
+    );
+  }
+
+  // Awaiting, running and unread on the rows: the server's summary, plus the turn streaming here (a
+  // built-in agent's turn is not reported by the server) and the approvals it shows (an application's
+  // own cards included). Before the first summary the rows keep what the list read said; a summary that
+  // lists fewer unread ids than it counts only adds to them.
+  function withAttention(items: ThreadItem[]): ThreadItem[] {
+    const known = attention.loaded.value;
+    const unreadComplete = attention.unreadIds.value.size >= attention.unreadCount.value;
+    const onScreen = activeThreadId.value;
+    const seen = onScreen && !pageHidden();
+    const approvalsHere = approvals.items.value.length > 0;
+    let changed = false;
+    const next = items.map((item) => {
+      // A new conversation's optimistic row is the turn streaming on screen
+      const streamingHere = (item.id === onScreen || !!item.pending) && isStreaming.value;
+      const running = known ? attention.runningIds.value.has(item.id) || streamingHere : !!item.running || streamingHere;
+      const awaitingHere = item.id === onScreen && approvalsHere;
+      const awaitingOwner = known
+        ? attention.awaitingOwnerIds.value.has(item.id) || awaitingHere
+        : !!item.awaitingOwner || awaitingHere;
+      const listedUnread = attention.unreadIds.value.has(item.id);
+      const unread = (seen && item.id === onScreen)
+        ? false
+        : known ? listedUnread || (!unreadComplete && !!item.unread) : !!item.unread;
+      if (!!item.running === running && !!item.awaitingOwner === awaitingOwner && !!item.unread === unread) return item;
+      changed = true;
+      const { running: _running, awaitingOwner: _awaitingOwner, unread: _unread, ...rest } = item;
+      return {
+        ...rest,
+        ...(awaitingOwner ? { awaitingOwner: true } : {}),
+        ...(running ? { running: true } : {}),
+        ...(unread ? { unread: true } : {}),
+      };
+    });
+    return changed ? next : items;
+  }
+
+  function pageHidden(): boolean {
+    return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+  }
+
+  // The flags, then the list's order (the sidebar in its chosen sort, the Recents page in the default one).
+  watch(
+    [
+      threads,
+      recentPageThreads,
+      attention.awaitingOwnerIds,
+      attention.runningIds,
+      attention.unreadIds,
+      attention.loaded,
+      activeThreadId,
+      isStreaming,
+      approvals.items,
+      () => recentsPreferences.value.sort,
+    ],
+    () => {
+      const sidebar = sortThreads(withAttention(threads.value), recentsPreferences.value.sort) as ThreadItem[];
+      if (sidebar !== threads.value) threads.value = sidebar;
+      const page = sortThreads(withAttention(recentPageThreads.value)) as ThreadItem[];
+      if (page !== recentPageThreads.value) recentPageThreads.value = page;
+    },
+    { immediate: true, flush: 'sync' },
+  );
+
+  if (attentionEnabled) {
+    // The conversation on screen is seen: a reply the summary still calls unread is marked read
+    // while the page is in view (the page coming back reads the summary again, which lands here).
+    watch(attention.unreadIds, (unread) => {
+      const threadId = activeThreadId.value;
+      if (threadId && !isPendingId(threadId) && unread.has(threadId) && !pageHidden()) void attention.markRead(threadId);
+    });
+    // An approval came or went on screen (answered here, or by someone else): the summary says how the
+    // conversation stands now, sooner than the next tick.
+    watch(
+      () => approvals.items.value.length,
+      (count, was) => {
+        if (count !== was) void attention.refresh();
+      },
+    );
+    // A turn named its run (it is running on the server now) or ended: read the summary again.
+    // A turn that ends on screen with the page in view has been seen.
+    watch(activeRunId, (runId) => {
+      if (runId) void attention.refresh();
+    });
+    watch(isStreaming, (streaming, was) => {
+      if (streaming || !was) return;
+      const threadId = activeThreadId.value;
+      if (threadId && !isPendingId(threadId) && !pageHidden()) void attention.markRead(threadId);
+      void attention.refresh();
+    });
+  }
+
   // Guarded: the hook is usable outside a component (a store, a test), where an
   // unguarded `onScopeDispose` only emits a Vue warning and registers nothing.
   if (getCurrentScope()) {
     onScopeDispose(() => {
       // Leaving the page is not stopping the reply: the run carries on and its reply is
-      // written to the thread. Only the stream is closed here, never the run cancelled.
-      activeRunId.value = undefined;
-      abort(false);
+      // written to the thread. Only the streams are closed here, never a run cancelled.
+      releaseTurn()?.controller.abort();
+      for (const released of releasedStreams) released.controller.abort();
+      releasedStreams.clear();
+      isStreaming.value = false;
       releaseAttachmentUrls();
+      approvals.dispose();
+      messageQueue.dispose();
+      disposed = true;
+      for (const timer of titleFollows.values()) clearTimeout(timer);
+      titleFollows.clear();
     });
   }
 
   // The visitor's first message, typed before signing in (`defineChatApp({ guestWelcome })`).
-  if (options.sendWelcomeMessage !== false) {
+  if (!reader && options.sendWelcomeMessage !== false) {
     const welcome = takeWelcomeMessage();
     if (welcome) sendWelcomeWhenReady(welcome);
   }
@@ -1795,6 +2687,7 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     loadMoreThreads,
     searchThreads,
     selectThread,
+    refreshThread,
     loadOlderMessages,
     newChat,
     deleteThread,
@@ -1802,11 +2695,25 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     send,
     regenerate,
     editMessage,
-    abort: () => abort(),
+    abort: stopTurn,
+    stopTask,
     updateMessage,
     resolveAttachmentUrl,
+    approvals,
+    messageQueue,
+    attention,
+    leave: leaveTurn,
   };
 }
+
+/** What each queue failure says when the server gives no message. */
+const QUEUE_FAILURES: Record<MessageQueueOperation, string> = {
+  'load-queue': 'Could not read the queued messages',
+  queue: 'The message could not be queued',
+  'edit-queued': 'The queued message could not be changed',
+  'remove-queued': 'The queued message could not be removed',
+  'send-queued-now': 'The queued message could not be sent now',
+};
 
 function findLastIndex<T>(items: readonly T[], predicate: (item: T) => boolean): number {
   for (let i = items.length - 1; i >= 0; i -= 1) {

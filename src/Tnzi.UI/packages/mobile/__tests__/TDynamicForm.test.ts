@@ -116,6 +116,33 @@ describe('TDynamicForm', () => {
     expect(wrapper.emitted('submit')).toBeUndefined()
   })
 
+  // A contract rule may name several triggers. Vant's form validates fields on
+  // blur by default, so a rule whose triggers include `blur` must run there,
+  // and one that names only `input` must not.
+  it.each([
+    ['blur and input', ['blur', 'input'], true],
+    ['blur', 'blur', true],
+    ['input only', ['input'], false],
+  ] as const)('runs a rule triggered on %s when the field loses focus: %s', async (_name, trigger, runs) => {
+    const wrapper = mountForm({
+      modelValue: { code: 'x' },
+      fields: [
+        {
+          key: 'code',
+          type: 'text',
+          label: 'Code',
+          rules: [{ trigger: Array.isArray(trigger) ? [...trigger] : trigger, validator: () => 'Bad code' }],
+        },
+      ],
+    })
+
+    await wrapper.find('input').trigger('blur')
+    await flushPromises()
+
+    expect(wrapper.find('.van-field__error-message').exists()).toBe(runs)
+    if (runs) expect(wrapper.find('.van-field__error-message').text()).toBe('Bad code')
+  })
+
   it('renders a date picker instead of a free-text box', async () => {
     const wrapper = mountForm({
       modelValue: {},

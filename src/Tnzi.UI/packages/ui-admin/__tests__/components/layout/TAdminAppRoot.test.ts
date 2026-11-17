@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
-import { defineComponent, h } from 'vue'
-import { darkTheme } from 'naive-ui'
+import { defineComponent, h, nextTick } from 'vue'
+import { NConfigProvider, darkTheme, type GlobalThemeOverrides } from 'naive-ui'
 import {
   THEME_CONTEXT_KEY,
   createThemeContext,
@@ -10,6 +10,8 @@ import {
   type ThemeContext,
 } from '@tnzi/ui'
 import TAdminAppRoot from '../../../src/components/layout/TAdminAppRoot.vue'
+import TThemeSchemaSwitch from '../../../src/components/utility/TThemeSchemaSwitch.vue'
+import { ADMIN_NAIVE_OVERRIDES_KEY, type NaiveOverridesSource } from '../../../src/theme/naive-bridge'
 
 function makeRouter(): Router {
   const Home = defineComponent({
@@ -62,6 +64,94 @@ describe('TAdminAppRoot', () => {
       },
     })
     expect(wrapper.html()).toContain('themed')
+  })
+
+  // An application with a set of naive overrides for each mode configures it
+  // once (createTnziUiAdmin({ naiveOverrides })) and passes nothing to the root.
+  it('hands naive the overrides of the current mode and swaps them when the mode changes', async () => {
+    const ctx: ThemeContext = createThemeContext(mergeThemeSettings({ mode: 'light' }))
+    const source: NaiveOverridesSource = ({ isDark }) => ({ Card: { color: isDark ? '#1c1c1b' : '#fafafa' } })
+    const wrapper = mount(TAdminAppRoot, {
+      props: { routerView: false },
+      slots: { default: 'x' },
+      global: {
+        provide: { [THEME_CONTEXT_KEY as symbol]: ctx, [ADMIN_NAIVE_OVERRIDES_KEY as symbol]: source },
+      },
+    })
+    const provider = () => wrapper.findComponent(NConfigProvider)
+    const card = () => (provider().props('themeOverrides') as GlobalThemeOverrides).Card?.color
+    expect(card()).toBe('#fafafa')
+    expect(provider().props('theme')).toBeNull()
+    ctx.setMode('dark')
+    await nextTick()
+    expect(card()).toBe('#1c1c1b')
+    expect(provider().props('theme')).toBe(darkTheme)
+  })
+
+  // The login page's switch (and `auto` following the OS) go through the same
+  // context as the shell's header button, so the `dark` class, naive's theme
+  // and the per-mode overrides agree in all three cases.
+  it('the theme switch inside the root moves the class, naive theme and overrides together', async () => {
+    document.documentElement.classList.remove('dark')
+    const ctx: ThemeContext = createThemeContext(mergeThemeSettings({ mode: 'light' }))
+    const source: NaiveOverridesSource = ({ isDark }) => ({ Input: { color: isDark ? '#222' : '#fff' } })
+    const wrapper = mount(TAdminAppRoot, {
+      props: { routerView: false },
+      slots: { default: () => h(TThemeSchemaSwitch) },
+      global: {
+        provide: { [THEME_CONTEXT_KEY as symbol]: ctx, [ADMIN_NAIVE_OVERRIDES_KEY as symbol]: source },
+      },
+    })
+    const provider = () => wrapper.findComponent(NConfigProvider)
+    const input = () => (provider().props('themeOverrides') as GlobalThemeOverrides).Input?.color
+
+    await wrapper.find('.t-theme-schema-switch').trigger('click')
+    expect(ctx.settings.value.mode).toBe('dark')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(provider().props('theme')).toBe(darkTheme)
+    expect(input()).toBe('#222')
+
+    // The shell's header sets the mode through the context: the switch shows it.
+    ctx.setMode('light')
+    await nextTick()
+    expect(wrapper.find('.t-theme-schema-switch').attributes('data-schema')).toBe('light')
+    expect(document.documentElement.classList.contains('dark')).toBe(false)
+    expect(provider().props('theme')).toBeNull()
+    ctx.setMode('dark')
+    await nextTick()
+    expect(wrapper.find('.t-theme-schema-switch').attributes('data-schema')).toBe('dark')
+
+    await wrapper.find('.t-theme-schema-switch').trigger('click')
+    await nextTick()
+    expect(ctx.settings.value.mode).toBe('auto')
+    const osDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
+    expect(document.documentElement.classList.contains('dark')).toBe(osDark)
+    expect(provider().props('theme')).toBe(osDark ? darkTheme : null)
+    wrapper.unmount()
+    document.documentElement.classList.remove('dark')
+  })
+
+  it('an auto context on a dark OS gives naive the dark theme and the document the class', async () => {
+    const originalMM = window.matchMedia
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: () => ({ matches: true, addEventListener: () => {}, removeEventListener: () => {} }),
+    })
+    try {
+      const ctx: ThemeContext = createThemeContext(mergeThemeSettings({ mode: 'auto' }))
+      const wrapper = mount(TAdminAppRoot, {
+        props: { routerView: false },
+        slots: { default: () => h(TThemeSchemaSwitch) },
+        global: { provide: { [THEME_CONTEXT_KEY as symbol]: ctx } },
+      })
+      await nextTick()
+      expect(document.documentElement.classList.contains('dark')).toBe(true)
+      expect(wrapper.findComponent(NConfigProvider).props('theme')).toBe(darkTheme)
+      wrapper.unmount()
+    } finally {
+      Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMM })
+      document.documentElement.classList.remove('dark')
+    }
   })
 
   it('explicit `theme` prop overrides injected context', () => {

@@ -10,7 +10,7 @@
 
 ### 1. EF Core Include 查询
 - `UserService.GetByIdAsync` - 包含关联数据的用户查询
-- `UserService.FindByPhoneNumberAsync` - 通过手机号查询用户
+- 通过手机号查询用户（`UserService.ResolveByPhoneNumberAsync` 的解析规则另见 `Tnzi.Identity.Tests` 的 `AuthServiceTests`）
 
 ### 2. 组织树查询
 - `OrganizationService.GetTreeAsync` - 组织树形结构查询

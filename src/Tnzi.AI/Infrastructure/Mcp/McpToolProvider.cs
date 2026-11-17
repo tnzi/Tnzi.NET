@@ -3,7 +3,7 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
 /// 从有效 MCP 服务器（IMcpServerCatalog：部署配置 + DB 注册表合并）拉取工具，
-/// 按 AllowedTools 过滤并按每服务器 ApprovalMode 做审批包装后返回。
+/// 按 AllowedTools / DeniedTools 过滤并按每服务器 ApprovalMode 做审批包装后返回。
 /// 单个服务器不可用时记录警告并跳过，不阻塞整体。
 /// </summary>
 /// <remarks>
@@ -114,11 +114,14 @@ public class McpToolProvider : IMcpToolProvider
             {
                 var tools = await GetToolsForServerAsync(server, toolCacheSeconds, ct).ConfigureAwait(false);
 
-                // Filter by AllowedTools (empty = allow all)
+                // AllowedTools 为空 = 全部允许；DeniedTools 命中的一律去掉（两份都点名时禁用为准）。
+                // 过滤在任何包装之前：被禁用的工具既不交给模型，也不会进入审批
                 var allowedSet = BuildNameSet(server.AllowedTools, server.Name, server.PrefixToolNameWithServer);
-                var filtered = allowedSet.Count == 0
+                var deniedSet = BuildNameSet(server.DeniedTools, server.Name, server.PrefixToolNameWithServer);
+                var filtered = allowedSet.Count == 0 && deniedSet.Count == 0
                     ? tools
-                    : tools.Where(t => IsAllowedTool(t, allowedSet)).ToList();
+                    : tools.Where(t => (allowedSet.Count == 0 || McpToolNames.IsNamedIn(t, allowedSet))
+                                       && !McpToolNames.IsNamedIn(t, deniedSet)).ToList();
 
                 // Wrap with auth recovery for servers with OAuth configured (retry once on 401/403)
                 IList<AITool> toAdd = filtered is IList<AITool> list ? list : filtered.ToList();
@@ -157,6 +160,9 @@ public class McpToolProvider : IMcpToolProvider
                     var auditLogger = _loggerFactory.CreateLogger<McpAuditToolWrapper>();
                     toAdd = McpAuditToolWrapper.Wrap(toAdd, server.Name, auditLogger);
                 }
+
+                // 第二道禁用检查挂在最外层：调用时先于审批与审计判定，绕过上面过滤的工具对象也到不了服务器
+                toAdd = McpDeniedToolGuard.Wrap(toAdd, server.Name, deniedSet, _loggerFactory.CreateLogger<McpDeniedToolGuard>());
 
                 var serverTools = new List<string>();
                 foreach (var tool in toAdd)
@@ -433,23 +439,6 @@ public class McpToolProvider : IMcpToolProvider
         bool prefixName)
     {
         return BuildNameSet(names, serverName, prefixName).ToList();
-    }
-
-    private static bool IsAllowedTool(AITool tool, HashSet<string> allowedSet)
-    {
-        if (allowedSet.Count == 0)
-        {
-            return true;
-        }
-
-        var name = tool.Name ?? string.Empty;
-        if (!string.IsNullOrWhiteSpace(name) && allowedSet.Contains(name))
-        {
-            return true;
-        }
-
-        var original = McpToolNames.OriginalName(tool);
-        return !string.IsNullOrWhiteSpace(original) && allowedSet.Contains(original);
     }
 
     /// <summary>缓存项：工具清单 + 列出它们的那条连接（工具绑在它上面）+ 过期时间</summary>

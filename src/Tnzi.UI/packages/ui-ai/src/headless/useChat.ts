@@ -42,7 +42,7 @@ import {
   type DeepReadonly,
   type ComputedRef,
 } from 'vue';
-import type { ToolResultBlockDto, UsageLimitWindow } from '@tnzi/core/services/ai';
+import type { ToolResultBlockDto, ToolTaskDetailDto, UsageLimitWindow } from '@tnzi/core/services/ai';
 import { scheduleFrame } from '../utils/scheduleFrame';
 
 // ---------------------------------------------------------------------------
@@ -88,6 +88,16 @@ export interface ToolCallInfo {
   result?: ToolResultBlockDto[] | null;
   /** How long the reply text was when the call happened (external CLI agents). */
   textOffset?: number | null;
+  /**
+   * The `id` of the sub-agent dispatch this call was made in: a call the sub-agent made, shown in the sub-agent's
+   * own view (`TSubAgentPanel`) rather than in the reply. Absent for the main agent's calls.
+   */
+  parentId?: string | null;
+  /**
+   * Set when this call started a CLI task (external CLI agents): a sub-agent or a command in the background, with its
+   * kind, description, state and usage, and for a sub-agent its steps and report.
+   */
+  task?: ToolTaskDetailDto | null;
 }
 
 export interface MessageAttachment {
@@ -101,6 +111,24 @@ export interface MessageAttachment {
   attachmentId?: string | null;
   /** Size in bytes, when known. */
   size?: number | null;
+}
+
+/** A context compaction an external CLI agent reported (`compacted` stream event). */
+export interface ChatCompaction {
+  /** `manual` (`/compact`) or `auto` (the context was nearly full). */
+  trigger?: string;
+  preTokens?: number;
+  postTokens?: number;
+}
+
+/** A background task an external CLI agent is waiting on before it answers again (`turn_completed` stream event). */
+export interface ChatBackgroundTask {
+  /** The CLI's own task id. */
+  id: string;
+  /** What the task does, when the CLI said. */
+  description?: string | null;
+  /** The CLI's kind of task (`local_bash`, `local_agent`, ...), passed on as it came. */
+  kind?: string | null;
 }
 
 export interface ChatMessage {
@@ -129,8 +157,21 @@ export interface ChatMessage {
    *  'usage_limit': a usage limit stopped the reply. `errorCode` says whose:
    *  `AI_USAGE_LIMIT_REACHED` is a limit this deployment set for the user,
    *  `AI_CLI_USAGE_LIMIT` the external CLI's own account (TThreadMessage words
-   *  the two differently, with `usageLimitResetsAt` when known). */
-  status?: 'streaming' | 'done' | 'stopped' | 'error' | 'usage_limit';
+   *  the two differently, with `usageLimitResetsAt` when known).
+   *  'compacted': the turn only compacted the conversation's context (`/compact`
+   *  on an external CLI agent) and has no answer of its own; `compaction` has the
+   *  token counts when the stream carried them.
+   *  'waiting': an external CLI agent finished an answer and its background
+   *  tasks (`backgroundTasks`, e.g. a dev server) are still running; the CLI
+   *  answers again by itself when they finish. Not a turn in progress: the row
+   *  is not `isStreaming`, has no content and the conversation is free. It
+   *  turns 'streaming' when that next answer begins, and goes when a new turn
+   *  is sent (the server hands the tasks to that turn). */
+  status?: 'streaming' | 'waiting' | 'done' | 'stopped' | 'error' | 'usage_limit' | 'compacted';
+  /** With status 'waiting': the background tasks the run waits on, as the server reported them (may be empty). */
+  backgroundTasks?: ChatBackgroundTask[] | null;
+  /** The context compaction this turn did (`compacted` stream event), when there was one. */
+  compaction?: ChatCompaction | null;
   /** Error message shown when status === 'error'. */
   error?: string | null;
   /**

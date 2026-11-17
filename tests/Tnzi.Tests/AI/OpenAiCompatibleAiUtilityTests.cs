@@ -246,6 +246,33 @@ public class OpenAiCompatibleAiUtilityTests
         Assert.Equal(0.7, body.RootElement.GetProperty("temperature").GetDouble(), 3);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_ByDefault_SendsNoTemperature()
+    {
+        var handler = new RecordingHandler(Completion("ok"));
+        var sut = CreateSut(handler, Registry(), new AiUtilityOptions());
+
+        await sut.ExecuteAsync("system", "user");
+
+        using var body = JsonDocument.Parse(handler.Requests[0].Body);
+        Assert.False(body.RootElement.TryGetProperty("temperature", out _),
+            "an unset utility temperature must not reach the wire (newer Claude models answer 400 to it)");
+    }
+
+    [Theory]
+    [InlineData("claude-haiku-5-5")]
+    [InlineData("anthropic/claude-sonnet-5-5")]
+    public async Task ExecuteAsync_ConfiguredTemperature_IsNotSentToAModelThatRejectsIt(string model)
+    {
+        var handler = new RecordingHandler(Completion("ok"));
+        var sut = CreateSut(handler, Registry(p => p.DefaultModel = model), new AiUtilityOptions { Temperature = 0.3 });
+
+        await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Temperature = 0.9 });
+
+        using var body = JsonDocument.Parse(handler.Requests[0].Body);
+        Assert.False(body.RootElement.TryGetProperty("temperature", out _));
+    }
+
     // ------------------------------------------------------------------
     // 模型与覆盖优先级
     // ------------------------------------------------------------------

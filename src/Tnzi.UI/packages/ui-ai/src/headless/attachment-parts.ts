@@ -12,11 +12,18 @@
  *   - **PDFs** inline, as base64 (`DocumentContentPartDto`): an agent bound to an
  *     external CLI runtime receives them as document blocks, the built-in engine
  *     hands them to the provider as inline data;
- *   - **anything else** only by reference - `FileContentPartDto.fileId` is a
+ *   - **anything else** inline too, as base64 (`DocumentContentPartDto` with
+ *     the file's own type), when the consumer says so (`inlineFiles`): an
+ *     agent bound to an external CLI runtime takes such a file on turns its
+ *     backend accepts files for (`ICliFileAttachmentPolicy`), stores it with
+ *     the message and has the agent open it with its tools; a turn that does
+ *     not take files answers 415;
+ *   - otherwise only by reference - `FileContentPartDto.fileId` is a
  *     Storage record id, so a non-image file has to be uploaded first. That
  *     upload is the consumer's call (`uploadFile`): which storage, which
- *     folder, public or not. Without it a non-image file is REFUSED, loudly,
- *     rather than sent as a name the model never sees.
+ *     folder, public or not. Without it (and without `inlineFiles`) a
+ *     non-image file is REFUSED, loudly, rather than sent as a name the model
+ *     never sees.
  *
  * The framework's default backend resolver does NOT load file contents: a
  * turn carrying a `file` part fails with 501 (`AI_UNSUPPORTED_MEDIA_TYPE`)
@@ -50,8 +57,22 @@ export interface FilesToContentPartsOptions {
    * a `file` part with 501.
    */
   uploadFile?: (file: File) => Promise<UploadedAttachment>;
-  /** Per-file ceiling in bytes. Default 10 MB. */
+  /**
+   * Send a file that is not an image or a PDF inline, as a `document` part
+   * carrying its bytes, its name and its type (`application/octet-stream`
+   * when the browser gave none). For an agent that runs as an external CLI
+   * on a backend that accepts files for the turn. Takes precedence over
+   * `uploadFile`. Default false.
+   */
+  inlineFiles?: boolean;
+  /** Per-file ceiling in bytes for images and PDFs. Default 10 MB. */
   maxBytes?: number;
+  /**
+   * Per-file ceiling in bytes for files sent with `inlineFiles` (they never
+   * reach the model, so they may be larger; match the backend's
+   * `AI:Chat:Attachments:MaxFileBytes`). Default `maxBytes`.
+   */
+  maxFileBytes?: number;
 }
 
 export interface ContentPartsResult {
@@ -103,6 +124,7 @@ const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 
 const isImage = (file: File): boolean => file.type.startsWith('image/');
 const isPdf = (file: File): boolean => file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+const OCTET_STREAM = 'application/octet-stream';
 
 /** The message a files-only turn is sent and persisted with; user-facing. */
 export function describeAttachments(files: readonly File[]): string {
@@ -160,17 +182,19 @@ export async function filesToContentParts(
 ): Promise<ContentPartsResult> {
   if (files.length === 0) return { parts: null, message: text.trim(), attachments: [] };
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+  const inlineFile = (file: File): boolean => options.inlineFiles === true && !isImage(file) && !isPdf(file);
 
   // Validate everything before reading or uploading anything: a refusal must
   // leave no half-uploaded state behind.
   for (const file of files) {
-    if (file.size > maxBytes) {
-      throw new AttachmentRefusedError(`"${file.name}" is larger than ${describeSize(maxBytes)} and cannot be sent.`, {
+    const limit = inlineFile(file) ? options.maxFileBytes ?? maxBytes : maxBytes;
+    if (file.size > limit) {
+      throw new AttachmentRefusedError(`"${file.name}" is larger than ${describeSize(limit)} and cannot be sent.`, {
         reason: 'too-large',
         fileName: file.name,
       });
     }
-    if (!isImage(file) && !isPdf(file) && !options.uploadFile) {
+    if (!isImage(file) && !isPdf(file) && !options.inlineFiles && !options.uploadFile) {
       throw new AttachmentRefusedError(`"${file.name}" cannot be sent: only images and PDFs can be attached here.`, {
         reason: 'unsupported-type',
         fileName: file.name,
@@ -196,6 +220,13 @@ export async function filesToContentParts(
     if (isPdf(file)) {
       const base64Data = await toBase64(file);
       const mediaType = 'application/pdf';
+      parts.push({ type: 'document', base64Data, mediaType, fileName: file.name });
+      attachments.push({ type: 'file', fileName: file.name, mediaType, base64Data, size: file.size });
+      continue;
+    }
+    if (inlineFile(file)) {
+      const base64Data = await toBase64(file);
+      const mediaType = file.type || OCTET_STREAM;
       parts.push({ type: 'document', base64Data, mediaType, fileName: file.name });
       attachments.push({ type: 'file', fileName: file.name, mediaType, base64Data, size: file.size });
       continue;

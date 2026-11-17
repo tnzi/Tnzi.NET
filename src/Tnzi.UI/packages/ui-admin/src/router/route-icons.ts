@@ -41,6 +41,8 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   'identity.organizations': 'mdi:office-building-outline',
   'identity.sessions': 'mdi:account-clock-outline',
   'identity.loginSecurity': 'mdi:shield-account-outline',
+  'identity.oidcClients': 'mdi:shield-key-outline',
+  'identity.oidcGrants': 'mdi:account-key-outline',
 
   // ── Authorization sub-routes ────────────────────────────────────
   'authorization.functionModules': 'mdi:view-grid-outline',

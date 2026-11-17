@@ -409,7 +409,7 @@ public class AgentThreadServiceTests
             .Returns(Task.CompletedTask);
 
         var service = CreateService();
-        var (threadId, isNew) = await service.GetOrCreateThreadAsync(null, null);
+        var (threadId, isNew) = await service.GetOrCreateThreadAsync(null, null, null);
 
         isNew.ShouldBeTrue();
         threadId.ShouldNotBe(Guid.Empty);
@@ -440,7 +440,7 @@ public class AgentThreadServiceTests
         var service = new AgentThreadService(_threadRepo.Object, _messageRepo.Object, _agentRepo.Object, services.BuildServiceProvider());
         try
         {
-            await service.GetOrCreateThreadAsync(null, null);
+            await service.GetOrCreateThreadAsync(null, null, null);
         }
         finally
         {
@@ -459,7 +459,7 @@ public class AgentThreadServiceTests
         _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
 
         var service = CreateService();
-        var (resultId, isNew) = await service.GetOrCreateThreadAsync(threadId, null);
+        var (resultId, isNew) = await service.GetOrCreateThreadAsync(threadId, null, null);
 
         isNew.ShouldBeFalse();
         resultId.ShouldBe(threadId);
@@ -476,7 +476,7 @@ public class AgentThreadServiceTests
         SetupMessageQueryable([MakeMessage(threadId, content: "earlier turn")]);
 
         var service = CreateService();
-        await service.GetOrCreateThreadAsync(threadId, null);
+        await service.GetOrCreateThreadAsync(threadId, null, null);
 
         _threadRepo.Verify(r => r.UpdateAsync(It.IsAny<AgentThreadEntity>(), It.IsAny<CancellationToken>()), Times.Never);
         thread.SerializedData.ShouldBeNull();
@@ -489,7 +489,7 @@ public class AgentThreadServiceTests
         _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync((AgentThreadEntity?)null);
 
         var service = CreateService();
-        await Should.ThrowAsync<BusinessException>(() => service.GetOrCreateThreadAsync(threadId, null));
+        await Should.ThrowAsync<BusinessException>(() => service.GetOrCreateThreadAsync(threadId, null, null));
     }
 
     [Fact]
@@ -504,7 +504,7 @@ public class AgentThreadServiceTests
         _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
 
         var service = CreateService();
-        await Should.ThrowAsync<BusinessException>(() => service.GetOrCreateThreadAsync(threadId, agentIdB));
+        await Should.ThrowAsync<BusinessException>(() => service.GetOrCreateThreadAsync(threadId, agentIdB, null));
     }
 
     [Fact]
@@ -517,7 +517,7 @@ public class AgentThreadServiceTests
         _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
 
         var service = CreateService();
-        await Should.ThrowAsync<BusinessException>(() => service.GetOrCreateThreadAsync(threadId, null));
+        await Should.ThrowAsync<BusinessException>(() => service.GetOrCreateThreadAsync(threadId, null, null));
     }
 
     [Fact]
@@ -527,7 +527,7 @@ public class AgentThreadServiceTests
         _agentRepo.Setup(r => r.GetAsync(agentId, It.IsAny<CancellationToken>())).ReturnsAsync((Agent?)null);
 
         var service = CreateService();
-        await Should.ThrowAsync<BusinessException>(() => service.GetOrCreateThreadAsync(null, agentId));
+        await Should.ThrowAsync<BusinessException>(() => service.GetOrCreateThreadAsync(null, agentId, null));
     }
 
     [Fact]
@@ -634,7 +634,7 @@ public class AgentThreadServiceTests
 
         await service.SetMetadataValueAsync(threadId, "activatedSkills", """["ro","x"]""");
 
-        _threadRepo.Verify(r => r.UpdateAsync(thread, It.IsAny<CancellationToken>()), Times.Once);
+        _threadRepo.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
         using var doc = JsonDocument.Parse(thread.Metadata!);
         doc.RootElement.GetProperty("source").GetString().ShouldBe("chat", "unrelated keys must survive");
         doc.RootElement.GetProperty("activatedSkills").EnumerateArray().Select(e => e.GetString()).ShouldBe(["ro", "x"]);
@@ -669,7 +669,7 @@ public class AgentThreadServiceTests
         (await service.GetMetadataValueAsync(threadId, "activatedSkills")).ShouldBeNull();
         await service.SetMetadataValueAsync(threadId, "activatedSkills", """["ro"]""");
 
-        _threadRepo.Verify(r => r.UpdateAsync(It.IsAny<AgentThreadEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+        _threadRepo.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     #endregion

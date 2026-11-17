@@ -8,18 +8,13 @@
       <slot name="empty">
         <!-- First-load empty on a creatable list → small Create CTA;
              search/filter misses keep the plain empty visual. -->
-        <TEmpty :text="emptyText">
-          <NButton
-            v-if="showCreateCta"
-            class="t-crud-empty-cta"
-            size="small"
-            tertiary
-            type="primary"
-            @click="onEmptyCreate"
-          >
-            {{ createCtaLabel }}
-          </NButton>
-        </TEmpty>
+        <TListEmpty
+          :text="emptyLine"
+          :hint="emptyHintLine"
+          :show-create="showCreateCta"
+          :create-label="createCtaLabel"
+          @create="onEmptyCreate"
+        />
       </slot>
     </div>
 
@@ -55,11 +50,10 @@
  * its checkbox inline at the head of the row, not floating over a tile.
  */
 import { computed } from 'vue'
-import { NButton } from 'naive-ui'
-import { TEmpty } from '@tnzi/ui'
 import type { UseCrudPageReturn } from '../../../headless/useCrudPage'
 import type { RowAction } from '../../../headless/row-actions'
 import { useEmptyCreateCta } from '../../../headless/useEmptyCreateCta'
+import TListEmpty from './TListEmpty.vue'
 
 export interface TItemRendererProps<T, TId extends string | number = string | number> {
   state: UseCrudPageReturn<T, TId>
@@ -74,6 +68,10 @@ export interface TItemRendererProps<T, TId extends string | number = string | nu
    * the table shell does instead of hand-rolling a second list.
    */
   rowActions?: RowAction<T>[]
+  /** The page's own empty line (already translated), on a first-load empty list. */
+  emptyText?: string
+  /** A muted sentence under it: what the page is for (already translated). */
+  emptyHint?: string
   translate?: (key: string) => string
 }
 
@@ -81,6 +79,8 @@ const props = withDefaults(defineProps<TItemRendererProps<T, TId>>(), {
   itemKey: undefined,
   showSelection: false,
   rowActions: undefined,
+  emptyText: undefined,
+  emptyHint: undefined,
   translate: undefined,
 })
 
@@ -96,17 +96,10 @@ defineSlots<{
   empty?: () => unknown
 }>()
 
-function t(key: string): string {
-  return props.translate ? props.translate(key) : key
-}
-
-/** Translated empty text; without a translator let TEmpty fall back to
- *  'No data' instead of leaking the raw `admin.crud.empty` key. */
-const emptyText = computed(() => (props.translate ? t('admin.crud.empty') : undefined))
-
-const { showCreateCta, createCtaLabel, onEmptyCreate } = useEmptyCreateCta<T, TId>(
+const { showCreateCta, createCtaLabel, onEmptyCreate, emptyText: emptyLine, emptyHint: emptyHintLine } = useEmptyCreateCta<T, TId>(
   () => props.state,
   () => props.translate,
+  () => ({ text: props.emptyText, hint: props.emptyHint }),
 )
 
 const items = computed<T[]>(() => props.state.items.value)

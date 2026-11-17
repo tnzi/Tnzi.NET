@@ -77,6 +77,8 @@ public class AICliModule : TnziApplicationModule
         // 两个可选子模块因此互不引用，各自单独加载都成立。
         services.AddScoped<CliRunTokenService>();
         services.AddScoped<IRunScopedCredentialValidator>(sp => sp.GetRequiredService<CliRunTokenService>());
+        // 进程此刻属于哪条运行（按起它的运行查）：按运行签进进程环境的消费方（模型网关）跟随进程交接
+        services.AddScoped<ICliProcessOwnership, CliProcessOwnership>();
         services.AddSingleton<ICliWorkspacePreparer, FileSystemWorkspacePreparer>();
 
         // 信号中枢与取消登记处必须是 Singleton：订阅者（HTTP 请求作用域）与执行者
@@ -84,6 +86,7 @@ public class AICliModule : TnziApplicationModule
         services.AddSingleton<CliRunSignalHub>();
         services.AddSingleton<CliRunCancellationRegistry>();
         services.AddSingleton<CliRunQueueSignal>();
+        services.AddSingleton<CliRunHandoffs>();
 
         // 远程执行目标上的 CLI 登记（使用方在工作区代理连上 / 断开时调用）。
         // 落点解析器（ICliRunPlacementResolver）与唤起（ICliTargetActivator）由使用方注册，框架不给缺省：没有时一切按绑定、不唤起。
@@ -96,6 +99,9 @@ public class AICliModule : TnziApplicationModule
         services.AddScoped<ICliRuntimeService, CliRuntimeService>();
 
         services.AddScoped<CliRunExecutor>();
+
+        // 线程列表把运行中等回答的权限 / 问题 / 计划请求所在的线程排在最前（与应用自己注册的提供者取并集）
+        services.AddScoped<IThreadAwaitingOwnerProvider, CliRunAwaitingOwnerProvider>();
 
         // 线程删除时删掉它的外部运行内容（运行记录、事件流、本机工作区），并让还没结束的运行停下来
         services.AddEventHandler<ThreadDeletedEvent, CliThreadCleanupHandler>();

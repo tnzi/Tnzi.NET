@@ -8,7 +8,7 @@
  * Unifying them flattens that distinction.
  */
 import { Icon } from '@iconify/vue';
-import type { LoginThirdPartyProvider } from '@tnzi/ui';
+import type { LoginThirdPartyProvider } from '@tnzi/ui/headless';
 
 defineProps<{
   provider: LoginThirdPartyProvider;

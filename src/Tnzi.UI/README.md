@@ -7,16 +7,16 @@ Frontend component monorepo for Tnzi.NET framework.
 | Package | Description | Status |
 |---------|-------------|--------|
 | @tnzi/core | Framework-agnostic business logic (services, state, headless controllers) | Stable |
-| @tnzi/ui | Base UI components (Naive UI + UnoCSS + headless logic + Pinia stores) | Stable |
-| @tnzi/ui-admin | Admin extension (shell, CRUD engine, 90+ built-in admin pages) | Stable |
-| @tnzi/ui-ai | AI components (chat, workflow, agent, streaming) | Stable |
+| @tnzi/ui | Common layer: theme context and tokens, login stack, overlay primitives, library-neutral components, optional Pinia stores. Depends on no component library | Stable |
+| @tnzi/ui-admin | Admin framework on Naive UI (shell, CRUD engine, built-in admin pages, the naive-rendered general components) | Stable |
+| @tnzi/ui-ai | AI product framework with its own controls (chat, workflow, agent, streaming); no Naive UI | Stable |
 | @tnzi/mobile | Mobile components (Vant 4, standalone) | Stable |
 
 ## Architecture
 
 ```
 @tnzi/core          (foundation)
-    ├── @tnzi/ui           (base UI + stores)
+    ├── @tnzi/ui           (common layer, no component library)
     │     ├── @tnzi/ui-admin   (admin extension)
     │     └── @tnzi/ui-ai         (AI extension)
     └── @tnzi/mobile       (standalone mobile)
@@ -24,19 +24,14 @@ Frontend component monorepo for Tnzi.NET framework.
 
 ## Quick Start
 
-### Web App
-```bash
-pnpm add @tnzi/core @tnzi/ui
-```
-
 ### Admin Dashboard
 ```bash
-pnpm add @tnzi/core @tnzi/ui @tnzi/ui-admin
+pnpm add @tnzi/core @tnzi/ui @tnzi/ui-admin naive-ui pinia vue-router
 ```
 
-### AI Features
+### AI Product
 ```bash
-pnpm add @tnzi/core @tnzi/ui @tnzi/ui-ai
+pnpm add @tnzi/core @tnzi/ui @tnzi/ui-ai   # no naive-ui
 ```
 
 ### Mobile App
@@ -95,7 +90,7 @@ reconciles it with the paths declared in each `api.ts`.
 Per-package reference lives on the docs site:
 
 - [@tnzi/core](https://tnzi.cc/docs/modules/ui-core) — HTTP, state, adapters, service contracts
-- [@tnzi/ui](https://tnzi.cc/docs/modules/ui) — base components, theming, headless controllers
+- [@tnzi/ui](https://tnzi.cc/docs/modules/ui) — common layer: theming, login stack, library-neutral components
 - [@tnzi/ui-admin](https://tnzi.cc/docs/modules/ui-admin) — shell, CRUD engine, built-in admin pages
 - [@tnzi/ui-ai](https://tnzi.cc/docs/modules/ui-ai) — chat, workflow, agent, streaming
 - [@tnzi/mobile](https://tnzi.cc/docs/modules/ui-mobile) — Vant 4 components

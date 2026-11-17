@@ -405,7 +405,7 @@ public class AgentRuntimeWorkflowDispatchTests
             new AgentExecutionContextAccessor(),
             serviceProvider,
             Mock.Of<IOptionsMonitor<AIOptions>>(),
-            new EventPublisher(eventBus.Object, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>()),
+            new EventPublisher(eventBus.Object, Mock.Of<ILogger<EventPublisher>>()),
             Mock.Of<ILogger<AgentRuntime>>());
 
         var result = await runtime.RunAsync(new AgentRunRequest
@@ -521,7 +521,7 @@ public class AgentRuntimeWorkflowDispatchTests
             accessor ?? new AgentExecutionContextAccessor(),
             sp,
             Mock.Of<IOptionsMonitor<AIOptions>>(),
-            new EventPublisher(eventBus, scopeFactory ?? Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>()),
+            new EventPublisher(eventBus, Mock.Of<ILogger<EventPublisher>>()),
             Mock.Of<ILogger<AgentRuntime>>());
     }
 

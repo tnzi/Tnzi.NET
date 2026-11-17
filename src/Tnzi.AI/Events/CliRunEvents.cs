@@ -77,3 +77,40 @@ public class CliRunFinishedEvent : EventBase
     /// </summary>
     public DateTime? UsageLimitResetsAt { get; init; }
 }
+
+/// <summary>
+/// 同一线程的下一条运行接过了一条等后台任务的运行的进程（<c>Tnzi.AI.Cli</c>，文档 <c>ai-cli.md</c> §6.18「等待期间的下一条消息」）：
+/// 从这一刻起，那个进程的模型调用、回写调用与用量都属于 <see cref="ToRunId"/>。
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>在新提示写进进程的 stdin 之前同步发布</b>（交出它的 <see cref="FromRunId"/> 已经落了终态）：消费方按运行签进进程环境的东西（模型网关令牌之类）
+/// 绑在起进程的那条运行（<see cref="LaunchedByRunId"/>）上、改不了，处理器在这里把授权与记账挪给 <see cref="ToRunId"/>，接下来的请求就不会被拒。
+/// 处理器的异常只记 Warning，这一轮照常进行：权威的答案是持久化的那条链接（<c>CliRun.ProcessLaunchedByRunId</c>，
+/// 经 <c>ICliProcessOwnership.GetCurrentOwnerAsync(LaunchedByRunId)</c> 随时可查，别的副本也看得见），事件只是让处理器不必轮询。
+/// </para>
+/// <para>
+/// 只走本地总线，在执行这条运行的副本上派发。同步处理器跑完之后提示才写进去，所以挪授权要放在同步处理器里；
+/// 标了 <see cref="BackgroundEventHandlerAttribute"/> 的处理器可能晚于进程的第一次模型调用，只适合通知这类旁路工作。
+/// </para>
+/// </remarks>
+public class CliRunProcessHandedOverEvent : EventBase
+{
+    /// <summary>交出进程的运行（已经落了终态）。</summary>
+    public Guid FromRunId { get; init; }
+
+    /// <summary>接过进程的运行（Running）：此刻拥有进程。</summary>
+    public Guid ToRunId { get; init; }
+
+    /// <summary>起这个进程的运行：进程的启动环境绑在它上面。一路交接下去也是最初起它的那条（第一次交接时等于 <see cref="FromRunId"/>）。</summary>
+    public Guid LaunchedByRunId { get; init; }
+
+    /// <summary>接过进程的运行的 Agent。</summary>
+    public Guid AgentId { get; init; }
+
+    /// <summary>线程（两条运行同一条）。</summary>
+    public Guid? ThreadId { get; init; }
+
+    /// <summary>接过进程的运行归属的用户（它的 <c>CreatorId</c>）。</summary>
+    public Guid? UserId { get; init; }
+}

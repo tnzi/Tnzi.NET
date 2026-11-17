@@ -36,6 +36,8 @@
         :drag-filter="dragFilter"
         :drag-disabled="dragDisabled"
         :drag-while-sorted="dragWhileSorted"
+        :empty-text="emptyText"
+        :empty-hint="emptyHint"
         :translate="translate"
         @reorder="emit('reorder', $event)"
       >
@@ -73,7 +75,7 @@ import type { CardReorderPayload } from './renderers/card-reorder'
 import type { UseCrudPageReturn } from '../../headless/useCrudPage'
 import type { RowAction } from '../../headless/row-actions'
 import type { FormModalMode } from '../../headless/useFormModal'
-import type { FormSchemaItem } from '@tnzi/ui'
+import type { FormSchemaItem } from '../forms/TSchemaForm'
 
 export interface TCardPageProps<T, TId extends string | number = string | number> {
   state: UseCrudPageReturn<T, TId>
@@ -141,6 +143,15 @@ export interface TCardPageProps<T, TId extends string | number = string | number
   detailTitle?: (data: T) => string
   titleHelp?: string
   titleHelpTitle?: string
+  /**
+   * The list's own empty line and a muted hint under it (both already
+   * translated, like `searchPlaceholder`): "No applications yet" / "Apps you
+   * register here can sign people in with their accounts." Shown on a
+   * first-load empty list only; a search that finds nothing keeps the generic
+   * line. The Create call-to-action stays. For anything else, the `#empty` slot.
+   */
+  emptyText?: string
+  emptyHint?: string
   translate?: (key: string) => string
 }
 
@@ -174,6 +185,8 @@ const props = withDefaults(defineProps<TCardPageProps<T, TId>>(), {
   detailTitle: undefined,
   titleHelp: undefined,
   titleHelpTitle: undefined,
+  emptyText: undefined,
+  emptyHint: undefined,
   translate: undefined,
 })
 

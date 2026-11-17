@@ -21,7 +21,7 @@ public class HistoryMiddlewareTests
 
         var mockThreadService = new Mock<IAgentThreadInternalService>();
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -33,7 +33,7 @@ public class HistoryMiddlewareTests
             (_, _) => Task.FromResult(new AgentRunResult { Response = "ok" }));
 
         mockThreadService.Verify(
-            s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "客户端提供的 ThreadId 必须经过归属校验，不能因为「已有值」就跳过");
     }
@@ -47,7 +47,7 @@ public class HistoryMiddlewareTests
 
         var mockThreadService = new Mock<IAgentThreadInternalService>();
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(foreignThreadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(foreignThreadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Tnzi.Exceptions.BusinessException("Thread not found", "AI_THREAD_NOT_FOUND", 404));
 
         var middleware = new HistoryMiddleware(mockThreadService.Object, CreateOptions(100), Mock.Of<ILogger<HistoryMiddleware>>());
@@ -75,7 +75,7 @@ public class HistoryMiddlewareTests
         // 线程存在且归当前用户所有：EnsureThreadAsync 现在**总是**经 GetOrCreateThreadAsync
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -108,7 +108,7 @@ public class HistoryMiddlewareTests
         // 线程存在且归当前用户所有：EnsureThreadAsync 现在**总是**经 GetOrCreateThreadAsync
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -142,7 +142,7 @@ public class HistoryMiddlewareTests
         // 线程存在且归当前用户所有：EnsureThreadAsync 现在**总是**经 GetOrCreateThreadAsync
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -173,7 +173,7 @@ public class HistoryMiddlewareTests
         // 线程存在且归当前用户所有：EnsureThreadAsync 现在**总是**经 GetOrCreateThreadAsync
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -212,7 +212,7 @@ public class HistoryMiddlewareTests
         // 线程存在且归当前用户所有：EnsureThreadAsync 现在**总是**经 GetOrCreateThreadAsync
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -258,7 +258,7 @@ public class HistoryMiddlewareTests
         // 线程存在且归当前用户所有：EnsureThreadAsync 现在**总是**经 GetOrCreateThreadAsync
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -297,7 +297,7 @@ public class HistoryMiddlewareTests
         // 线程存在且归当前用户所有：EnsureThreadAsync 现在**总是**经 GetOrCreateThreadAsync
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -336,7 +336,7 @@ public class HistoryMiddlewareTests
         // 线程存在且归当前用户所有：EnsureThreadAsync 现在**总是**经 GetOrCreateThreadAsync
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -376,7 +376,7 @@ public class HistoryMiddlewareTests
         // 线程存在且归当前用户所有：EnsureThreadAsync 现在**总是**经 GetOrCreateThreadAsync
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -434,7 +434,7 @@ public class HistoryMiddlewareTests
         var threadId = Guid.NewGuid();
         var mockThreadService = new Mock<IAgentThreadInternalService>();
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
@@ -447,8 +447,8 @@ public class HistoryMiddlewareTests
         IReadOnlyDictionary<string, JsonElement>? stored = null;
         mockThreadService
             .Setup(s => s.SaveUserMessageAsync(
-                threadId, "test", It.IsAny<IReadOnlyDictionary<string, JsonElement>?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .Callback((Guid _, string _, IReadOnlyDictionary<string, JsonElement>? metadata, Guid? _, CancellationToken _) => stored = metadata)
+                threadId, "test", It.IsAny<IReadOnlyDictionary<string, JsonElement>?>(), It.IsAny<Guid?>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+            .Callback((Guid _, string _, IReadOnlyDictionary<string, JsonElement>? metadata, Guid? _, DateTime? _, CancellationToken _) => stored = metadata)
             .ReturnsAsync(Guid.NewGuid());
 
         var middleware = new HistoryMiddleware(mockThreadService.Object, CreateOptions(maxLoadedMessages: 100), Mock.Of<ILogger<HistoryMiddleware>>());
@@ -472,7 +472,7 @@ public class HistoryMiddlewareTests
         var threadId = Guid.NewGuid();
         var mockThreadService = new Mock<IAgentThreadInternalService>();
         mockThreadService
-            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))

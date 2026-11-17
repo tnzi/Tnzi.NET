@@ -188,7 +188,7 @@ public class AdHocToolSelectionAllowListTests
                 accessor,
                 new ServiceCollection().BuildServiceProvider(),
                 new StaticOptionsMonitor<AIOptions>(options),
-                new EventPublisher(null, Mock.Of<IServiceScopeFactory>(), Mock.Of<ILogger<EventPublisher>>()),
+                new EventPublisher(null, Mock.Of<ILogger<EventPublisher>>()),
                 Mock.Of<ILogger<AgentRuntime>>());
         }
 

@@ -72,7 +72,8 @@
  * glance and buried the remark. Cards give each tenant its own block with the
  * name, code, live state and expiry together.
  */
-import { TAvatar, TRelativeTime, TSvgIcon } from '@tnzi/ui'
+import { TAvatar, TSvgIcon } from '@tnzi/ui'
+import TRelativeTime from '../../components/display/TRelativeTime.vue'
 import TCardPage from '../../components/crud/TCardPage.vue'
 import TEntityCard from '../../components/data/TEntityCard.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'

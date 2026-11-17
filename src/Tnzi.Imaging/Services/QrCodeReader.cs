@@ -156,6 +156,10 @@ public class QrCodeReader : IQrCodeReader
     /// 而传真网关与扫描仪交回来的正是 TIFF。拒绝抛的是 <see cref="UnknownImageFormatException"/>，由下面同一个分支
     /// 变成「这不是一张可读的图片」。
     /// </para>
+    /// <para>
+    /// ★ <b>会让解码器越界写的 CCITT TIFF 同样在这里拒绝</b>（GHSA-v76p-62qx-wwq2）：Group 3 / Modified Huffman 压缩的页、
+    /// 分块存储的 Group 4 页。传真回来的条带 Group 4 照常可读。
+    /// </para>
     /// </remarks>
     private static async Task<Image<L8>> LoadAsync(byte[] image, CancellationToken ct)
     {
@@ -164,6 +168,7 @@ public class QrCodeReader : IQrCodeReader
             ImageDecodeGuard.ThrowIfBigTiff(image);
 
             using var stream = new MemoryStream(image, writable: false);
+            await ImageDecodeGuard.ThrowIfUnsafeFaxTiffAsync(stream, ct);
 
             var info = await Image.IdentifyAsync(FirstFrameOnly, stream, ct);
             if (info.Width > MaxDimension || info.Height > MaxDimension)

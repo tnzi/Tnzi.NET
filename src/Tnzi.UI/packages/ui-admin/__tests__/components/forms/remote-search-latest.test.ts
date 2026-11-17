@@ -14,8 +14,7 @@ import { nextTick } from 'vue'
  */
 const messageApi = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(), loading: vi.fn(), create: vi.fn(), destroyAll: vi.fn() }
 
-vi.mock('@tnzi/ui', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@tnzi/ui')>()),
+vi.mock('../../../src/headless/useSafeMessage', () => ({
   useSafeMessage: () => messageApi,
 }))
 

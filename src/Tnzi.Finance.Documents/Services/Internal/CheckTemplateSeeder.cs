@@ -22,6 +22,11 @@ namespace Tnzi.Finance.Documents.Services.Internal;
 /// 只会让一个系统性故障看起来像六个孤立问题。
 /// </para>
 /// <para>
+/// ★ 逐份的写失败也不吞掉：清单走完之后，有任何一份没写成就整体抛出，交给运行器在后台重试
+/// （幂等：已经是这一版的什么都不写，另一实例插过的走刷新路径）。只记日志、正常返回的话，
+/// 启动那一刻数据库抖一下，这一份就停在旧正文上直到下次重启。
+/// </para>
+/// <para>
 /// ★★ 语义从「additive，永不覆盖」改为 <b>「刷新出厂版，永不覆盖用户编辑」</b>
 /// （2026-09-02）。原语义的代价是：框架代码里修好的模板正文<b>到不了一个已经播种过的库</b> ——
 /// 没有报错，只是纸印错，而每个消费应用都得自己想到要写一条数据迁移去删行重播。
@@ -60,11 +65,20 @@ internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
             return;
         }
 
+        var failures = new List<Exception>();
         foreach (var builtIn in BuiltInCheckTemplates.All)
-            await SeedOneAsync(repository, builtIn, logger, cancellationToken);
+        {
+            var failure = await SeedOneAsync(repository, builtIn, logger, cancellationToken);
+            if (failure != null)
+                failures.Add(failure);
+        }
+
+        if (failures.Count > 0)
+            throw new AggregateException($"{failures.Count} built-in check template(s) could not be seeded or refreshed.", failures);
     }
 
-    private static async Task SeedOneAsync(
+    /// <summary>播种或刷新一份；这一份的写失败作为返回值交回（已记日志），成功或无事可做时为 null。</summary>
+    private static async Task<Exception?> SeedOneAsync(
         IRepository<TemplateEntity, Guid> repository,
         BuiltInCheckTemplate builtIn,
         ILogger logger,
@@ -74,7 +88,7 @@ internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
         if (content == null)
         {
             logger.LogWarning("Embedded check template resource '{Resource}' was not found; skipping the seed.", builtIn.ResourceFile);
-            return;
+            return null;
         }
 
         var existing = await repository.AsQueryable(withTracking: true)
@@ -85,15 +99,12 @@ internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
                 cancellationToken);
 
         if (existing == null)
-        {
-            await InsertAsync(repository, builtIn, content, logger, cancellationToken);
-            return;
-        }
+            return await InsertAsync(repository, builtIn, content, logger, cancellationToken);
 
-        await RefreshAsync(repository, builtIn, existing, content, logger, cancellationToken);
+        return await RefreshAsync(repository, builtIn, existing, content, logger, cancellationToken);
     }
 
-    private static async Task InsertAsync(
+    private static async Task<Exception?> InsertAsync(
         IRepository<TemplateEntity, Guid> repository,
         BuiltInCheckTemplate builtIn,
         string content,
@@ -119,6 +130,7 @@ internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
             await repository.InsertAsync(template, cancellationToken);
             await repository.SaveChangesAsync(cancellationToken);
             logger.LogInformation("Seeded the built-in check template '{TemplateName}'.", builtIn.Name);
+            return null;
         }
         catch (DbUpdateException ex)
         {
@@ -126,15 +138,17 @@ internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
             // ★ 必须丢弃这条失败的实体：它仍是 Added 留在变更跟踪器里，
             // 下一份版式的 SaveChanges 会把它一起重放并再次撞索引，一路传染到清单末尾。
             repository.Discard(template);
+            // 竞态时重试走到刷新路径、什么都不写；别的原因（连接断了）时重试把它补上。
             logger.LogWarning(ex, "Could not seed the built-in check template '{TemplateName}'; it may already exist.", builtIn.Name);
+            return ex;
         }
     }
 
     /// <summary>
     /// 已存在的行：仍是出厂版就刷成新正文，被人改过就一个字节都不碰。
-    /// 写失败只影响这一份（丢弃实体 + 点名记 Error），调用方继续处理下一份。
+    /// 写失败只影响这一份（丢弃实体 + 点名记 Error + 交回异常），调用方继续处理下一份。
     /// </summary>
-    private static async Task RefreshAsync(
+    private static async Task<Exception?> RefreshAsync(
         IRepository<TemplateEntity, Guid> repository,
         BuiltInCheckTemplate builtIn,
         TemplateEntity existing,
@@ -143,7 +157,7 @@ internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
         CancellationToken cancellationToken)
     {
         if (!SeededTemplateRefresh.IsFactoryOwned(existing.Metadata, existing.ContentTemplate, existing.LastModificationTime))
-            return;
+            return null;
 
         var fingerprint = SeededTemplateRefresh.Fingerprint(content);
         if (SeededTemplateRefresh.ReadFingerprint(existing.Metadata) == fingerprint
@@ -151,7 +165,7 @@ internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
         {
             // 已经是这一版，什么都不写 —— 每次启动都空写一遍会把
             // LastModificationTime 顶到当前时间，让「这行有没有被人动过」再也读不出来。
-            return;
+            return null;
         }
 
         var metadata = SeededTemplateRefresh.TryWriteFingerprint(existing.Metadata, fingerprint);
@@ -161,7 +175,7 @@ internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
             logger.LogWarning(
                 "Check template '{TemplateName}' has metadata that is not a JSON object; leaving it untouched instead of refreshing it.",
                 builtIn.Name);
-            return;
+            return null;
         }
 
         existing.ContentTemplate = content;
@@ -175,6 +189,7 @@ internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
             await repository.SaveChangesAsync(cancellationToken);
             logger.LogInformation(
                 "Refreshed the built-in check template '{TemplateName}' to the version shipped with the assembly.", builtIn.Name);
+            return null;
         }
         catch (DbUpdateException ex)
         {
@@ -189,7 +204,8 @@ internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
             // 插入路径那条是 Warning，因为「另一实例已经插过了」是良性竞态，结果是对的。
             logger.LogError(ex,
                 "Could not refresh the built-in check template '{TemplateName}'; it stays on the body it already had. "
-                + "The other built-in layouts are unaffected.", builtIn.Name);
+                + "The other built-in layouts are unaffected; it is retried.", builtIn.Name);
+            return ex;
         }
     }
 }

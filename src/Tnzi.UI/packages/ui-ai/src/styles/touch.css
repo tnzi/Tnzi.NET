@@ -1,0 +1,57 @@
+/* ==========================================================================
+ *  Touch screens: what a tap and a long press do on the package's controls.
+ *
+ *  Only under `@media (hover: none)` (a phone, a tablet), so a desktop with a
+ *  mouse looks and behaves exactly as without this file. Hover styles are
+ *  kept off touch screens by the build (`tools/vite/hover-media.mjs`); what a
+ *  hover reveals there has its own `@media (hover: none)` rule where it lives.
+ * ========================================================================== */
+
+/* The browser's own grey tap flash: the controls show their own press below. */
+.t-chat-app,
+.t-action-menu,
+.t-popover-menu,
+.t-dialog-backdrop {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (hover: none) {
+  /* Press: a wash of the control's own text colour while the finger is down,
+     laid over whatever background it has (a selected row, an accent button),
+     at once. `background-image`, which no component sets, so it adds to the
+     component's look instead of competing with its rules. iOS applies
+     `:active` only with a touch listener on the page (`enableTouchPress`). */
+  :is(.t-chat-app, .t-action-menu, .t-popover-menu, .t-dialog-backdrop)
+    :is(button, a[href], [role='button'], [role^='menuitem'], [role='tab'], [role='option']):not(:disabled, .t-thread-list__select, .t-recents-page__open):active,
+  /* A conversation row is pressed as a whole, not just its title button. */
+  .t-thread-list__row:has(> .t-thread-list__select:active),
+  .t-recents-page__row:has(> .t-recents-page__open:active) {
+    background-image: linear-gradient(
+      color-mix(in srgb, currentColor 10%, transparent),
+      color-mix(in srgb, currentColor 10%, transparent)
+    );
+  }
+
+  /* A long press on a control is a press, not a text selection and not the
+     system's link / image menu. Message text, code and fields stay selectable:
+     only the chrome and the controls are covered. */
+  .t-collapsible-sidebar,
+  .t-chat-rail,
+  .t-chat-app__topbar,
+  .t-action-menu,
+  .t-popover-menu,
+  :is(.t-chat-app, .t-dialog-backdrop)
+    :is(button, [role='button'], [role^='menuitem'], [role='tab'], [role='option']) {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  /* Fields inside those (the thread search, a rename box) are typed into as
+     usual: iOS will not edit a field whose ancestors forbid selection. */
+  :is(.t-collapsible-sidebar, .t-chat-rail, .t-chat-app__topbar, .t-action-menu, .t-popover-menu)
+    :is(input, textarea, [contenteditable]:not([contenteditable='false'])) {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+}

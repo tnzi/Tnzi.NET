@@ -14,7 +14,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp, h, nextTick, ref, watch, type App } from 'vue';
-import { DEFAULT_LOGIN_FEATURES, type LoginCallbacks, type LoginFeatures } from '@tnzi/ui';
+import { DEFAULT_LOGIN_FEATURES, type LoginCallbacks, type LoginFeatures } from '@tnzi/ui/headless';
 
 const widgetConfigs: unknown[] = [];
 

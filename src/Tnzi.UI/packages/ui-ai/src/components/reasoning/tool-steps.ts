@@ -28,6 +28,12 @@ export interface ToolStepDescription {
   /** When it failed: "Couldn't read a page". */
   readonly failed: string;
   /**
+   * For a tool whose failing result is a person's answer rather than an error (a plan sent
+   * back, a question left unanswered): the phrase for that. With it, such a step reads as
+   * finished, in the normal tone, and never counts as a failure in a run's summary.
+   */
+  readonly declined?: string;
+  /**
    * Several done steps of this kind in one run: `(5) => "Read 5 pages"`. Without it,
    * several read as `done` once ("Searched the web"), which suits steps nobody counts.
    */
@@ -40,6 +46,14 @@ export interface ToolStepDescription {
   readonly kind?: string;
   /** What the step acted on (a query, a path), shown after the phrase in the generic view. */
   readonly subject?: string | null;
+  /**
+   * For a step that goes on after its run (a sub-agent or a command in the background): how a finished run's line
+   * says it is still going ("A background command running"). With it, such a step is counted under its own kind
+   * instead of as "not finished".
+   */
+  readonly ongoing?: string;
+  /** Several ongoing steps of this kind in one run: `(2) => "2 background commands running"`. */
+  readonly manyOngoing?: (count: number) => string;
 }
 
 /**
@@ -130,14 +144,28 @@ export function describeToolStep(
     running: text(given.running, fallback.running),
     done: text(given.done, fallback.done),
     failed: text(given.failed, fallback.failed),
+    declined: typeof given.declined === 'string' && given.declined.trim() ? given.declined : undefined,
     many: typeof given.many === 'function' ? given.many : undefined,
     kind: text(given.kind, fallback.kind ?? ''),
     subject: given.subject === undefined ? fallback.subject : given.subject,
+    ongoing: typeof given.ongoing === 'string' && given.ongoing.trim() ? given.ongoing : undefined,
+    manyOngoing: typeof given.manyOngoing === 'function' ? given.manyOngoing : undefined,
   };
+}
+
+/** Whether the step "failed" only because a person said no (see `ToolStepDescription.declined`). */
+export function isDeclinedStep(step: ToolRunStep): boolean {
+  return step.state === 'failed' && !!step.description.declined;
+}
+
+/** The state a step is drawn in: a declined step is a finished one, not a failed one. */
+export function shownStepState(step: ToolRunStep): ToolCallState {
+  return isDeclinedStep(step) ? 'completed' : step.state;
 }
 
 /** The phrase for a step in its state: a step that never answered still reads as under way. */
 export function stepPhrase(step: ToolRunStep): string {
+  if (isDeclinedStep(step)) return step.description.declined!;
   if (step.state === 'failed') return step.description.failed;
   if (step.state === 'completed') return step.description.done;
   return step.description.running;
@@ -174,20 +202,37 @@ export function summarizeToolRun(steps: readonly ToolRunStep[], messages: AiLoca
   let recovered = 0;
   let unfinished = 0;
 
-  steps.forEach((step, order) => {
+  steps.forEach((given, order) => {
+    // A declined step is a finished outcome of its own ("Plan sent back"), counted apart from the approved ones
+    const step: ToolRunStep = isDeclinedStep(given)
+      ? {
+          state: 'completed',
+          description: {
+            ...given.description,
+            done: given.description.declined!,
+            many: undefined,
+            kind: `${given.description.kind ?? ''}:declined`,
+          },
+        }
+      : given;
     if (step.state === 'failed') {
       if (isRecovered(steps, order)) recovered += 1;
       else failed.push(step);
       return;
     }
-    if (step.state !== 'completed') {
+    const ongoing = step.state === 'running' && !!step.description.ongoing;
+    if (step.state !== 'completed' && !ongoing) {
       unfinished += 1;
       return;
     }
-    const kind = step.description.kind ?? '';
+    // A step still going on after the run (a background task) is counted apart, with its own words
+    const kind = ongoing ? `${step.description.kind ?? ''}:ongoing` : step.description.kind ?? '';
+    const description: ToolStepDescription = ongoing
+      ? { ...step.description, done: step.description.ongoing!, many: step.description.manyOngoing }
+      : step.description;
     const group = groups.find((g) => g.kind === kind);
     if (group) group.count += 1;
-    else groups.push({ kind, first: step.description, count: 1, order });
+    else groups.push({ kind, first: description, count: 1, order });
   });
 
   const ranked = [...groups].sort((a, b) => b.count - a.count || a.order - b.order);

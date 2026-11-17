@@ -25,19 +25,4 @@ public static class AgentRunStatusResolver
             ? result
             : result.CloneWith(status: Resolve(result.FinishReason, defaultStatus));
     }
-
-    public static bool ShouldGenerateThreadTitle(string? finishReason)
-    {
-        return finishReason switch
-        {
-            FinishReasons.GuardrailRejected or
-            FinishReasons.QuotaExceeded or
-            FinishReasons.Error or
-            FinishReasons.Failed or
-            FinishReasons.Rejected or
-            FinishReasons.MaxHandoffs or
-            FinishReasons.MaxToolIterations => false,
-            _ => true
-        };
-    }
 }

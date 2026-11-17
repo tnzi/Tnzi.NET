@@ -171,7 +171,8 @@
  */
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { NButton, NPopconfirm, NSpin, NTag } from 'naive-ui'
-import { TEmpty, TSvgIcon, useSafeMessage } from '@tnzi/ui'
+import { TEmpty, TSvgIcon } from '@tnzi/ui'
+import { useSafeMessage } from '../../headless/useSafeMessage'
 import { StepUpPromptController, TwoFactorType, isPasskeySupported } from '@tnzi/core/services/identity'
 import type { PasskeyCredentialDto, TotpSetupDto, TwoFactorStatusDto } from '@tnzi/core/services/identity'
 import { formatDateOnly } from '@tnzi/core/utils'

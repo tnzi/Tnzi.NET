@@ -9,6 +9,7 @@ public class S3Storage : IFileStorage, IDisposable
     private readonly S3StorageOptions _options;
     private readonly string? _baseUrl;
     private readonly IAmazonS3 _s3Client;
+    private readonly IAmazonS3? _publicSigningClient;
     private readonly S3ObjectStore _objects;
     private readonly ILogger<S3Storage>? _logger;
     private readonly IOptionsMonitor<StorageOptions>? _optionsMonitor;
@@ -74,20 +75,35 @@ public class S3Storage : IFileStorage, IDisposable
             // 而默认凭据链的答案不在任何配置文件里。
             _logger?.LogInformation(
                 "S3 storage: no static credentials configured; resolving credentials from the AWS SDK default chain (environment variables, shared credentials file, ECS/EC2 role).");
-            _s3Client = new AmazonS3Client(config);
         }
         else
         {
             // 半填的配置在这里也拦一次：直接 new S3Storage(...) 的调用方绕过了选项验证器。
             Check.NotNullOrWhiteSpace(_options.AccessKeyId);
             Check.NotNullOrWhiteSpace(_options.SecretAccessKey);
-            _s3Client = new AmazonS3Client(_options.AccessKeyId, _options.SecretAccessKey, config);
         }
 
+        _s3Client = CreateClient(config);
+
         // 预签名 URL 的 scheme 由请求的 Protocol 决定（默认 HTTPS），与 UseHttps 对齐。
-        _objects = new S3ObjectStore(_s3Client, _options.BucketName, ProviderName,
-            _options.UseHttps ? Protocol.HTTPS : Protocol.HTTP, logger);
+        var presignProtocol = _options.UseHttps ? Protocol.HTTPS : Protocol.HTTP;
+
+        // 配了公开端点：预签名 URL 改由一个端点是公开地址的客户端签，凭据与签名区域与上面那一路相同，
+        // scheme 取公开地址自己的。其余操作仍走 ServiceUrl。见 S3PublicEndpoint。
+        if (!string.IsNullOrWhiteSpace(_options.PublicServiceUrl))
+        {
+            var publicConfig = S3PublicEndpoint.ConfigFor(config, _options.PublicServiceUrl);
+            _publicSigningClient = CreateClient(publicConfig);
+            presignProtocol = S3PublicEndpoint.ProtocolOf(publicConfig);
+        }
+
+        _objects = new S3ObjectStore(_s3Client, _options.BucketName, ProviderName, presignProtocol, logger, _publicSigningClient);
     }
+
+    /// <summary>按凭据三态造一个客户端：没配静态密钥就不传凭据，交给 SDK 的默认凭据链。</summary>
+    private AmazonS3Client CreateClient(AmazonS3Config config) => _options.UsesDefaultCredentialChain
+        ? new AmazonS3Client(config)
+        : new AmazonS3Client(_options.AccessKeyId, _options.SecretAccessKey, config);
 
     /// <summary>
     /// 获取存储提供者名称
@@ -187,5 +203,6 @@ public class S3Storage : IFileStorage, IDisposable
     public void Dispose()
     {
         _s3Client?.Dispose();
+        _publicSigningClient?.Dispose();
     }
 }

@@ -117,7 +117,10 @@ public class OpenAiCompatibleAiUtility : IAiUtility
                 new ChatCompletionMessage("user", userMessage)
             ],
             MaxTokens: options?.MaxTokens ?? defaults.MaxTokens,
-            Temperature: options?.Temperature ?? defaults.Temperature);
+            // 没配就不发（null 不进请求体）；型号不收采样参数时配了也不发，否则整次调用 400
+            Temperature: ModelSamplingSupport.AcceptsSamplingParameters(target.Model)
+                ? options?.Temperature ?? defaults.Temperature
+                : null);
 
         try
         {

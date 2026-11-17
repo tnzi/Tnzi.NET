@@ -360,7 +360,7 @@
                   </div>
                 </NFormItem>
               </NForm>
-              <NSpace size="small">
+              <div class="flex flex-wrap items-center gap-x-8px gap-y-4px">
                 <NButton
                   v-if="can('ai.agent.update')"
                   size="small"
@@ -379,7 +379,7 @@
                   </template>
                   {{ t('detail.abtest.stopConfirm') }}
                 </NPopconfirm>
-              </NSpace>
+              </div>
               <div v-if="abStatus" class="t-agent-detail__status" :data-state="abStatus.kind">
                 {{ abStatus.message }}
               </div>
@@ -524,7 +524,7 @@ import { computed, h, reactive, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NSpin, NForm, NFormItem, NInput, NInputNumber, NSwitch, NSelect, NTag, NButton,
-  NSpace, NList, NListItem, NSlider, NPopconfirm, NModal, NDynamicTags, NProgress, useMessage,
+  NList, NListItem, NSlider, NPopconfirm, NModal, NDynamicTags, NProgress, useMessage,
   type DataTableColumns,
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'

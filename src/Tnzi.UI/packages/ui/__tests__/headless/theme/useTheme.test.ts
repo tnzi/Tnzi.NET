@@ -33,15 +33,10 @@ describe('useTheme', () => {
     expect(settings.value.palettes.primary[500]).toBe('#ff0000')
   })
 
-  // Changing one colour is not a reset: a consumer's raw naive overrides and
-  // the rest of its settings must survive it.
+  // Changing one colour is not a reset: the rest of the settings must survive it.
   it('setColor keeps the other settings', () => {
-    const naiveOverrides = { common: { borderRadius: '10px' } }
-    const ctx = createThemeContext(
-      mergeThemeSettings({ naiveOverrides, presetName: 'azir', mode: 'dark' }),
-    )
+    const ctx = createThemeContext(mergeThemeSettings({ presetName: 'azir', mode: 'dark' }))
     ctx.setColor('primary', '#ff0000')
-    expect(ctx.settings.value.naiveOverrides).toEqual(naiveOverrides)
     expect(ctx.settings.value.presetName).toBe('azir')
     expect(ctx.settings.value.mode).toBe('dark')
     expect(ctx.settings.value.colors.info).toBe(defaultThemeSettings.colors.info)
@@ -54,18 +49,15 @@ describe('useTheme', () => {
     await nextTick()
     const root = document.documentElement.style
     expect(root.getPropertyValue('--tnzi-on-primary')).toBe('#ffffff')
-    expect(ctx.naiveOverrides.value.Button).toBeUndefined()
 
     ctx.setColor('primary', '#FFD217')
     await nextTick()
     expect(root.getPropertyValue('--tnzi-on-primary')).toBe('#141414')
     expect(root.getPropertyValue('--tnzi-primary-text-on-light')).toBe('#816800')
-    expect(ctx.naiveOverrides.value.Button?.textColorPrimary).toBe('#141414')
 
     ctx.setColor('primary', '#2563EB')
     await nextTick()
     expect(root.getPropertyValue('--tnzi-on-primary')).toBe('#ffffff')
-    expect(ctx.naiveOverrides.value.Button).toBeUndefined()
   })
 
   it('applyPreset loads a preset from JSON', async () => {

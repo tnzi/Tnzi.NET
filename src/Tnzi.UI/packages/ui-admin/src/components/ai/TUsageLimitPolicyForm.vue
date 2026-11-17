@@ -83,6 +83,56 @@
       </div>
     </div>
 
+    <!-- Per model: the thinking efforts users can choose, and the one they start on. -->
+    <div v-if="effortModels.length > 0" class="t-ulp__row">
+      <div class="t-ulp__label">
+        <span class="t-ulp__name">{{ t('policy.efforts') }}</span>
+        <span class="t-ulp__sub">{{ t('policy.effortsHint') }}</span>
+      </div>
+      <div class="t-ulp__control t-ulp__control--stack">
+        <div v-for="m in effortModels" :key="m.id" class="t-ulp__effort" :data-effort-model="m.id">
+          <div class="t-ulp__effort-head">
+            <span class="t-ulp__effort-model">{{ m.displayName || m.id }}</span>
+            <NRadioGroup
+              size="small"
+              :value="ownEfforts(m.id) ? 'custom' : 'inherit'"
+              :disabled="readonly"
+              @update:value="(mode: 'inherit' | 'custom') => onEffortsMode(m.id, mode)"
+            >
+              <NRadioButton value="inherit">{{ inheritLabel }}</NRadioButton>
+              <NRadioButton value="custom">{{ t('policy.effortsSet') }}</NRadioButton>
+            </NRadioGroup>
+          </div>
+          <template v-if="ownEfforts(m.id)">
+            <div class="t-ulp__effort-fields">
+              <NSelect
+                class="t-ulp__effort-list"
+                :value="ownEfforts(m.id)!.efforts"
+                multiple
+                filterable
+                tag
+                :options="effortValueOptions(m.id)"
+                :disabled="readonly"
+                :placeholder="t('policy.effortsPlaceholder')"
+                @update:value="(values: string[]) => setEfforts(m.id, values)"
+              />
+              <NSelect
+                class="t-ulp__effort-default"
+                :value="ownEfforts(m.id)!.defaultEffort ?? null"
+                clearable
+                :options="ownEfforts(m.id)!.efforts.map((v) => ({ label: v, value: v }))"
+                :disabled="readonly || ownEfforts(m.id)!.efforts.length === 0"
+                :placeholder="t('policy.effortDefaultPlaceholder')"
+                @update:value="(v: string | null) => setEffortDefault(m.id, v)"
+              />
+            </div>
+            <span v-if="ownEfforts(m.id)!.efforts.length === 0" class="t-ulp__inherited">{{ t('policy.effortsNoChoice') }}</span>
+          </template>
+          <span v-else class="t-ulp__inherited">{{ t('policy.inheritedValue', { value: inheritedEffortsText(m.id) }) }}</span>
+        </div>
+      </div>
+    </div>
+
     <div class="t-ulp__row">
       <div class="t-ulp__label">
         <span class="t-ulp__name">{{ t('policy.note') }}</span>
@@ -103,7 +153,9 @@
 <script setup lang="ts">
 /**
  * `TUsageLimitPolicyForm` - one level of the usage policy as a form: the two
- * window limits, the models a user may pick, and the default model.
+ * window limits, the models a user may pick, the default model, and per model
+ * the thinking efforts users can choose (runtime-native values, typed freely:
+ * each CLI has its own vocabulary) with the one they start on.
  *
  * Every item can follow the level below it (`inheritLabel`: "Follow defaults"
  * for a user, "Follow configuration" for everyone's defaults), and the form
@@ -112,7 +164,13 @@
  */
 import { computed } from 'vue'
 import { NInput, NInputNumber, NRadioButton, NRadioGroup, NSelect } from 'naive-ui'
-import { UsageLimitMode, type ChatModelDto, type SaveUsagePolicyDto, type UsageLimitSettingDto } from '@tnzi/core/services/ai'
+import {
+  UsageLimitMode,
+  type ChatModelDto,
+  type ChatModelEffortsDto,
+  type SaveUsagePolicyDto,
+  type UsageLimitSettingDto,
+} from '@tnzi/core/services/ai'
 import { interpolate, translatePageKey } from '../../i18n/translate'
 import { formatUsd, formatWindowLength } from './usage-limit-format'
 
@@ -123,6 +181,8 @@ export interface InheritedUsagePolicy {
   /** Model ids; empty = every model of the list. */
   allowedModels: string[]
   defaultModel?: string | null
+  /** Each model's efforts at the level below; a model missing here follows the catalog's (the model list's). */
+  modelEfforts?: Record<string, ChatModelEffortsDto>
 }
 
 const props = withDefaults(
@@ -194,6 +254,63 @@ const inheritedDefaultText = computed(() =>
   props.inherited.defaultModel ? nameOf(props.inherited.defaultModel) : t('policy.defaultModelAgent'),
 )
 
+/** The values Claude Code takes, offered as suggestions; any other runtime value can be typed. */
+const KNOWN_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+
+/** The models efforts can be set for: the ones the user may pick at this level. */
+const effortModels = computed(() => {
+  const ids = props.modelValue.allowedModels ?? props.inherited.allowedModels
+  return ids.length === 0 ? props.catalog : props.catalog.filter((m) => ids.includes(m.id))
+})
+
+const ownEfforts = (id: string): ChatModelEffortsDto | null => props.modelValue.modelEfforts?.[id] ?? null
+
+function inheritedEfforts(id: string): ChatModelEffortsDto {
+  const below = props.inherited.modelEfforts?.[id]
+  if (below) return below
+  const listed = props.catalog.find((m) => m.id === id)
+  return { efforts: listed?.efforts ?? [], defaultEffort: listed?.defaultEffort ?? null }
+}
+
+function inheritedEffortsText(id: string): string {
+  const e = inheritedEfforts(id)
+  if (e.efforts.length === 0) return t('policy.effortsNone')
+  const list = e.efforts.join(', ')
+  return e.defaultEffort ? t('policy.effortsWithDefault', { efforts: list, default: e.defaultEffort }) : list
+}
+
+function effortValueOptions(id: string) {
+  const values = [...new Set([...inheritedEfforts(id).efforts, ...KNOWN_EFFORTS, ...(ownEfforts(id)?.efforts ?? [])])]
+  return values.map((v) => ({ label: v, value: v }))
+}
+
+function setModelEfforts(id: string, value: ChatModelEffortsDto | null): void {
+  const next = { ...(props.modelValue.modelEfforts ?? {}) }
+  if (value) next[id] = value
+  else delete next[id]
+  update({ modelEfforts: Object.keys(next).length > 0 ? next : null })
+}
+
+function onEffortsMode(id: string, mode: 'inherit' | 'custom'): void {
+  if (mode === 'inherit') {
+    setModelEfforts(id, null)
+    return
+  }
+  // Start from what the model offers now, so "set" edits from there.
+  const below = inheritedEfforts(id)
+  setModelEfforts(id, { efforts: [...below.efforts], defaultEffort: below.defaultEffort ?? null })
+}
+
+function setEfforts(id: string, values: string[]): void {
+  const efforts = [...new Set(values.map((v) => v.trim()).filter((v) => v.length > 0))]
+  const current = ownEfforts(id)?.defaultEffort ?? null
+  setModelEfforts(id, { efforts, defaultEffort: current && efforts.includes(current) ? current : null })
+}
+
+function setEffortDefault(id: string, value: string | null): void {
+  setModelEfforts(id, { efforts: [...(ownEfforts(id)?.efforts ?? [])], defaultEffort: value })
+}
+
 function onModelsMode(mode: 'inherit' | 'custom'): void {
   if (mode === 'inherit') {
     update({ allowedModels: null })
@@ -246,6 +363,35 @@ function onModelsMode(mode: 'inherit' | 'custom'): void {
 }
 .t-ulp__control--stack > :first-child {
   align-self: flex-start;
+}
+.t-ulp__effort {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.t-ulp__effort-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.t-ulp__effort-model {
+  min-width: 120px;
+  font-size: 13px;
+  color: var(--tnzi-base-text);
+}
+.t-ulp__effort-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.t-ulp__effort-list {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.t-ulp__effort-default {
+  flex: 0 1 180px;
+  min-width: 140px;
 }
 .t-ulp__amount {
   width: 180px;

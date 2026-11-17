@@ -43,9 +43,33 @@ public sealed record CliTurnContext
 /// 这一轮带的一个附件。
 /// </summary>
 /// <param name="MediaType">媒体类型。</param>
-/// <param name="FileName">文件名（客户端给的话）。</param>
+/// <param name="FileName">文件名（客户端给的话；文件总有）。</param>
 /// <param name="Size">字节数。</param>
-public sealed record CliTurnAttachment(string MediaType, string? FileName, long Size);
+/// <param name="IsFile">
+/// 文件（不是图片或 PDF）：不交给模型，agent 用自己的工具打开（见 <see cref="Services.ICliFileAttachmentPolicy"/>）。
+/// </param>
+public sealed record CliTurnAttachment(string MediaType, string? FileName, long Size, bool IsFile = false);
+
+/// <summary>
+/// 一轮带着文件附件、要决定收不收时交给 <see cref="Services.ICliFileAttachmentPolicy"/> 的信息。线程的归属在调用之前已经核过。
+/// </summary>
+public sealed record CliFileAttachmentRequest
+{
+    /// <summary>执行这一轮的 Agent。</summary>
+    public required Guid AgentId { get; init; }
+
+    /// <summary>这一轮所在的线程；新线程（还没建）与一次性运行为 null。</summary>
+    public Guid? ThreadId { get; init; }
+
+    /// <summary>这一轮回答的用户消息；聊天门面问的那一次（还没写下）为 null。</summary>
+    public Guid? UserMessageId { get; init; }
+
+    /// <summary>代谁执行（请求的 <c>UserId</c>，否则当前用户）；后台调用为 null。</summary>
+    public Guid? UserId { get; init; }
+
+    /// <summary>这一轮带的文件（只有文件，不含图片与 PDF）。</summary>
+    public IReadOnlyList<CliTurnAttachment> Files { get; init; } = [];
+}
 
 /// <summary>
 /// 处理器对一轮的决定。

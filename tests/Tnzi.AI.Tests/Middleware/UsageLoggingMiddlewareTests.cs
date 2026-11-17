@@ -21,7 +21,7 @@ public class UsageLoggingMiddlewareTests
             Mock.Of<ILogger<UsageLoggingMiddleware>>());
     }
 
-    private static AiMiddlewareContext CreateContext(string provider = TestProvider, string model = TestModel, Guid? agentId = null, Guid? threadId = null, string? operationType = null)
+    private static AiMiddlewareContext CreateContext(string provider = TestProvider, string model = TestModel, Guid? agentId = null, Guid? threadId = null, string? operationType = null, Guid? userId = null)
     {
         return new AiMiddlewareContext
         {
@@ -29,7 +29,8 @@ public class UsageLoggingMiddlewareTests
             {
                 OperationType = operationType,
                 UserMessage = "Hello",
-                ThreadId = threadId
+                ThreadId = threadId,
+                UserId = userId
             },
             Agent = AgentResolution.Success(
                 agent: null!,
@@ -63,16 +64,33 @@ public class UsageLoggingMiddlewareTests
         // Assert
         actual.Response.ShouldBe("ok");
         usageLogService.Verify(x => x.LogUsageAsync(
-            AIOperationType.Chat,
-            TestProvider,
-            TestModel,
-            100, 50,
-            It.IsAny<long>(),
-            true,
-            null,
-            null, null,
-            10, 5,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.Chat &&
+                e.Provider == TestProvider &&
+                e.Model == TestModel &&
+                e.InputTokens == 100 &&
+                e.OutputTokens == 50 &&
+                e.IsSuccess &&
+                e.ErrorMessage == null &&
+                e.AgentId == null &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 10 &&
+                e.CacheCreationTokens == 5),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_MetersTheUsageToTheRequestsUser()
+    {
+        // 流式收尾可能改在独立作用域重试，那里没有登录用户：用户必须随这一行显式带过去
+        var usageLogService = new Mock<IUsageLogService>();
+        var middleware = CreateMiddleware(usageLogService);
+        var userId = Guid.NewGuid();
+        var context = CreateContext(userId: userId);
+
+        await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
+
+        usageLogService.Verify(x => x.LogUsageAsync(It.Is<UsageLogEntry>(e => e.UserId == userId), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -92,15 +110,18 @@ public class UsageLoggingMiddlewareTests
 
         // 失败时 isSuccess=false, errorMessage 有值
         usageLogService.Verify(x => x.LogUsageAsync(
-            AIOperationType.Chat,
-            TestProvider,
-            TestModel,
-            0, 0,
-            It.IsAny<long>(),
-            false,
-            "downstream error",
-            null, null,
-            0, 0,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.Chat &&
+                e.Provider == TestProvider &&
+                e.Model == TestModel &&
+                e.InputTokens == 0 &&
+                e.OutputTokens == 0 &&
+                !e.IsSuccess &&
+                e.ErrorMessage == "downstream error" &&
+                e.AgentId == null &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 0 &&
+                e.CacheCreationTokens == 0),
             CancellationToken.None), Times.Once);
     }
 
@@ -118,15 +139,18 @@ public class UsageLoggingMiddlewareTests
 
         // Assert - 无 Usage 时记录 0
         usageLogService.Verify(x => x.LogUsageAsync(
-            AIOperationType.Chat,
-            "Anthropic",
-            "claude-3",
-            0, 0,
-            It.IsAny<long>(),
-            true,
-            null,
-            null, null,
-            0, 0,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.Chat &&
+                e.Provider == "Anthropic" &&
+                e.Model == "claude-3" &&
+                e.InputTokens == 0 &&
+                e.OutputTokens == 0 &&
+                e.IsSuccess &&
+                e.ErrorMessage == null &&
+                e.AgentId == null &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 0 &&
+                e.CacheCreationTokens == 0),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -146,15 +170,18 @@ public class UsageLoggingMiddlewareTests
         await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(result));
 
         usageLogService.Verify(x => x.LogUsageAsync(
-            AIOperationType.Chat,
-            TestProvider,
-            TestModel,
-            12, 3,
-            It.IsAny<long>(),
-            false,
-            "Blocked by guardrail",
-            null, null,
-            0, 0,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.Chat &&
+                e.Provider == TestProvider &&
+                e.Model == TestModel &&
+                e.InputTokens == 12 &&
+                e.OutputTokens == 3 &&
+                !e.IsSuccess &&
+                e.ErrorMessage == "Blocked by guardrail" &&
+                e.AgentId == null &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 0 &&
+                e.CacheCreationTokens == 0),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -177,15 +204,18 @@ public class UsageLoggingMiddlewareTests
         await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(result));
 
         usageLogService.Verify(x => x.LogUsageAsync(
-            AIOperationType.Chat,
-            "Anthropic",
-            "claude-3-7-sonnet",
-            10, 4,
-            It.IsAny<long>(),
-            true,
-            null,
-            null, null,
-            0, 0,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.Chat &&
+                e.Provider == "Anthropic" &&
+                e.Model == "claude-3-7-sonnet" &&
+                e.InputTokens == 10 &&
+                e.OutputTokens == 4 &&
+                e.IsSuccess &&
+                e.ErrorMessage == null &&
+                e.AgentId == null &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 0 &&
+                e.CacheCreationTokens == 0),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -204,15 +234,18 @@ public class UsageLoggingMiddlewareTests
         await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(result));
 
         usageLogService.Verify(x => x.LogUsageAsync(
-            AIOperationType.AgentRun,
-            TestProvider,
-            TestModel,
-            5, 2,
-            It.IsAny<long>(),
-            true,
-            null,
-            context.Agent.AgentId, null,
-            0, 0,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.AgentRun &&
+                e.Provider == TestProvider &&
+                e.Model == TestModel &&
+                e.InputTokens == 5 &&
+                e.OutputTokens == 2 &&
+                e.IsSuccess &&
+                e.ErrorMessage == null &&
+                e.AgentId == context.Agent.AgentId &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 0 &&
+                e.CacheCreationTokens == 0),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -245,15 +278,18 @@ public class UsageLoggingMiddlewareTests
         chunks.Count.ShouldBe(2);
         // 流式完成后记录最后一个 Usage 的值
         usageLogService.Verify(x => x.LogUsageAsync(
-            AIOperationType.ChatStreaming,
-            TestProvider,
-            TestModel,
-            80, 40,
-            It.IsAny<long>(),
-            true,
-            null,
-            null, null,
-            0, 0,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.ChatStreaming &&
+                e.Provider == TestProvider &&
+                e.Model == TestModel &&
+                e.InputTokens == 80 &&
+                e.OutputTokens == 40 &&
+                e.IsSuccess &&
+                e.ErrorMessage == null &&
+                e.AgentId == null &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 0 &&
+                e.CacheCreationTokens == 0),
             CancellationToken.None), Times.Once);
     }
 
@@ -276,15 +312,18 @@ public class UsageLoggingMiddlewareTests
         }
 
         usageLogService.Verify(x => x.LogUsageAsync(
-            AIOperationType.ChatStreaming,
-            TestProvider,
-            TestModel,
-            300, 30,
-            It.IsAny<long>(),
-            true,
-            null,
-            null, null,
-            100, 5,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.ChatStreaming &&
+                e.Provider == TestProvider &&
+                e.Model == TestModel &&
+                e.InputTokens == 300 &&
+                e.OutputTokens == 30 &&
+                e.IsSuccess &&
+                e.ErrorMessage == null &&
+                e.AgentId == null &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 100 &&
+                e.CacheCreationTokens == 5),
             CancellationToken.None), Times.Once);
     }
 
@@ -313,15 +352,18 @@ public class UsageLoggingMiddlewareTests
 
         chunks.Count.ShouldBe(2);
         usageLogService.Verify(x => x.LogUsageAsync(
-            AIOperationType.ChatStreaming,
-            TestProvider,
-            TestModel,
-            21, 8,
-            It.IsAny<long>(),
-            false,
-            $"AI request finished unsuccessfully: {FinishReasons.MaxHandoffs}",
-            null, null,
-            0, 0,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.ChatStreaming &&
+                e.Provider == TestProvider &&
+                e.Model == TestModel &&
+                e.InputTokens == 21 &&
+                e.OutputTokens == 8 &&
+                !e.IsSuccess &&
+                e.ErrorMessage == $"AI request finished unsuccessfully: {FinishReasons.MaxHandoffs}" &&
+                e.AgentId == null &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 0 &&
+                e.CacheCreationTokens == 0),
             CancellationToken.None), Times.Once);
     }
 
@@ -353,15 +395,18 @@ public class UsageLoggingMiddlewareTests
         }
 
         usageLogService.Verify(x => x.LogUsageAsync(
-            AIOperationType.ChatStreaming,
-            "Anthropic",
-            "claude-3-7-sonnet",
-            33, 12,
-            It.IsAny<long>(),
-            true,
-            null,
-            null, null,
-            0, 0,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.ChatStreaming &&
+                e.Provider == "Anthropic" &&
+                e.Model == "claude-3-7-sonnet" &&
+                e.InputTokens == 33 &&
+                e.OutputTokens == 12 &&
+                e.IsSuccess &&
+                e.ErrorMessage == null &&
+                e.AgentId == null &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 0 &&
+                e.CacheCreationTokens == 0),
             CancellationToken.None), Times.Once);
     }
 
@@ -388,15 +433,18 @@ public class UsageLoggingMiddlewareTests
         }
 
         usageLogService.Verify(x => x.LogUsageAsync(
-            AIOperationType.AgentRunStreaming,
-            TestProvider,
-            TestModel,
-            17, 9,
-            It.IsAny<long>(),
-            true,
-            null,
-            agentId, null,
-            0, 0,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.AgentRunStreaming &&
+                e.Provider == TestProvider &&
+                e.Model == TestModel &&
+                e.InputTokens == 17 &&
+                e.OutputTokens == 9 &&
+                e.IsSuccess &&
+                e.ErrorMessage == null &&
+                e.AgentId == agentId &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 0 &&
+                e.CacheCreationTokens == 0),
             CancellationToken.None), Times.Once);
     }
 

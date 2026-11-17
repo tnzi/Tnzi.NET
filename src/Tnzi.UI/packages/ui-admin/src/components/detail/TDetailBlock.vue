@@ -1,16 +1,18 @@
 <template>
   <div class="t-detail-block">
-    <div class="t-detail-block__head" :class="{ 't-detail-block__head--bare': !hint }">
+    <div class="t-detail-block__head" :class="{ 't-detail-block__head--bare': !inlineHint }">
       <div class="t-detail-block__title">
         <TSvgIcon v-if="icon" :icon="icon" :size="16" />
         <span>{{ title }}</span>
+        <!-- `hintMode: 'popover'`: the hint behind a ⓘ beside the title, as in TDetailSection. -->
+        <THint v-if="popoverHint" type="info" :size="15" :content="popoverHint" placement="bottom-start" />
         <slot name="titleExtra" />
       </div>
       <div v-if="$slots.actions" class="t-detail-block__actions">
         <slot name="actions" />
       </div>
     </div>
-    <p v-if="hint" class="t-detail-block__hint">{{ hint }}</p>
+    <p v-if="inlineHint" class="t-detail-block__hint">{{ inlineHint }}</p>
     <slot />
   </div>
 </template>
@@ -37,20 +39,38 @@
  * (Doc comment in the script, not above the root element: a leading comment
  * node in `<template>` makes the component multi-root and breaks fallthrough.)
  */
+import { computed } from 'vue'
 import { TSvgIcon } from '@tnzi/ui'
+import THint from '../display/THint.vue'
+import type { TDetailSectionHintMode } from './TDetailSection.vue'
+
+/** Where a block's `hint` goes; the same two placements as a section's. */
+export type TDetailBlockHintMode = TDetailSectionHintMode
 
 interface Props {
   title: string
   /** Iconify glyph before the title. */
   icon?: string
-  /** One or two sentences under the title, read for free. */
+  /** One or two sentences about the block. Under the title by default. */
   hint?: string
+  /**
+   * `'inline'` (default): a muted line under the title, read for free; right
+   * for one short sentence. `'popover'`: a ⓘ beside the title with the text on
+   * hover / focus; right for copy that would wrap into a paragraph and outweigh
+   * the block it explains.
+   */
+  hintMode?: TDetailBlockHintMode
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   icon: undefined,
   hint: undefined,
+  hintMode: 'inline',
 })
+
+// One hint, two mutually exclusive placements, as in TDetailSection.
+const inlineHint = computed(() => (props.hintMode === 'inline' ? props.hint : undefined))
+const popoverHint = computed(() => (props.hintMode === 'popover' ? props.hint : undefined))
 
 defineOptions({ name: 'TDetailBlock' })
 

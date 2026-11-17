@@ -1,9 +1,6 @@
-using System.Runtime.CompilerServices;
 using Tnzi.AI.Engine;
 using Tnzi.AI.Entities.Configs;
-using Tnzi.EventBus;
 using Tnzi.Exceptions;
-using Tnzi.Json;
 
 namespace Tnzi.AI.Cli.Tests;
 
@@ -18,6 +15,7 @@ public class CliChatDbContext : TnziDbContext<CliChatDbContext>
     {
         modelBuilder.ApplyConfiguration(new CliRunConfiguration());
         modelBuilder.ApplyConfiguration(new CliRunMessageConfiguration());
+        modelBuilder.ApplyConfiguration(new CliRunPermissionRequestConfiguration());
         modelBuilder.ApplyConfiguration(new CliAgentBindingConfiguration());
         modelBuilder.ApplyConfiguration(new CliRuntimeConfiguration());
         modelBuilder.ApplyConfiguration(new AgentConfiguration());
@@ -25,6 +23,7 @@ public class CliChatDbContext : TnziDbContext<CliChatDbContext>
         modelBuilder.ApplyConfiguration(new AgentThreadConfiguration());
         modelBuilder.ApplyConfiguration(new AgentThreadMessageConfiguration());
         modelBuilder.ApplyConfiguration(new AgentAttachmentConfiguration());
+        modelBuilder.ApplyConfiguration(new QueuedThreadMessageConfiguration());
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);
     }
@@ -39,48 +38,8 @@ public class CliChatDbContext : TnziDbContext<CliChatDbContext>
 /// Only the process and the protocol are fake (a scripted adapter); everything that decides what is stored and what the
 /// CLI is told runs for real on SQLite.
 /// </remarks>
-public class CliChatTurnTests : IntegratedTestBase<CliChatDbContext>
+public class CliChatTurnTests : CliChatTurnTestBase
 {
-    private static readonly Guid AgentId = Guid.Parse("11111111-1111-1111-1111-1111111111c1");
-    private static readonly Guid RuntimeId = Guid.Parse("22222222-2222-2222-2222-2222222222c2");
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(20);
-
-    private static readonly byte[] Png =
-    [
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE
-    ];
-
-    private readonly string _workspaces = TestScratch.NewPath("chat-turn");
-    private readonly Mock<IEventPublisher> _publisher = new();
-    private readonly List<CliRunFinishedEvent> _finished = [];
-
-    protected override void ConfigureServices(IServiceCollection services)
-    {
-        services.AddScoped<IRepository<CliRun, Guid>, EFCoreRepository<CliChatDbContext, CliRun, Guid>>();
-        services.AddScoped<IRepository<CliRunMessage, Guid>, EFCoreRepository<CliChatDbContext, CliRunMessage, Guid>>();
-        services.AddScoped<IRepository<CliAgentBinding, Guid>, EFCoreRepository<CliChatDbContext, CliAgentBinding, Guid>>();
-        services.AddScoped<IRepository<CliRuntime, Guid>, EFCoreRepository<CliChatDbContext, CliRuntime, Guid>>();
-        services.AddScoped<IRepository<Agent, Guid>, EFCoreRepository<CliChatDbContext, Agent, Guid>>();
-        services.AddScoped<IRepository<AgentThread, Guid>, EFCoreRepository<CliChatDbContext, AgentThread, Guid>>();
-        services.AddScoped<IRepository<AgentThreadMessage, Guid>, EFCoreRepository<CliChatDbContext, AgentThreadMessage, Guid>>();
-        services.AddScoped<IRepository<AgentAttachment, Guid>, EFCoreRepository<CliChatDbContext, AgentAttachment, Guid>>();
-        services.AddScoped<AgentThreadService>();
-        services.AddScoped<IAgentThreadService>(sp => sp.GetRequiredService<AgentThreadService>());
-        services.AddScoped<IAgentThreadInternalService>(sp => sp.GetRequiredService<AgentThreadService>());
-        services.AddScoped<IAgentAttachmentService, AgentAttachmentService>();
-        services.AddScoped(_ => _publisher.Object);
-
-        // 运行与线程的 DTO 投影要 Mapster：用默认配置，与其它调度器测试同一做法
-        MapperExtensions.SetMapper(new Mapper(new TypeAdapterConfig()));
-    }
-
-    public override void Dispose()
-    {
-        TestScratch.Delete(_workspaces);
-        base.Dispose();
-    }
-
     // ---------------------------------------------------------------- the reply is written by the run
 
     [Fact]
@@ -118,7 +77,7 @@ public class CliChatTurnTests : IntegratedTestBase<CliChatDbContext>
         reply.Content.ShouldBe("Let me look.\n\nIt is a login page.");
         reply.Status.ShouldBeNull("a completed reply carries no status");
         persisted.AssistantMessageId.ShouldBe(reply.Id, "the stream's terminal chunk reads the reply id from the run");
-        _finished.ShouldHaveSingleItem().AssistantMessageId.ShouldBe(reply.Id);
+        Finished.ShouldHaveSingleItem().AssistantMessageId.ShouldBe(reply.Id);
 
         var calls = JsonSerializer.Deserialize<List<ToolCallDetail>>(reply.ToolCalls!, TnziJsonDefaults.Options)!;
         var call = calls.ShouldHaveSingleItem();
@@ -143,6 +102,111 @@ public class CliChatTurnTests : IntegratedTestBase<CliChatDbContext>
         resultRow.OutputBlocksJson.ShouldNotBeNull();
         resultRow.OutputBlocksJson.ShouldNotContain(Convert.ToBase64String(Png), Case.Sensitive,
             "image bytes live in the attachment, not in the event log");
+    }
+
+    // ---------------------------------------------------------------- turns after background tasks, compaction
+
+    /// <summary>
+    /// The CLI started a background task and answered; when the task finished it started another turn by itself. Each
+    /// answer is its own reply in the thread, in order: the first one is written as soon as its turn ends (the boundary
+    /// event carries its id), the last one when the run ends, and the run points at the last one.
+    /// </summary>
+    [Fact]
+    public async Task ATurnAfterABackgroundTask_IsItsOwnReply_AndTheBoundaryCarriesTheFirstOnesId()
+    {
+        var (threadId, userMessageId) = await SeedThreadWithQuestionAsync("run the tests in the background");
+        var run = await SeedClaimedRunAsync(threadId, userMessageId);
+        var adapter = new ScriptedAdapter(
+        [
+            new CliAgentEvent { Type = CliAgentEventType.ToolUse, CallId = "call-1", Tool = "Bash", Input = new Dictionary<string, object?> { ["command"] = "dotnet test" } },
+            new CliAgentEvent { Type = CliAgentEventType.ToolResult, CallId = "call-1", Status = "completed", Output = "Command running in background with ID: b1." },
+            new CliAgentEvent { Type = CliAgentEventType.Text, Content = "The tests are running." },
+            new CliAgentEvent
+            {
+                Type = CliAgentEventType.TurnCompleted, Content = "The tests are running.",
+                Turn = new CliTurnBoundary { BackgroundTasks = [new CliBackgroundTask("b1", "Run the tests", "local_bash")] }
+            },
+            new CliAgentEvent { Type = CliAgentEventType.Status, Status = "background_task_finished", Content = "Background command \"Run the tests\" completed (exit code 0)" },
+            new CliAgentEvent { Type = CliAgentEventType.Text, Content = "All 12 tests passed." }
+        ], output: "All 12 tests passed.");
+
+        await CreateExecutor(adapter).ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        var replies = await DbContext.Set<AgentThreadMessage>().AsNoTracking()
+            .Where(m => m.ThreadId == threadId && m.Role == MessageRole.Assistant)
+            .OrderBy(m => m.Order).ToListAsync();
+        replies.Select(m => m.Content).ShouldBe(["The tests are running.", "All 12 tests passed."]);
+        replies[0].ToolCalls.ShouldNotBeNull("the first turn's tool call stays with the first answer");
+        replies[1].ToolCalls.ShouldBeNull("the second answer starts after the boundary");
+
+        var boundary = await DbContext.Set<CliRunMessage>().AsNoTracking().IgnoreQueryFilters()
+            .SingleAsync(m => m.RunId == run.Id && m.Type == CliAgentEventType.TurnCompleted);
+        var turn = CliRunMessageConverter.ToEvent(boundary).Turn.ShouldNotBeNull();
+        turn.AssistantMessageId.ShouldBe(replies[0].Id);
+        turn.BackgroundTasks.ShouldHaveSingleItem().Description.ShouldBe("Run the tests");
+
+        var persisted = await ReloadRunAsync(run.Id);
+        persisted.Status.ShouldBe(CliRunStatus.Completed);
+        persisted.AssistantMessageId.ShouldBe(replies[1].Id);
+        persisted.Output.ShouldBe("All 12 tests passed.");
+    }
+
+    /// <summary>
+    /// The wait for a background task ran out before the CLI's next turn: the run's deliverable is still the first answer,
+    /// which is already in the thread. It is not written a second time, and the run points at it.
+    /// </summary>
+    [Fact]
+    public async Task WhenTheWaitForABackgroundTaskRunsOut_TheFirstAnswerIsNotWrittenTwice()
+    {
+        var (threadId, userMessageId) = await SeedThreadWithQuestionAsync("start the build");
+        var run = await SeedClaimedRunAsync(threadId, userMessageId);
+        var adapter = new ScriptedAdapter(
+        [
+            new CliAgentEvent { Type = CliAgentEventType.Text, Content = "Started." },
+            new CliAgentEvent
+            {
+                Type = CliAgentEventType.TurnCompleted, Content = "Started.",
+                Turn = new CliTurnBoundary { BackgroundTasks = [new CliBackgroundTask("b1", "Build", "local_bash")] }
+            },
+            new CliAgentEvent { Type = CliAgentEventType.Status, Status = "background_tasks_stopped", Content = "Build" }
+        ], output: "Started.");
+
+        await CreateExecutor(adapter).ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        var reply = await DbContext.Set<AgentThreadMessage>().AsNoTracking()
+            .SingleAsync(m => m.ThreadId == threadId && m.Role == MessageRole.Assistant);
+        reply.Content.ShouldBe("Started.");
+        (await ReloadRunAsync(run.Id)).AssistantMessageId.ShouldBe(reply.Id);
+    }
+
+    /// <summary>
+    /// A turn that only compacted the conversation (<c>/compact</c>) has no answer: the run has no output (it does not
+    /// claim a missing final response), and the thread gets an empty reply with status <c>compacted</c>.
+    /// </summary>
+    [Fact]
+    public async Task ACompactOnlyTurn_IsStoredAsACompactedReply_WithoutClaimingAMissingAnswer()
+    {
+        var (threadId, userMessageId) = await SeedThreadWithQuestionAsync("/compact");
+        var run = await SeedClaimedRunAsync(threadId, userMessageId, prompt: "/compact");
+        var compaction = new CliCompaction("manual", 28750, 3533);
+        var adapter = new ScriptedAdapter(
+            [new CliAgentEvent { Type = CliAgentEventType.Compacted, Compaction = compaction }], compaction: compaction);
+
+        await CreateExecutor(adapter).ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        var reply = await DbContext.Set<AgentThreadMessage>().AsNoTracking()
+            .SingleAsync(m => m.ThreadId == threadId && m.Role == MessageRole.Assistant);
+        reply.Status.ShouldBe(ThreadMessageStatuses.Compacted);
+        reply.Content.ShouldBeEmpty();
+
+        var persisted = await ReloadRunAsync(run.Id);
+        persisted.Status.ShouldBe(CliRunStatus.Completed);
+        persisted.Output.ShouldBeNull();
+        persisted.AssistantMessageId.ShouldBe(reply.Id);
+
+        var row = await DbContext.Set<CliRunMessage>().AsNoTracking().IgnoreQueryFilters()
+            .SingleAsync(m => m.RunId == run.Id && m.Type == CliAgentEventType.Compacted);
+        CliRunMessageConverter.ToEvent(row).Compaction.ShouldBe(compaction);
     }
 
     [Fact]
@@ -202,7 +266,7 @@ public class CliChatTurnTests : IntegratedTestBase<CliChatDbContext>
         stored.UsageLimitResetsAt.ShouldBe(resetsAt.UtcDateTime);
         stored.AssistantMessageId.ShouldBe(reply.Id);
 
-        var finished = _finished.ShouldHaveSingleItem();
+        var finished = Finished.ShouldHaveSingleItem();
         finished.FailureReason.ShouldBe(CliRunFailureReason.UsageLimit);
         finished.UsageLimitResetsAt.ShouldBe(resetsAt.UtcDateTime);
     }
@@ -321,39 +385,6 @@ public class CliChatTurnTests : IntegratedTestBase<CliChatDbContext>
         (await ReloadRunAsync(run.Id)).ProviderSessionEntryId.ShouldBe("entry-9");
     }
 
-    // ---------------------------------------------------------------- titles
-
-    [Fact]
-    public async Task TheFirstReplyOfAThread_TitlesIt_EvenWithNoClientConnected()
-    {
-        var (threadId, userMessageId) = await SeedThreadWithQuestionAsync("plan my week");
-        var run = await SeedClaimedRunAsync(threadId, userMessageId, prompt: "plan my week");
-
-        await CreateExecutor(new ScriptedAdapter([new CliAgentEvent { Type = CliAgentEventType.Text, Content = "Sure." }]))
-            .ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
-
-        _publisher.Verify(p => p.HandleNewThreadTitleAsync(
-            It.Is<AgentRunRequest>(r => r.ThreadId == threadId && r.UserMessage == "plan my week"),
-            It.Is<AgentRunResult>(r => r.Response == "Sure."),
-            "plan my week"), Times.Once);
-    }
-
-    [Fact]
-    public async Task ALaterReply_DoesNotRetitleTheThread()
-    {
-        var (threadId, firstQuestion) = await SeedThreadWithQuestionAsync("first");
-        await AddMessageAsync(threadId, MessageRole.Assistant, "first answer");
-        var secondQuestion = await AddMessageAsync(threadId, MessageRole.User, "second");
-        var run = await SeedClaimedRunAsync(threadId, secondQuestion);
-
-        await CreateExecutor(new ScriptedAdapter([new CliAgentEvent { Type = CliAgentEventType.Text, Content = "Sure." }]))
-            .ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
-
-        _publisher.Verify(p => p.HandleNewThreadTitleAsync(
-            It.IsAny<AgentRunRequest>(), It.IsAny<AgentRunResult>(), It.IsAny<string?>()), Times.Never);
-        firstQuestion.ShouldNotBe(Guid.Empty);
-    }
-
     // ---------------------------------------------------------------- edit and regenerate cut the session back
 
     [Fact]
@@ -391,7 +422,7 @@ public class CliChatTurnTests : IntegratedTestBase<CliChatDbContext>
         var context = adapter.Contexts.Single();
         context.ResumeSessionId.ShouldBe("s1");
         context.ResumeAtEntryId.ShouldBe("e1", "the replaced turn must not stay in the CLI session");
-        context.Prompt.ShouldNotContain("could not be resumed");
+        context.PromptWithTurnContext.ShouldNotContain("could not be resumed");
 
         var persisted = await ReloadRunAsync(run.Id);
         persisted.ResumeAtEntryId.ShouldBe("e1", "a re-executed run must cut at the same place");
@@ -412,7 +443,7 @@ public class CliChatTurnTests : IntegratedTestBase<CliChatDbContext>
 
         var context = adapter.Contexts.Single();
         context.ResumeSessionId.ShouldBeNull("resuming would bring the replaced turn back");
-        context.Prompt.ShouldContain("could not be resumed");
+        context.PromptWithTurnContext.ShouldContain("could not be resumed");
     }
 
     [Fact]
@@ -428,7 +459,7 @@ public class CliChatTurnTests : IntegratedTestBase<CliChatDbContext>
 
         var context = adapter.Contexts.Single();
         context.ResumeSessionId.ShouldBeNull();
-        context.Prompt.ShouldNotContain("could not be resumed");
+        context.PromptWithTurnContext.ShouldNotContain("could not be resumed");
     }
 
     // ---------------------------------------------------------------- the whole way through
@@ -467,7 +498,9 @@ public class CliChatTurnTests : IntegratedTestBase<CliChatDbContext>
 
         var context = adapter.Contexts.Single();
         context.Prompt.ShouldContain("what is this?");
-        context.Prompt.ShouldContain("Current time: 10:00 UTC", Case.Sensitive, "the handler's context is appended to the prompt");
+        context.PromptWithTurnContext.ShouldContain("Current time: 10:00 UTC", Case.Sensitive, "the handler's context goes with the prompt");
+        context.Prompt.ShouldNotContain("Current time", Case.Sensitive, "the context travels separately, so a slash command's arguments stay clean");
+        context.TurnContext.ShouldNotBeNull().ShouldContain("Current time: 10:00 UTC");
         context.Attachments.ShouldHaveSingleItem().FileName.ShouldBe("red.png");
 
         var terminal = chunks[^1];
@@ -478,6 +511,103 @@ public class CliChatTurnTests : IntegratedTestBase<CliChatDbContext>
         thread.Select(m => (m.Role, m.Content)).ShouldBe([("user", "what is this?"), ("assistant", "A red square.")]);
         var upload = await DbContext.Set<AgentAttachment>().AsNoTracking().SingleAsync(a => a.Origin == AttachmentOrigin.Upload);
         upload.MessageId.ShouldBe(thread[0].Id, "the attachment is shown with the message it was sent with");
+    }
+
+    [Fact]
+    public async Task ThroughTheFacade_AnEmailForATurnThatTakesFiles_IsStoredWithItsName_NotSentInline_AndNamedToTheCli()
+    {
+        await SeedBindingAsync();
+        FilePolicy.Accepts = true;
+        ProfileContributors.Add(new PlacingContributor(ServiceProvider));
+        var adapter = new ScriptedAdapter([new CliAgentEvent { Type = CliAgentEventType.Text, Content = "It is an invoice." }]);
+        var eml = "From: a@example.com\r\nSubject: Invoice\r\n\r\nPlease pay."u8.ToArray();
+
+        await StreamThroughAsync(CreateFacade(new FixedContextHandler("Current time: 10:00 UTC")), adapter, new AgentRunRequest
+        {
+            AgentId = AgentId,
+            UserId = TestHelper.DefaultTestUserId,
+            ContentParts =
+            [
+                new TextContentPartDto { Text = "what does this mail want?" },
+                new ImageContentPartDto { Base64Data = Convert.ToBase64String(Png), FileName = "red.png" },
+                new DocumentContentPartDto { Base64Data = Convert.ToBase64String(eml), MediaType = "message/rfc822", FileName = "invoice.eml" }
+            ]
+        });
+
+        var stored = await DbContext.Set<AgentAttachment>().AsNoTracking().Where(a => a.Origin == AttachmentOrigin.Upload).ToListAsync();
+        var mail = stored.Single(a => a.FileName == "invoice.eml");
+        mail.MediaType.ShouldBe("message/rfc822");
+        mail.Size.ShouldBe(eml.Length);
+        mail.Content.ShouldBe(eml);
+        mail.MessageId.ShouldNotBeNull("the file is shown with the message it was sent with");
+
+        var context = adapter.Contexts.Single();
+        context.Attachments.ShouldHaveSingleItem().FileName.ShouldBe("red.png", "images still go inline, the file does not");
+        var file = context.Files.ShouldHaveSingleItem();
+        file.AttachmentId.ShouldBe(mail.Id);
+        file.Path.ShouldBe("attachments/invoice.eml");
+        var turnContext = context.TurnContext.ShouldNotBeNull();
+        turnContext.ShouldContain("Current time: 10:00 UTC");
+        turnContext.ShouldContain("invoice.eml");
+        turnContext.ShouldContain("at attachments/invoice.eml", Case.Sensitive, "the agent is told where to open it");
+        turnContext.ShouldContain("not shown to you inline");
+        context.Prompt.ShouldBe("what does this mail want?");
+
+        FilePolicy.Requests.Count.ShouldBe(2, "the facade asks before writing anything, the dispatcher again as it enqueues");
+        FilePolicy.Requests.ShouldAllBe(r => r.Files.Count == 1 && r.Files[0].FileName == "invoice.eml" && r.Files[0].IsFile);
+        FilePolicy.Requests[1].UserMessageId.ShouldBe(mail.MessageId);
+    }
+
+    [Fact]
+    public async Task ThroughTheFacade_AFileForATurnThatDoesNotTakeFiles_IsRefusedWith415_AndNothingIsWritten()
+    {
+        await SeedBindingAsync();
+        var facade = CreateFacade(new FixedContextHandler("ctx"));
+
+        var error = await Should.ThrowAsync<BusinessException>(async () =>
+        {
+            await foreach (var _ in facade.RunStreamingAsync(new AgentRunRequest
+            {
+                AgentId = AgentId,
+                UserId = TestHelper.DefaultTestUserId,
+                ContentParts =
+                [
+                    new TextContentPartDto { Text = "read this" },
+                    new DocumentContentPartDto { Base64Data = Convert.ToBase64String("hello"u8.ToArray()), MediaType = "text/plain", FileName = "notes.txt" }
+                ]
+            }))
+            {
+            }
+        });
+
+        error.HttpStatusCode.ShouldBe(415);
+        error.Code.ShouldBe(Tnzi.AI.Metadata.ErrorCodes.UnsupportedMediaType);
+        error.Message.ShouldContain("notes.txt");
+        (await DbContext.Set<CliRun>().CountAsync()).ShouldBe(0);
+        (await DbContext.Set<AgentThreadMessage>().CountAsync()).ShouldBe(0);
+        (await DbContext.Set<AgentAttachment>().CountAsync()).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task AFileWithoutAPlace_IsStillNamedToTheCli_AsNotReadable()
+    {
+        var (threadId, userMessageId) = await SeedThreadWithQuestionAsync("read the log");
+        var run = await SeedClaimedRunAsync(threadId, userMessageId);
+        DbContext.Set<AgentAttachment>().Add(new AgentAttachment
+        {
+            RunId = run.Id, ThreadId = threadId, MessageId = userMessageId, Origin = AttachmentOrigin.Upload,
+            MediaType = "text/plain", FileName = "build.log", Content = [1, 2, 3], Size = 3,
+            OwnerId = TestHelper.DefaultTestUserId
+        });
+        await DbContext.SaveChangesAsync();
+        var adapter = new ScriptedAdapter([new CliAgentEvent { Type = CliAgentEventType.Text, Content = "ok" }]);
+
+        await CreateExecutor(adapter).ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        var context = adapter.Contexts.Single();
+        context.Attachments.ShouldBeEmpty();
+        context.Files.ShouldHaveSingleItem().Path.ShouldBeNull();
+        context.TurnContext.ShouldNotBeNull().ShouldContain("build.log (3 bytes, text/plain): not placed where you can read it");
     }
 
     [Fact]
@@ -502,300 +632,15 @@ public class CliChatTurnTests : IntegratedTestBase<CliChatDbContext>
         (await DbContext.Set<AgentThreadMessage>().CountAsync()).ShouldBe(0);
     }
 
-    // ---------------------------------------------------------------- helpers
-
-    /// <summary>Streams a turn through the facade, playing the queue processor's part when the run starts.</summary>
-    private async Task<List<AgentStreamChunk>> StreamThroughAsync(AgentDispatchFacade facade, ScriptedAdapter adapter, AgentRunRequest request)
+    /// <summary>What a consumer does: places the run's uploads under <c>attachments/</c> and says where.</summary>
+    private sealed class PlacingContributor(IServiceProvider services) : ICliLaunchProfileContributor
     {
-        var chunks = new List<AgentStreamChunk>();
-        await foreach (var chunk in facade.RunStreamingAsync(request))
+        public async Task<CliLaunchProfile> ContributeAsync(CliLaunchProfileRequest request, CliLaunchProfile profile, CancellationToken cancellationToken)
         {
-            chunks.Add(chunk);
-            if (chunk.EventType == RunStreamEventTypes.RunStarted)
-            {
-                await ClaimAsync(chunk.RunId!.Value);
-                await CreateExecutor(adapter).ExecuteAsync(chunk.RunId.Value, CancellationToken.None).WaitAsync(TestTimeout);
-            }
+            using var scope = services.CreateScope();
+            var uploads = await scope.ServiceProvider.GetRequiredService<IAgentAttachmentService>()
+                .GetForRunAsync(request.Scope.RunId!.Value, AttachmentOrigin.Upload, cancellationToken);
+            return profile with { AttachmentPaths = uploads.ToDictionary(a => a.Id, a => $"attachments/{a.FileName}") };
         }
-
-        return chunks;
-    }
-
-    private AgentDispatchFacade CreateFacade(ICliAgentTurnHandler handler)
-    {
-        var services = new ServiceCollection();
-        services.AddScoped(_ => CreateDispatcher());
-        services.AddScoped<ICliAgentDispatcher>(sp => sp.GetRequiredService<CliAgentDispatcher>());
-        services.AddScoped(_ => ServiceProvider.GetRequiredService<IAgentThreadInternalService>());
-        services.AddScoped(_ => handler);
-
-        var binding = new Mock<ICliAgentBindingService>();
-        binding.Setup(b => b.GetByAgentIdAsync(AgentId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new CliAgentBindingDto { AgentId = AgentId, CliRuntimeId = RuntimeId, ProviderKey = "claude", AcceptsAttachments = true });
-
-        return new AgentDispatchFacade(
-            Mock.Of<IAgentRuntime>(MockBehavior.Strict),
-            binding.Object,
-            CreateDispatcher(),
-            services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
-            NullLogger<AgentDispatchFacade>.Instance);
-    }
-
-    private CliAgentDispatcher CreateDispatcher()
-    {
-        var registry = new Mock<ICliProviderRegistry>();
-        registry.Setup(r => r.Find("claude")).Returns(CliBuiltInProviders.All["claude"]);
-
-        return new CliAgentDispatcher(
-            ServiceProvider.GetRequiredService<IRepository<CliRun, Guid>>(),
-            ServiceProvider.GetRequiredService<IRepository<CliRunMessage, Guid>>(),
-            ServiceProvider.GetRequiredService<IRepository<CliAgentBinding, Guid>>(),
-            ServiceProvider.GetRequiredService<IRepository<CliRuntime, Guid>>(),
-            ServiceProvider.GetRequiredService<IRepository<AgentThread, Guid>>(),
-            TestAgents.Repository(AgentId),
-            new CliRunSignalHub(),
-            new CliRunCancellationRegistry(),
-            Options(new CliAgentOptions { Enabled = true, PollInterval = TimeSpan.FromMilliseconds(50) }),
-            ServiceProvider,
-            providerRegistry: registry.Object,
-            attachmentService: ServiceProvider.GetRequiredService<IAgentAttachmentService>(),
-            threadMessageRepository: ServiceProvider.GetRequiredService<IRepository<AgentThreadMessage, Guid>>());
-    }
-
-    private CliRunExecutor CreateExecutor(ScriptedAdapter adapter, CliToolResultOptions? toolResults = null, bool supportsResumeAt = true)
-    {
-        var descriptor = CliBuiltInProviders.All["claude"] with { SupportsResumeAtEntry = supportsResumeAt };
-        var registry = new Mock<ICliProviderRegistry>();
-        registry.Setup(r => r.Find("claude")).Returns(descriptor);
-
-        var adapters = new Mock<ICliProtocolAdapterFactory>();
-        adapters.Setup(f => f.IsImplemented(CliAgentProtocol.StreamJson)).Returns(true);
-        adapters.Setup(f => f.Create(CliAgentProtocol.StreamJson)).Returns(adapter);
-
-        var host = TestCliHost.Starting(() => new FakeProcess());
-
-        var workspaceRoot = Path.Combine(_workspaces, Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(workspaceRoot);
-        var workspace = new CliWorkspace
-        {
-            RootDirectory = workspaceRoot, WorkDirectory = workspaceRoot, OutputDirectory = workspaceRoot, LogDirectory = workspaceRoot
-        };
-        var preparer = new Mock<ICliWorkspacePreparer>();
-        preparer.Setup(p => p.PrepareAsync(It.IsAny<ICliHostTarget>(), It.IsAny<CliRunContext>(), It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        preparer.Setup(p => p.ReuseAsync(It.IsAny<ICliHostTarget>(), It.IsAny<string>(), It.IsAny<CliRunContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((CliWorkspace?)null);
-
-        var eventBus = new Mock<IEventBus>();
-        eventBus.Setup(b => b.PublishAsync(It.IsAny<CliRunFinishedEvent>(), It.IsAny<CancellationToken>()))
-            .Callback<CliRunFinishedEvent, CancellationToken>((e, _) => _finished.Add(e))
-            .Returns(Task.CompletedTask);
-
-        var runs = ServiceProvider.GetRequiredService<IRepository<CliRun, Guid>>();
-        return new CliRunExecutor(
-            runs,
-            ServiceProvider.GetRequiredService<IRepository<CliRunMessage, Guid>>(),
-            ServiceProvider.GetRequiredService<IRepository<CliAgentBinding, Guid>>(),
-            ServiceProvider.GetRequiredService<IRepository<CliRuntime, Guid>>(),
-            TestAgents.Repository(AgentId),
-            registry.Object,
-            adapters.Object,
-            host,
-            preparer.Object,
-            Mock.Of<ICliBriefComposer>(),
-            Mock.Of<ICliMcpConfigComposer>(),
-            new CliRunTokenService(runs, NullLogger<CliRunTokenService>.Instance),
-            new CliLaunchEnvironmentComposer(Mock.Of<ICliAuthStatusProbe>(), NullLogger<CliLaunchEnvironmentComposer>.Instance),
-            Mock.Of<IAgentGrantService>(),
-            Mock.Of<ISkillService>(),
-            new CliRunSignalHub(),
-            Options(new CliAgentOptions { Enabled = true, ToolResults = toolResults ?? new CliToolResultOptions() }),
-            ServiceProvider.GetRequiredService<ICurrentTenant>(),
-            NullLogger<CliRunExecutor>.Instance,
-            ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
-            threadRepository: ServiceProvider.GetRequiredService<IRepository<AgentThread, Guid>>(),
-            eventBus: eventBus.Object);
-    }
-
-    private static IOptionsMonitor<CliAgentOptions> Options(CliAgentOptions value)
-    {
-        var monitor = new Mock<IOptionsMonitor<CliAgentOptions>>();
-        monitor.Setup(m => m.CurrentValue).Returns(value);
-        return monitor.Object;
-    }
-
-    private async Task SeedBindingAsync()
-    {
-        DbContext.Set<Agent>().Add(new Agent { Id = AgentId, Name = "cli-bound", Provider = "claude" });
-        DbContext.Set<CliAgentBinding>().Add(new CliAgentBinding
-        {
-            AgentId = AgentId, CliRuntimeId = RuntimeId, WorkDirectoryMode = CliWorkDirectoryMode.PerThread,
-            MaterializeSkills = false, InjectAgentInstructions = false
-        });
-        DbContext.Set<CliRuntime>().Add(new CliRuntime
-        {
-            Id = RuntimeId, HostId = "TEST-HOST", ProviderKey = "claude", Name = "claude @ TEST-HOST",
-            ExecutablePath = "/nonexistent/claude", Status = CliRuntimeStatus.Online
-        });
-        await DbContext.SaveChangesAsync();
-        DbContext.ChangeTracker.Clear();
-    }
-
-    private async Task<Guid> SeedThreadAsync()
-    {
-        if (!await DbContext.Set<CliAgentBinding>().AnyAsync())
-        {
-            await SeedBindingAsync();
-        }
-
-        var thread = new AgentThread { AgentId = AgentId, Title = "Thread", LastActivityTime = DateTime.UtcNow };
-        DbContext.Set<AgentThread>().Add(thread);
-        await DbContext.SaveChangesAsync();
-        DbContext.ChangeTracker.Clear();
-        return thread.Id;
-    }
-
-    private async Task<(Guid ThreadId, Guid UserMessageId)> SeedThreadWithQuestionAsync(string question)
-    {
-        var threadId = await SeedThreadAsync();
-        var messageId = await AddMessageAsync(threadId, MessageRole.User, question);
-        return (threadId, messageId);
-    }
-
-    private async Task<Guid> AddMessageAsync(Guid threadId, string role, string content)
-    {
-        using var scope = ServiceProvider.CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<IAgentThreadInternalService>()
-            .SaveMessageAsync(threadId, role, content);
-    }
-
-    private async Task<CliRun> SeedClaimedRunAsync(Guid threadId, Guid userMessageId, string prompt = "a question")
-    {
-        var run = new CliRun
-        {
-            AgentId = AgentId, CliRuntimeId = RuntimeId, ThreadId = threadId, UserMessageId = userMessageId,
-            Status = CliRunStatus.Dispatched, ClaimedByHostId = "TEST-HOST", DispatchedAt = DateTime.UtcNow,
-            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5), Prompt = prompt
-        };
-        DbContext.Set<CliRun>().Add(run);
-        await DbContext.SaveChangesAsync();
-        DbContext.ChangeTracker.Clear();
-        return run;
-    }
-
-    private async Task SeedFinishedRunAsync(Guid threadId, Guid userMessageId, string session, string entry, DateTime completedAt)
-    {
-        DbContext.Set<CliRun>().Add(new CliRun
-        {
-            AgentId = AgentId, CliRuntimeId = RuntimeId, ThreadId = threadId, UserMessageId = userMessageId,
-            Status = CliRunStatus.Completed, Prompt = "earlier", ProviderSessionId = session, ProviderSessionEntryId = entry,
-            CompletedAt = completedAt
-        });
-        await DbContext.SaveChangesAsync();
-        DbContext.ChangeTracker.Clear();
-    }
-
-    private async Task ClaimAsync(Guid runId)
-        => await DbContext.Set<CliRun>().Where(r => r.Id == runId).ExecuteUpdateAsync(s => s
-            .SetProperty(r => r.Status, CliRunStatus.Dispatched)
-            .SetProperty(r => r.ClaimedByHostId, "TEST-HOST")
-            .SetProperty(r => r.LeaseExpiresAt, DateTime.UtcNow.AddMinutes(5)));
-
-    private async Task<CliRun> ReloadRunAsync(Guid runId)
-        => await DbContext.Set<CliRun>().AsNoTracking().IgnoreQueryFilters().FirstAsync(r => r.Id == runId);
-
-    private sealed class FixedContextHandler(string context) : ICliAgentTurnHandler
-    {
-        public Task<CliTurnDecision> OnTurnAsync(CliTurnContext turn, CancellationToken cancellationToken = default)
-            => Task.FromResult(CliTurnDecision.Proceed(context));
-    }
-
-    private sealed class RecordingHandler : ICliAgentTurnHandler
-    {
-        public List<CliTurnContext> Turns { get; } = [];
-
-        public List<CliTurnQueued> Queued { get; } = [];
-
-        public Task<CliTurnDecision> OnTurnAsync(CliTurnContext turn, CancellationToken cancellationToken = default)
-        {
-            Turns.Add(turn);
-            return Task.FromResult(CliTurnDecision.Proceed());
-        }
-
-        public Task OnTurnQueuedAsync(CliTurnQueued queued, CancellationToken cancellationToken = default)
-        {
-            Queued.Add(queued);
-            return Task.CompletedTask;
-        }
-    }
-
-    private sealed class RefusingHandler : ICliAgentTurnHandler
-    {
-        public Task<CliTurnDecision> OnTurnAsync(CliTurnContext turn, CancellationToken cancellationToken = default)
-            => Task.FromResult(CliTurnDecision.Refuse("Not in this session.", "APP_RESTRICTED"));
-    }
-
-    /// <summary>Replays a fixed event script once and ends with the given status, recording what it was launched with.</summary>
-    private sealed class ScriptedAdapter(
-        IReadOnlyList<CliAgentEvent> events,
-        CliRunStatus status = CliRunStatus.Completed,
-        string sessionId = "session-after",
-        string? entryId = "entry-after",
-        CliRunFailureReason? failureReason = null,
-        DateTimeOffset? usageLimitResetsAt = null) : ICliProtocolAdapter
-    {
-        public List<CliAgentLaunchContext> Contexts { get; } = [];
-
-        public CliAgentProtocol Protocol => CliAgentProtocol.StreamJson;
-
-        public CliProcessSpec BuildProcess(CliAgentLaunchContext context)
-        {
-            Contexts.Add(context);
-            return new CliProcessSpec { ExecutablePath = context.ExecutablePath, WorkingDirectory = context.WorkingDirectory };
-        }
-
-        public async IAsyncEnumerable<CliAgentEvent> RunAsync(
-            ICliAgentTransport transport, CliAgentLaunchContext context,
-            [EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            foreach (var evt in events)
-            {
-                await Task.Yield();
-                yield return evt;
-            }
-        }
-
-        public CliAgentResult GetResult(CliSessionOutcome outcome) => new()
-        {
-            Status = status,
-            FailureReason = status == CliRunStatus.Completed ? null
-                : failureReason ?? (status == CliRunStatus.Cancelled ? CliRunFailureReason.Cancelled : CliRunFailureReason.ProviderError),
-            UsageLimitResetsAt = usageLimitResetsAt,
-            Output = status == CliRunStatus.Completed ? string.Concat(events.Where(e => e.Type == CliAgentEventType.Text).Select(e => e.Content)) : null,
-            Error = status == CliRunStatus.Completed ? null : "stopped",
-            SessionId = sessionId,
-            SessionEntryId = entryId,
-            DurationMs = 1
-        };
-    }
-
-    private sealed class FakeProcess : ICliProcess
-    {
-        public ICliAgentTransport Transport { get; } = new FakeCliAgentTransport([]);
-
-        public int ProcessId => 4242;
-
-        public bool HasExited { get; private set; }
-
-        public int? ExitCode => HasExited ? 0 : null;
-
-        public Task TerminateAsync(CancellationToken cancellationToken)
-        {
-            HasExited = true;
-            return Task.CompletedTask;
-        }
-
-        public Task<int> WaitForExitAsync(CancellationToken cancellationToken) => Task.FromResult(0);
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

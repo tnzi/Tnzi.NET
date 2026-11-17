@@ -58,6 +58,7 @@ global using Tnzi.AspNetCore.Options;
 global using Tnzi.AspNetCore.Routing;
 global using Tnzi.AspNetCore.Security;
 global using Tnzi.AspNetCore.Services;
+global using Tnzi.AspNetCore.Startup;
 global using Tnzi.AspNetCore.Dtos;
 global using Tnzi.Caching;
 global using Tnzi.Data;

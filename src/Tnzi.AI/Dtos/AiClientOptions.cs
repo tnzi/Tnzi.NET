@@ -20,6 +20,18 @@ public class AiClientOptions
     /// <summary>是否启用 Run 追踪</summary>
     public bool EnableRunTracking { get; init; }
 
+    /// <summary>
+    /// 这次调用新建线程时（不给 threadId）写进线程的来源（<c>AgentThreadDto.Origin</c>），例如 <c>Schedule</c>；续接已有线程时不用。
+    /// 应用自己的值，只校验形状。
+    /// </summary>
+    public string? ThreadOrigin { get; init; }
+
+    /// <summary>
+    /// 这次调用新建线程时（不给 threadId）它在不在主人的列表里（<c>AgentThreadDto.Listing</c>）；续接已有线程时不用。
+    /// 默认 <see cref="ThreadListing.Listed"/>；无人值守的运行给 <see cref="ThreadListing.UntilUserMessage"/>。
+    /// </summary>
+    public ThreadListing ThreadListing { get; init; }
+
     /// <summary>用户 ID（用于配额等）</summary>
     public Guid? UserId { get; init; }
 

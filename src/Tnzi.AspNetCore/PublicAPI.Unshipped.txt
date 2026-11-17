@@ -376,3 +376,18 @@ Tnzi.AspNetCore.Options.HttpEncryptOptions.MaxRequestBodyBytes.set -> void
 const Tnzi.AspNetCore.Security.RequestValidator.MaxNonceLength = 128 -> int
 static Tnzi.AspNetCore.Http.HttpContextExtensions.GetEndpointRouteTemplate(this Microsoft.AspNetCore.Http.HttpContext! context) -> string?
 static Tnzi.AspNetCore.Http.HttpContextExtensions.IsLongLivedConnection(this Microsoft.AspNetCore.Http.HttpContext! context) -> bool
+Tnzi.AspNetCore.Middleware.Handlers.BadHttpRequestExceptionHandler
+Tnzi.AspNetCore.Middleware.Handlers.BadHttpRequestExceptionHandler.BadHttpRequestExceptionHandler(Microsoft.AspNetCore.Hosting.IWebHostEnvironment! environment, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.ExceptionHandlingOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.Handlers.BadHttpRequestExceptionHandler!>! logger) -> void
+override Tnzi.AspNetCore.Middleware.Handlers.BadHttpRequestExceptionHandler.CanHandle(System.Exception! exception) -> bool
+override Tnzi.AspNetCore.Middleware.Handlers.BadHttpRequestExceptionHandler.HandleAsync(Microsoft.AspNetCore.Http.HttpContext! context, System.Exception! exception) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Middleware.ExceptionHandlingResult!>!
+Tnzi.AspNetCore.Options.PostMigrationStartupTaskOptions
+Tnzi.AspNetCore.Options.PostMigrationStartupTaskOptions.PostMigrationStartupTaskOptions() -> void
+Tnzi.AspNetCore.Options.PostMigrationStartupTaskOptions.MaxRetryDelay.get -> System.TimeSpan
+Tnzi.AspNetCore.Options.PostMigrationStartupTaskOptions.MaxRetryDelay.set -> void
+Tnzi.AspNetCore.Options.PostMigrationStartupTaskOptions.RequiredTaskHealthStatus.get -> Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus
+Tnzi.AspNetCore.Options.PostMigrationStartupTaskOptions.RequiredTaskHealthStatus.set -> void
+Tnzi.AspNetCore.Options.PostMigrationStartupTaskOptions.RetryDelay.get -> System.TimeSpan
+Tnzi.AspNetCore.Options.PostMigrationStartupTaskOptions.RetryDelay.set -> void
+Tnzi.AspNetCore.Options.PostMigrationStartupTaskOptionsValidator
+Tnzi.AspNetCore.Options.PostMigrationStartupTaskOptionsValidator.PostMigrationStartupTaskOptionsValidator() -> void
+override Tnzi.AspNetCore.Options.PostMigrationStartupTaskOptionsValidator.ValidateOptions(Tnzi.AspNetCore.Options.PostMigrationStartupTaskOptions! options, System.Collections.Generic.List<string!>! errors) -> void

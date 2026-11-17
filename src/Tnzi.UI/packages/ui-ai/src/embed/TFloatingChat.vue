@@ -6,9 +6,10 @@
  * Slot: #trigger for custom button.
  */
 
-import { NButton } from 'naive-ui';
 import { watch } from 'vue';
 import { Icon } from '@iconify/vue';
+import TIconButton from '../components/controls/TIconButton.vue';
+import { vTooltip } from '../headless/tooltip';
 import { useEmbedMode } from '../headless/useEmbedMode';
 import TChatBox from '../components/chat/TChatBox.vue';
 import type { ChatMessage } from '../headless/useChat';
@@ -74,12 +75,8 @@ watch(isOpen, (v) => {
         <div class="t-floating-chat__header">
           <span class="text-sm font-medium">{{ t.embed.title }}</span>
           <div class="flex items-center gap-1">
-            <NButton text size="small" :aria-label="t.embed.minimize" @click="minimize()">
-              <template #icon><Icon icon="lucide:minimize-2" class="size-3.5" /></template>
-            </NButton>
-            <NButton text size="small" :aria-label="t.embed.close" @click="toggle()">
-              <template #icon><Icon icon="lucide:x" class="size-3.5" /></template>
-            </NButton>
+            <TIconButton icon="lucide:minimize-2" size="xs" :label="t.embed.minimize" @click="minimize()" />
+            <TIconButton icon="lucide:x" size="xs" :label="t.embed.close" @click="toggle()" />
           </div>
         </div>
 
@@ -98,36 +95,35 @@ watch(isOpen, (v) => {
       </div>
     </Transition>
 
-    <!-- Minimized bar -->
-    <div
-      v-if="isOpen && isMinimized"
-      class="t-floating-chat__minimized"
-      :title="t.embed.expand"
-      @click="expand()"
-    >
-      <Icon icon="lucide:message-circle" class="size-4 t-floating-chat__primary-icon" />
-      <span class="text-sm">{{ t.embed.title }}</span>
-      <NButton text size="small" class="size-5" :aria-label="t.embed.close" @click.stop="toggle()">
-        <template #icon><Icon icon="lucide:x" class="size-3" /></template>
-      </NButton>
+    <!-- Minimized bar: the title is the button that expands the window, the
+         cross beside it closes; two sibling buttons, so both are reachable
+         from the keyboard. -->
+    <div v-if="isOpen && isMinimized" class="t-floating-chat__minimized">
+      <button
+        v-tooltip="t.embed.expand"
+        type="button"
+        class="t-floating-chat__expand"
+        :aria-label="`${t.embed.expand}: ${t.embed.title}`"
+        @click="expand()"
+      >
+        <Icon icon="lucide:message-circle" class="t-floating-chat__primary-icon" aria-hidden="true" />
+        <span>{{ t.embed.title }}</span>
+      </button>
+      <TIconButton icon="lucide:x" size="xs" :label="t.embed.close" @click="toggle()" />
     </div>
 
     <!-- Trigger button -->
     <slot name="trigger">
-      <NButton
-        type="primary"
-        round
+      <button
+        v-tooltip="{ text: isOpen ? t.embed.close : t.embed.open, side: 'left' }"
+        type="button"
         class="t-floating-chat__fab"
         :aria-label="isOpen ? t.embed.close : t.embed.open"
+        :aria-expanded="isOpen"
         @click="toggle()"
       >
-        <template #icon>
-          <Icon
-            :icon="isOpen ? 'lucide:x' : 'lucide:message-circle'"
-            class="size-5"
-          />
-        </template>
-      </NButton>
+        <Icon :icon="isOpen ? 'lucide:x' : 'lucide:message-circle'" aria-hidden="true" />
+      </button>
     </slot>
   </div>
 </template>
@@ -137,19 +133,20 @@ watch(isOpen, (v) => {
   position: fixed;
   bottom: 16px;
   right: 16px;
-  z-index: 50;
+  z-index: var(--tnzi-ai-z-drawer, 50);
 }
 .t-floating-chat__window {
   margin-bottom: 12px;
-  width: 380px;
+  /* A phone keeps 16px of page on either side. */
+  width: min(380px, calc(100vw - 32px));
   height: 560px;
   /* On a short viewport the window shrinks rather than rising into the page's
      top inset (`--tnzi-overlay-inset-top`) or off the top: 96px is the
      launcher below it (16 + 48 + 12) plus a 20px gap at the top. */
   max-height: calc(100vh - var(--tnzi-overlay-inset-top, 0px) - 96px);
   border-radius: 16px;
-  border: 1px solid var(--tnzi-border);
-  background-color: var(--tnzi-container-bg);
+  border: 1px solid var(--tnzi-ai-border);
+  background-color: var(--tnzi-ai-surface);
   box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
   overflow: hidden;
   display: flex;
@@ -159,25 +156,61 @@ watch(isOpen, (v) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--tnzi-border);
-  padding: 8px 16px;
+  border-bottom: 1px solid var(--tnzi-ai-border);
+  padding: 6px 8px 6px 16px;
+  color: var(--tnzi-ai-text);
 }
 .t-floating-chat__minimized {
   margin-bottom: 12px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   border-radius: 999px;
-  border: 1px solid var(--tnzi-border);
-  background-color: var(--tnzi-container-bg);
-  padding: 8px 16px;
+  border: 1px solid var(--tnzi-ai-border);
+  background-color: var(--tnzi-ai-surface);
+  padding: 3px 4px 3px 3px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  cursor: pointer;
 }
-.t-floating-chat__primary-icon { color: var(--tnzi-ai-accent-text); }
+.t-floating-chat__expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--tnzi-ai-text);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
+}
+.t-floating-chat__expand:hover { background: var(--tnzi-ai-hover); }
+.t-floating-chat__primary-icon {
+  font-size: 16px;
+  color: var(--tnzi-ai-accent-text);
+}
 .t-floating-chat__fab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 48px;
   height: 48px;
+  margin-left: auto;
+  border: none;
+  border-radius: 999px;
+  background: var(--tnzi-ai-accent);
+  color: var(--tnzi-ai-on-accent);
+  font-size: 20px;
+  cursor: pointer;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: transform var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
+}
+.t-floating-chat__fab:hover { transform: translateY(-1px); }
+.t-floating-chat__expand:focus-visible,
+.t-floating-chat__fab:focus-visible {
+  outline: var(--tnzi-ai-focus-outline);
+  outline-offset: 2px;
 }
 </style>

@@ -16,11 +16,12 @@
       免授权版本 ImageSharp 3.1.12。升级到 3.2.0 或 v4（包括只为拿安全修复而升）之前，
       须先取得 Six Labors 商业授权。
 
-      漏洞处置（2026-10）：3.1.12 有五条已披露的 GHSA，修复版都在授权线上，所以不升级。
-      本仓可达的只有一条（BigTIFF 解码空转，GHSA-wmxv-xphr-5c9g），由 ImageDecodeGuard 与
-      QrCodeReader 在把字节交给 ImageSharp 之前按文件头拒绝；其余四条只在调用本仓从不调用的
+      漏洞处置（2026-10）：3.1.12 有六条已披露的 GHSA，修复版都在授权线上，所以不升级。
+      本仓可达的有两条，都由 ImageDecodeGuard 与 QrCodeReader 在把字节交给 ImageSharp 之前拒绝：
+      BigTIFF 解码空转（GHSA-wmxv-xphr-5c9g，按文件头）与 CCITT 解压器越界写（GHSA-v76p-62qx-wwq2，
+      逐页读 IFD，拒绝 MH / Group 3 页与分块的 Group 4 页）；其余四条只在调用本仓从不调用的
       API 时可达（HistogramEqualization、TIFF CCITT 编码、读取 IccProfile.Entries）。
-      五条的 NuGet 审计告警在根目录 Directory.Build.props 逐条压制并写明理由，
+      六条的 NuGet 审计告警在根目录 Directory.Build.props 逐条压制并写明理由，
       tests/Tnzi.Imaging.Tests/ImageSharpAdvisoryGateTests 守着那些理由不失效。
     -->
     <PackageReference Include="SixLabors.Fonts" Version="2.1.3" />

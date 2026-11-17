@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref, h, nextTick } from 'vue'
-import { useFormHostRegistration } from '@tnzi/ui/headless'
+import { useFormHostRegistration } from '../../../src/headless/form-host'
 import TDetailHost from '../../../src/components/detail/TDetailHost.vue'
 
 const stubs = {

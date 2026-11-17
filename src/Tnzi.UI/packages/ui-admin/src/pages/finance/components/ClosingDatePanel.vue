@@ -102,7 +102,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { NAlert, NButton, NDatePicker, NForm, NFormItem, NInput, NTag } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import { TModalShell } from '@tnzi/ui'
+import TModalShell from '../../../components/overlay/TModalShell.vue'
 import { formatAccountingDate, isoDateToLocalTs, tsToIsoDate } from '../../../utils/finance-format'
 import type { FinanceBridge, LedgerLockDto } from '../../../services/bridges/finance-bridge'
 

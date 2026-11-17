@@ -30,11 +30,17 @@ public class AiUtilityOptions
     public int MaxTokens { get; set; } = 4096;
 
     /// <summary>
-    /// 默认温度参数
+    /// 默认温度参数；null（默认）= 不发温度，用模型自己的默认值
     /// </summary>
+    /// <remarks>
+    /// ★ 默认不发是有意的：新一代 Claude 型号对带 <c>temperature</c> 的请求答 400，
+    /// 一个对谁都发的默认值会让 utility 调用在这些型号上全部失败。
+    /// 配了值时，对收采样参数的型号照常发送；对不收的型号（见 <c>ModelSamplingSupport</c>）不发。
+    /// </remarks>
     [RuntimeSetting(Label = "Utility Temperature", I18n = "admin.modules.system.settings.fields.utilityTemperature",
+        Description = "Sampling temperature for utility calls; empty uses the model's default. Models that reject temperature never receive it",
         Type = SettingFieldType.Decimal, Min = 0, Max = 2)]
-    public double Temperature { get; set; } = 0.3;
+    public double? Temperature { get; set; }
 }
 
 /// <summary>
@@ -65,7 +71,7 @@ public class AiUtilityCallOptions
     /// 模型按 <see cref="Model"/> → <see cref="AiUtilityInlineProvider.DefaultModel"/> 解析；
     /// <see cref="MaxTokens"/> / <see cref="Temperature"/> 未设置时仍回退 <c>AI:Utility</c> 的默认值。
     /// 提供商不合法时本次调用记 Warning 并返回 <see langword="null"/>，与配置提供商的失败形态相同。
-    /// <see cref="Services.IAiUtility.IsAvailable"/> 只描述配置提供商，自带提供商的调用方无需问它。
+    /// <see cref="Services.IAiUtility.IsAvailable"/> 只描述不自带提供商时的解析结果，自带提供商的调用方无需问它。
     /// </remarks>
     public AiUtilityInlineProvider? Provider { get; init; }
 }

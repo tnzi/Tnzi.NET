@@ -92,6 +92,7 @@ internal sealed class CliRunFinalizer
                 .SetProperty(r => r.LeaseExpiresAt, (DateTime?)null)
                 // 终态的运行没有进程可以接回来
                 .SetProperty(r => r.ReattachHandle, (string?)null)
+                .SetProperty(r => r.HandedInputs, (string?)null)
                 .SetProperty(r => r.DetachedAt, (DateTime?)null)
                 // 运行到达终态，回写凭据立刻作废：凭据校验已按状态挡掉，清掉哈希是让终态记录里不留任何凭据材料
                 .SetProperty(r => r.WriteBackTokenHash, (string?)null)
@@ -128,6 +129,12 @@ internal sealed class CliRunFinalizer
                 if (completion.SessionUsageJson is { } sessionUsageJson)
                 {
                     s.SetProperty(r => r.SessionUsageJson, sessionUsageJson);
+                }
+
+                if (completion.Context is { } context)
+                {
+                    s.SetProperty(r => r.ContextTokens, (long?)context.Tokens)
+                        .SetProperty(r => r.ContextWindow, context.Window);
                 }
             }
         }, CancellationToken.None);
@@ -257,4 +264,7 @@ internal sealed record CliRunCompletion(int MessageCount, string? ProviderSessio
 
     /// <summary>这一轮结束时的会话累计用量（下一轮续接时的基线）；null = 不改这一列。</summary>
     public string? SessionUsageJson { get; init; }
+
+    /// <summary>这一轮结束时上下文窗口的占用；null = 协议没报，两列都不改。</summary>
+    public CliContextUsage? Context { get; init; }
 }

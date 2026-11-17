@@ -8,10 +8,10 @@ public enum CliAgentProtocol
     /// <summary>stdio 上的行分隔 JSON 事件流（claude / codebuddy / qwen / cursor）。</summary>
     StreamJson = 0,
 
-    /// <summary>Agent Client Protocol：stdio 上的 JSON-RPC 2.0，双向（hermes / kimi / kiro / qoder / trae / grok）。</summary>
+    /// <summary>Agent Client Protocol：stdio 上的 JSON-RPC 2.0，双向（codex / hermes / kimi / kiro / qoder / trae / grok）。</summary>
     Acp = 1,
 
-    /// <summary>厂商专有 app-server（codex）。</summary>
+    /// <summary>厂商专有 app-server。没有适配器，内置表里也没有 provider 用它：codex 经 ACP 适配器 <c>codex-acp</c> 接入。</summary>
     VendorAppServer = 2
 }
 
@@ -97,13 +97,21 @@ public sealed record CliProviderDescriptor
     public bool ResumeRejectionDetectable { get; init; }
 
     /// <summary>
-    /// 该 provider 能否随提示接收附件（PNG / JPEG / GIF / WebP 图片与 PDF 文档，作为内容块投递）。
+    /// 该 provider 能随提示接收的附件种类（图片、PDF 文档，作为内容块投递）。
     /// </summary>
     /// <remarks>
-    /// 默认 <c>false</c>：带附件的消息发给不支持的 provider 时当场以 415 拒绝，而不是只把文字发出去：
+    /// 默认 <see cref="CliAttachmentKinds.None"/>：带附件的消息发给收不了它的 provider 时当场以 415 拒绝，而不是只把文字发出去：
     /// 那样的回合看上去和成功一模一样，模型照样作答，用户以为它看到了附件。只对实测过的 provider 打开。
+    /// <para>
+    /// ACP 的 CLI 只开 <see cref="CliAttachmentKinds.Images"/>：ACP 没有文档块，PDF 只能作为内嵌资源投递，
+    /// 实测 codex-acp 把它当 base64 文本塞进提示（模型读不到内容、白白占掉上下文）。
+    /// 握手时报 <c>promptCapabilities.image = false</c> 的 ACP 运行时，带图片的一轮以 <see cref="CliRunFailureReason.UnsupportedInput"/> 结束。
+    /// </para>
     /// </remarks>
-    public bool AcceptsAttachments { get; init; }
+    public CliAttachmentKinds Attachments { get; init; }
+
+    /// <summary>该 provider 收不收任何附件（<see cref="Attachments"/> 不为空）。</summary>
+    public bool AcceptsAttachments => Attachments != CliAttachmentKinds.None;
 
     /// <summary>
     /// 该 provider 能否从会话里的某个条目处截断续接（claude：<c>--resume-session-at &lt;条目&gt; --fork-session</c>）。
@@ -114,6 +122,66 @@ public sealed record CliProviderDescriptor
     /// 默认 <c>false</c>：只对实测过的 provider 打开。
     /// </remarks>
     public bool SupportsResumeAtEntry { get; init; }
+
+    /// <summary>
+    /// 让 CLI 把要人回答的事交给宿主（框架）的启动参数；null = 这个 provider 没有（或没实测过）这样的开关。只对 stream-json 有意义。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// claude 是 <c>--permission-prompt-tool stdio</c>，按 2.1.316 实测：不带它时 <c>-p</c> 模式下<b>没有人</b>回答权限提示，
+    /// 要权限的操作当场被拒、一条 <c>can_use_tool</c> 都不发（「先问我」档的批准通道因此收不到请求），
+    /// <c>AskUserQuestion</c>、<c>EnterPlanMode</c> 与 <c>ExitPlanMode</c> 也不在工具列表里。带上它，这三类都以 <c>can_use_tool</c> 到达，
+    /// 全权档（<c>bypassPermissions</c>）下也一样（问题与计划带 <c>requires_user_interaction: true</c>，普通工具照旧不问）。
+    /// </para>
+    /// <para>
+    /// 执行器只在这一轮有人值守时让适配器带上它：没有人值守时问题与计划工具不在 agent 手里，比拿到一份空回答然后自己猜要好。
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<string>? HostPromptArgs { get; init; }
+
+    /// <summary>
+    /// agent 问用户、进出计划要用的那几个内置工具（claude：<c>AskUserQuestion</c>、<c>EnterPlanMode</c>、<c>ExitPlanMode</c>）。空 = 没有。
+    /// </summary>
+    /// <remarks>
+    /// 启动档案用 <see cref="CliLaunchProfile.BuiltInTools"/> 收窄内置工具时（claude 的 <c>--tools</c>，实测 2.1.317：
+    /// <c>--tools WebSearch</c> 之后 init 帧的工具列表只剩 <c>WebSearch</c>），这几个工具跟着一起没了，有人值守的一轮既问不了也交不了计划。
+    /// 执行器在这一轮转发交互请求时把它们补进那份清单；没有人值守时不补，它们照旧不在 agent 手里。
+    /// </remarks>
+    public IReadOnlyList<string> InteractionTools { get; init; } = [];
+
+    /// <summary>
+    /// stream-json：CLI 接受一条只写进会话、不开一轮的用户帧（claude：<c>"shouldQuery": false</c>）。默认 <c>false</c>：只对实测过的 provider 打开。
+    /// </summary>
+    /// <remarks>
+    /// 用在用户这一轮是斜杠命令（<c>/名字 参数</c>）的时候：CLI 只在一条用户消息<b>整条</b>以斜杠命令开头时把它展开成命令或技能，
+    /// 追加在尾部的上下文会变成命令的参数，放进同一条消息的另一个内容块则让命令认不出来（2.1.317 实测：模型改为自己调 Skill 工具，
+    /// 内建命令如 <c>/compact</c> 则根本不执行）。先发一帧只含上下文的「不开一轮」用户帧、再发命令本身，命令的参数干净，模型照样读得到上下文。
+    /// CLI 对那一帧回一条空的 result（<c>num_turns: 0</c>），适配器把它吞掉。
+    /// </remarks>
+    public bool AcceptsContextFrames { get; init; }
+
+    /// <summary>
+    /// stream-json：一轮进行中写进 stdin 的用户消息，CLI 在 agent 的两步之间收下、并进这一轮，不必停下它（claude：带 <c>uuid</c> 与
+    /// <c>priority: "next"</c> 的用户帧，着落经 <c>command_lifecycle</c> 报告）。默认 <c>false</c>：只对实测过的 provider 打开。
+    /// </summary>
+    /// <remarks>
+    /// 打开时线程的消息队列把运行中写下的消息交给正在跑的这一轮，「立即发送」也不停下它；关着时消息等这一轮结束、作为新的一轮发出。
+    /// 进程交给远程宿主、可以重新附着的运行一律不交（重新附着按 stdin 行数重放，中途插进去的行会让重放错位）。
+    /// </remarks>
+    public bool TakesMessagesMidTurn { get; init; }
+
+    /// <summary>
+    /// stream-json：一个已经起来的进程能在两轮之间换推理强度（claude：<c>control_request</c> 的 <c>apply_flag_settings</c>
+    /// 带 <c>effortLevel</c>）。默认 <c>false</c>：只对实测过的 provider 打开。
+    /// </summary>
+    /// <remarks>
+    /// 打开时，等后台任务的进程交给同线程下一条运行（§6.18）不因两轮的 <c>--effort</c> 不同而另起进程：接手时先写这一帧再写用户帧，
+    /// 后台任务不会因为用户换了档而被一起结束。只在两轮都给了强度时这样换：从「有」换到「没有」（<c>effortLevel: null</c>）回到的是
+    /// 模型的默认档，不是不带 <c>--effort</c> 启动时那个值，所以照旧另起进程。
+    /// 关着时强度不同 = 启动不同 = 另起进程续接会话。一轮<b>进行中</b>交给它的排队消息（<see cref="TakesMessagesMidTurn"/>）不经这里换档：
+    /// 强度与这一轮不同的消息等这一轮结束、作为新的一轮发出。
+    /// </remarks>
+    public bool ChangesEffortInSession { get; init; }
 
     /// <summary>禁止用户 custom args 覆盖的参数（协议契约参数）。</summary>
     public IReadOnlyDictionary<string, BlockedArgMode> BlockedArgs { get; init; }

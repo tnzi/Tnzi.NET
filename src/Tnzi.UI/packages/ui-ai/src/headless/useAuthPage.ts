@@ -32,7 +32,7 @@ import type {
   TwoFactorMethodName,
   LoginCaptchaData,
   Translate,
-} from '@tnzi/ui';
+} from '@tnzi/ui/headless';
 
 /** Which pane fills the column. `identify` is always the entry point. */
 export type AuthStep = 'identify' | 'password' | 'code' | 'register' | 'two-factor';
@@ -57,6 +57,13 @@ export interface UseAuthPageOptions {
    * provider, whose token is composed from `captcha.captchaId` + `captchaCode`.
    */
   executeCaptcha?: () => Promise<string>;
+  /**
+   * Opt in to the one-screen form: the entry pane (`identify`) takes the account
+   * AND the password and one submit signs in, instead of the account-first
+   * flow with a separate `password` step. Only applies while password sign-in
+   * is on; code-only deployments keep the account-first entry pane.
+   */
+  singleScreen?: () => boolean;
 }
 
 export interface UseAuthPageReturn {
@@ -71,6 +78,8 @@ export interface UseAuthPageReturn {
   accountType: ComputedRef<'email' | 'phone' | undefined>;
   busy: ComputedRef<boolean>;
   canContinue: ComputedRef<boolean>;
+  /** The entry pane takes the account and the password together (opted in, and password sign-in is on). */
+  singleScreen: ComputedRef<boolean>;
   /** Code sign-in is on and can send its code to the kind of address typed. */
   offersCodeSignIn: ComputedRef<boolean>;
   /** Sign-up is on and can send its code to the kind of address typed. */
@@ -118,6 +127,7 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
   });
 
   const busy = computed(() => submitting.value || (options.loading?.() ?? false));
+  const singleScreen = computed(() => (options.singleScreen?.() ?? false) && options.features().passwordLogin);
   const canContinue = computed(() => account.value.trim().length > 0 && !busy.value);
 
   /**
@@ -267,6 +277,11 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
    * code. On a refusal the page stays on this step with the error under it.
    */
   async function onContinue(): Promise<void> {
+    // One-screen form: the submit IS the password sign-in.
+    if (singleScreen.value) {
+      await onPasswordSubmit();
+      return;
+    }
     if (!canContinue.value) return;
     reset();
     const features = options.features();
@@ -287,6 +302,14 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
     const call = options.callbacks().pwdLogin;
     if (!call) {
       error.value = t('auth.errors.notConfigured', 'Password sign-in is not configured.');
+      return;
+    }
+    // One-screen form: both fields share the pane, so an empty one is a local
+    // mistake (and a password manager may not have fired its input events yet).
+    if (singleScreen.value && (!account.value.trim() || !password.value)) {
+      reset();
+      error.value = t('auth.errors.credentialsRequired', 'Enter your account and password.');
+      await options.focusFirstField?.();
       return;
     }
     await run(async () => {
@@ -360,7 +383,7 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
         password: password.value,
         type: accountType.value,
       });
-      await switchTo('password');
+      await switchTo(singleScreen.value ? 'identify' : 'password');
       notice.value = t('auth.notice.registered', 'Account created. Sign in with your password.');
     });
   }
@@ -404,6 +427,13 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
 
   async function switchTo(next: AuthStep): Promise<void> {
     reset();
+    // The code goes to what was typed, and the one-screen form lets the user
+    // reach these links before typing anything.
+    if (singleScreen.value && (next === 'code' || next === 'register') && !account.value.trim()) {
+      error.value = t('auth.errors.accountRequired', 'Enter your email address or phone number first.');
+      await options.focusFirstField?.();
+      return;
+    }
     code.value = '';
     password.value = '';
     if (next === 'code') await run(() => sendCode('code-login'));
@@ -449,6 +479,7 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
     accountType,
     busy,
     canContinue,
+    singleScreen,
     offersCodeSignIn,
     offersSignUp,
     challenge,

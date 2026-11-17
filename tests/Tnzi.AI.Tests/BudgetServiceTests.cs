@@ -347,16 +347,19 @@ public class BudgetService_PeriodBoundary : BudgetTestBase
 public class BudgetService_ThreadDeletion : BudgetTestBase
 {
     [Fact]
-    public async Task ThreadCleanup_KeepsUsageLogRows_ButDetachesThreadId()
+    public async Task ThreadCleanup_KeepsUsageLogRowsAndTheirUser_ButDetachesThreadId()
     {
         // 线程是软删的展示数据，UsageLog 是账目事实：用户删自己的线程不能让租户/Agent 的本期花费缩水。
         // 处理器只解除 ThreadId 引用，token / cost / provider / model / agent / tenant / 时间一律保留。
         var threadId = Guid.NewGuid();
         var otherThreadId = Guid.NewGuid();
+        var ownerId = Guid.NewGuid();
         var log1 = CreateLog(30m);
         log1.ThreadId = threadId;
+        log1.UserId = ownerId;
         var log2 = CreateLog(20m);
         log2.ThreadId = threadId;
+        log2.UserId = ownerId;
         var untouched = CreateLog(10m);
         untouched.ThreadId = otherThreadId;
         await SeedLogsAsync(log1, log2, untouched);
@@ -373,6 +376,8 @@ public class BudgetService_ThreadDeletion : BudgetTestBase
         var rows = await DbContext.Set<UsageLog>().OrderBy(l => l.EstimatedCostUsd).ToListAsync();
         rows.Count.ShouldBe(3);
         rows.Where(l => l.Id == log1.Id || l.Id == log2.Id).ShouldAllBe(l => l.ThreadId == null);
+        // 归属不随线程走：删了对话，用户自己的用量里仍有这两行
+        rows.Where(l => l.Id == log1.Id || l.Id == log2.Id).ShouldAllBe(l => l.UserId == ownerId);
         rows.Single(l => l.Id == untouched.Id).ThreadId.ShouldBe(otherThreadId);
         rows.Sum(l => l.EstimatedCostUsd).ShouldBe(60m);
 

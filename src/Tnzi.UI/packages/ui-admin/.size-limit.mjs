@@ -82,6 +82,22 @@ const LAZY_DESKTOP_SHELL = ['../components/desktop/*']
  */
 const LAZY_HOSTED_PANELS = ['./components/ai/*']
 
+/**
+ * The charting runtime (`echarts/core` plus the chart, component and renderer
+ * modules `headless/useEcharts` registers). Externalised from every budget
+ * below and measured on its own, last in this file: at roughly 220 kB it would
+ * otherwise drown every other signal, and it moves only when the registered
+ * modules change. It entered these figures on 2026-11-09, when `useEcharts`
+ * moved here from `@tnzi/ui` (a peer, never counted before).
+ */
+const CHART_RUNTIME = ['echarts', 'echarts/*']
+
+/**
+ * The image cropper behind `TImageUpload`, loaded with `import()` when a crop
+ * dialog opens. Externalised like the lazy chunks above; measured on its own.
+ */
+const LAZY_CROPPER = ['cropperjs']
+
 export default [
   {
     // Everything statically reachable from the package root - the admin shell,
@@ -90,7 +106,7 @@ export default [
     // actually describes "what does adding @tnzi/ui-admin cost me up front".
     name: 'shell - static graph (route components + locale packs load lazily)',
     path: 'dist/index.js',
-    ignore: [...LAZY_ROUTE_COMPONENTS, ...LAZY_LOCALE_PACKS, ...LAZY_DESKTOP_SHELL, ...LAZY_HOSTED_PANELS],
+    ignore: [...CHART_RUNTIME, ...LAZY_CROPPER, ...LAZY_ROUTE_COMPONENTS, ...LAZY_LOCALE_PACKS, ...LAZY_DESKTOP_SHELL, ...LAZY_HOSTED_PANELS],
     // Raised 196 -> 200 on 2026-08-22. The ratchet had 10 B of headroom left,
     // which stops being a budget and becomes a tripwire that fails CI for
     // whatever change happens to land next rather than for the one that grew
@@ -173,7 +189,15 @@ export default [
     // product owner: the reusable footer switch on the form modal (a record
     // flag such as "Active" at the footer's left, `useCrudPage({ formFooterSwitch })`).
     // Measured by building with the round's ui-admin sources at HEAD and with them.
-    limit: '220 kB',
+    // 220 -> 221 kB (2026-11-09): the naive theme bridge (`buildNaiveThemeOverrides`)
+    // moved here from `@tnzi/ui`, a peer this file never counted, so its weight
+    // shows up for the first time (220.43 kB); nothing grew.
+    // 221 kB -> 265 kB (2026-11-09), measured 261.13 kB with echarts and the cropper
+    // externalised (own budgets at the end of this file): the 36 naive-rendered
+    // components, their headless hooks, the naive adapters and converters moved here
+    // from `@tnzi/ui`, a peer this file never counted. A consumer downloads nothing
+    // new: the same code used to arrive through `@tnzi/ui`.
+    limit: '265 kB',
     gzip: true,
   },
   {
@@ -214,9 +238,18 @@ export default [
     // descriptions. The f43cf2c1c line's agent provider hint, chat drawer and
     // workflow unsaved-edits strings add 0.04 kB. 0.21 kB of headroom is a
     // tripwire.
+    // 74 -> 75.5 kB (2026-11-08). Measured 74.80 kB at e804321b1, already
+    // over: the OpenID Connect provider pages' strings (d3c047803, about 100
+    // lines in each catalogue) and the chat shell's admin strings (a95a4df66)
+    // landed without a size note. The approval cards, slash menu, context
+    // meter and image viewer batch on top of it does not move these packs
+    // (measured the same with its ui-admin and core changes reverted).
+    // Re-measured 2026-11-09 at 74.80 kB with the login rules' move to
+    // `IFormRule` (`useNaiveFormRules`), which adds no strings.
     name: 'locale pack - en (fetched only when the active locale is en)',
     path: 'dist/locales/en.js',
-    limit: '74 kB',
+    ignore: [...CHART_RUNTIME, ...LAZY_CROPPER],
+    limit: '75.5 kB',
     gzip: true,
   },
   {
@@ -242,9 +275,13 @@ export default [
     // tree against 83.69 kB at its start (+1.84 kB): the same strings as the
     // en note above, the MCP sentence among them. 0.47 kB of headroom would
     // trip on the next batch of that size, and the two packs move together.
+    // 88 -> 90 kB (2026-11-08). Measured 89.01 kB at e804321b1: the same
+    // strings as the en note above. Re-measured 2026-11-09 at 89.01 kB
+    // with the login rules' move to `IFormRule`, which adds no strings.
     name: 'locale pack - zh-cn (fetched only when the active locale is zh-cn)',
     path: 'dist/locales/zh-cn.js',
-    limit: '88 kB',
+    ignore: [...CHART_RUNTIME, ...LAZY_CROPPER],
+    limit: '90 kB',
     gzip: true,
   },
   {
@@ -259,7 +296,7 @@ export default [
     // shell has always imported.
     name: 'route table - records + guards (page components excluded)',
     path: 'dist/router.js',
-    ignore: [...LAZY_ROUTE_COMPONENTS, ...LAZY_DESKTOP_SHELL],
+    ignore: [...CHART_RUNTIME, ...LAZY_CROPPER, ...LAZY_ROUTE_COMPONENTS, ...LAZY_DESKTOP_SHELL],
     // Raised 85 -> 88 on 2026-08-22, measured at 85.00 kB - i.e. exactly on the
     // line, which is a tripwire rather than a budget. The growth is the desktop
     // store's panel support (panel-aware grouping, window size hints), which
@@ -279,7 +316,12 @@ export default [
     // keyword search and login modules that survive a reload, less the guard
     // code the route gate replaced); 88.91 kB with the chat config probed again
     // when the shell switches users (+0.10 kB).
-    limit: '90 kB',
+    // 90 kB -> 93 kB (2026-11-09), measured 91.45 kB with echarts and the cropper //
+    // externalised (own budgets at the end of this file): the 36 naive-rendered
+    // components, their headless hooks, the naive adapters and converters moved here
+    // from `@tnzi/ui`, a peer this file never counted. A consumer downloads nothing
+    // new: the same code used to arrive through `@tnzi/ui`.
+    limit: '93 kB',
     gzip: true,
   },
   {
@@ -287,6 +329,7 @@ export default [
     // already the download unit.
     name: 'components subpath (TCrudPage, TListShell, renderers + deps)',
     path: 'dist/components.js',
+    ignore: [...CHART_RUNTIME, ...LAZY_CROPPER],
     // 100 -> 101 kB (2026-10-12). Measured 99.43 kB with this batch's ui-admin
     // sources swapped back to HEAD and 99.77 kB with them (+0.34 kB): advanced
     // search resolving the schema's label keys and `visible`, and the delete
@@ -305,12 +348,18 @@ export default [
     // hint and switch at the footer's left, edit-only by default) and the list
     // shell handing `useCrudPage`'s `formFooterSwitch` to it. 86 B of headroom
     // before it made any framework opt-in on the modal red.
-    limit: '102 kB',
+    // 102 kB -> 144 kB (2026-11-09), measured 141.95 kB with echarts and the cropper
+    // externalised (own budgets at the end of this file): the 36 naive-rendered
+    // components, their headless hooks, the naive adapters and converters moved here
+    // from `@tnzi/ui`, a peer this file never counted. A consumer downloads nothing
+    // new: the same code used to arrive through `@tnzi/ui`.
+    limit: '144 kB',
     gzip: true,
   },
   {
     name: 'headless subpath (useCrudPage etc.)',
     path: 'dist/headless.js',
+    ignore: [...CHART_RUNTIME, ...LAZY_CROPPER],
     // 36 -> 37 kB (2026-10-11). Measured 35.60 kB at HEAD and 35.91 kB with the
     // in-flight save guard (useFormModal / useCrudPage / useDetail) and the
     // finance period's rollover handling: 0.09 kB of headroom is a tripwire.
@@ -318,12 +367,23 @@ export default [
     // limit stays. It read 36.39 kB before the f43cf2c1c merge, which took
     // 0.18 kB off: the module manifest came out, against the shared route gate,
     // the theme snapshot's colour check and the CRUD list's retry rule.
-    limit: '37 kB',
+    // 37 -> 38 kB (2026-11-09). Measured 36.86 kB at e804321b1 and 37.02 kB
+    // with `useNaiveFormRules` / `useNaiveLoginAccountField` (+0.16 kB): the
+    // login stack's rules are library-neutral `IFormRule`s in `@tnzi/ui` now,
+    // and binding them to NForm is this package's job. Shipped weight; 38 kB
+    // keeps the usual headroom.
+    // 38 kB -> 41.5 kB (2026-11-09), measured 40.5 kB with echarts and the cropper
+    // externalised (own budgets at the end of this file): the 36 naive-rendered
+    // components, their headless hooks, the naive adapters and converters moved here
+    // from `@tnzi/ui`, a peer this file never counted. A consumer downloads nothing
+    // new: the same code used to arrive through `@tnzi/ui`.
+    limit: '41.5 kB',
     gzip: true,
   },
   {
     name: 'pages subpath (built-in page components + translate helpers)',
     path: 'dist/pages.js',
+    ignore: [...CHART_RUNTIME, ...LAZY_CROPPER],
     // 60 -> 65 kB on 2026-09-20 (pt3), measured at 62.09 kB against 58.61 kB at
     // HEAD. `UserSecuritySection` (exported here since the day before) now
     // renders its two-factor half through `TTwoFactorPanel`, and the one
@@ -360,7 +420,12 @@ export default [
     // reload, detail ids that cannot steer a request, masked secret inputs)
     // and the sign-in modules submitting once per attempt 0.06 kB. 0.44 kB of
     // headroom would trip on the next batch of this round's size.
-    limit: '69 kB',
+    // 69 kB -> 79 kB (2026-11-09), measured 77.77 kB with echarts and the cropper //
+    // externalised (own budgets at the end of this file): the 36 naive-rendered
+    // components, their headless hooks, the naive adapters and converters moved here
+    // from `@tnzi/ui`, a peer this file never counted. A consumer downloads nothing
+    // new: the same code used to arrive through `@tnzi/ui`.
+    limit: '79 kB',
     gzip: true,
   },
   {
@@ -412,6 +477,7 @@ export default [
     // aggregate - that the per-unit budgets above would each absorb.
     name: 'total reachable graph (all chunks + both locales; not a download)',
     path: 'dist/index.js',
+    ignore: [...CHART_RUNTIME, ...LAZY_CROPPER],
     // 610 since the bank-deposit page landed (2026-08-28): a new finance page
     // plus its two locale blocks, measured at 600.76 kB. Was 600 since the
     // desktop layout (2026-08-22). The window manager is lazily loaded and so
@@ -564,7 +630,39 @@ export default [
     // section's usage row, the history's overage note, their strings, and the
     // core storage-unit helpers and storage-usage client. Lazy chunks again;
     // the shell stayed at 219.21 kB (219,213 B, as before).
-    limit: '728 kB',
+    // 728 -> 733 kB (2026-11-08). Measured 731.89 kB at e804321b1, over
+    // since the batches named in the locale pack notes (OpenID Connect
+    // provider pages and their strings, the chat shell's admin strings), which
+    // landed without a size note. The shell stayed at 219.68 kB.
+    // Re-measured 2026-11-09 at 732.09 kB with `useNaiveFormRules` /
+    // `useNaiveLoginAccountField` (+0.20 kB measured on e804321b1: the login
+    // stack's rules are library-neutral `IFormRule`s in `@tnzi/ui` now, and
+    // binding them to NForm is this package's job). The shell reads
+    // 219.84 kB with it, the same 0.16 kB the headless subpath gained.
+    // 733 kB -> 786 kB (2026-11-09), measured 774.01 kB with echarts and the cropper
+    // externalised (own budgets at the end of this file): the 36 naive-rendered
+    // components, their headless hooks, the naive adapters and converters moved here
+    // from `@tnzi/ui`, a peer this file never counted. A consumer downloads nothing
+    // new: the same code used to arrive through `@tnzi/ui`.
+    limit: '786 kB',
+    gzip: true,
+  },
+  {
+    // The charting runtime alone: `useEcharts` with every echarts module it
+    // registers. Paid by a consumer on the first chart.
+    name: 'echarts runtime (useEcharts + the registered echarts modules)',
+    path: 'dist/headless/useEcharts.js',
+    ignore: ['vue', '@vueuse/core', '@tnzi/ui', '@tnzi/ui/*'],
+    // Measured 231 kB on 2026-11-09.
+    limit: '235 kB',
+    gzip: true,
+  },
+  {
+    // The cropper `TImageUpload` loads with `import()` when a crop dialog opens.
+    name: 'image cropper (cropperjs, fetched when a crop dialog opens)',
+    path: 'dist/node_modules/.pnpm/cropperjs@*/node_modules/cropperjs/dist/cropper.esm.raw.js',
+    // Measured 14.16 kB on 2026-11-09.
+    limit: '14.5 kB',
     gzip: true,
   },
 ]

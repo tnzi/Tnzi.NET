@@ -34,6 +34,14 @@ export interface AdminSettingsSection {
   order?: number
   /** Optional permission code required to SEE this section. Checked via usePermissionGuard().can(); omit to always show (super-admin / not-yet-loaded fail-open as everywhere). */
   permission?: string
+  /**
+   * Roles allowed to SEE this section: any one of them is enough, compared
+   * case-insensitively, the same rule as a route's `meta.roles`. For a section
+   * whose endpoints answer by role and have no permission code. Combined with
+   * `permission`, both must hold. Super-user bypass and not-yet-loaded fail-open
+   * as everywhere; the backend stays the real wall.
+   */
+  roles?: string[]
   /** Module short-name required to SEE this section - hidden when the backend
    *  hasn't loaded that module (e.g. `'chat'`). Fail-open when the module
    *  signal is unavailable. Mirrors the User Center section contract. */
@@ -84,29 +92,45 @@ export const ADMIN_SETTINGS_CONFIG_KEY: InjectionKey<AdminSettingsConfig> = Symb
 
 export function provideAdminSettingsConfig(app: App, config: AdminSettingsConfig): void {
   app.provide(ADMIN_SETTINGS_CONFIG_KEY, config)
-  registerSettingsSectionEntryPermissions(config.sections ?? [])
+  registerSettingsSectionEntryRules(config.sections ?? [])
 }
 
 /**
- * Permission codes of the consumer's custom sections that declare one. Holding
- * any of them opens the Settings Center (route guard and the sidebar entry),
- * because those sections live nowhere else: a billing manager whose only grant
- * is `payment.account.view` must reach the billing sections without also
- * holding a settings or parameter code. Module-level (not injected) because the
- * router guard asks outside any component setup.
+ * What it takes to see one of the consumer's gated custom sections: its
+ * permission code and / or its roles (any-of). Both, when both are declared.
  */
-const sectionEntryPermissions = new Set<string>()
-
-function registerSettingsSectionEntryPermissions(sections: readonly AdminSettingsSection[]): void {
-  sectionEntryPermissions.clear()
-  for (const section of sections) {
-    if (section.permission) sectionEntryPermissions.add(section.permission)
-  }
+export interface SettingsSectionEntryRule {
+  readonly permission?: string
+  readonly roles: readonly string[]
 }
 
-/** Codes registered by {@link provideAdminSettingsConfig}; read by the Settings Center gate. */
-export function settingsSectionEntryPermissions(): ReadonlySet<string> {
-  return sectionEntryPermissions
+/**
+ * Entry rules of the consumer's custom sections that declare a `permission` or
+ * `roles`. Being able to see any of them opens the Settings Center (route guard
+ * and the sidebar entry), because those sections live nowhere else: a billing
+ * manager whose only grant is `payment.account.view` must reach the billing
+ * sections without also holding a settings or parameter code. A section is an
+ * entry only for whoever passes its whole rule, so a roles-only section opens
+ * the gear for holders of the role and for nobody else. Ungated sections are
+ * not entries (they would open the Settings Center to every administrator).
+ * Module-level (not injected) because the router guard asks outside any
+ * component setup.
+ */
+let sectionEntryRules: readonly SettingsSectionEntryRule[] = []
+
+function registerSettingsSectionEntryRules(sections: readonly AdminSettingsSection[]): void {
+  sectionEntryRules = sections
+    .map((section) => ({ permission: section.permission || undefined, roles: nonEmptyStrings(section.roles) }))
+    .filter((rule) => rule.permission !== undefined || rule.roles.length > 0)
+}
+
+function nonEmptyStrings(value: readonly string[] | undefined): string[] {
+  return (value ?? []).filter((v) => typeof v === 'string' && v !== '')
+}
+
+/** Rules registered by {@link provideAdminSettingsConfig}; read by the Settings Center gate. */
+export function settingsSectionEntryRules(): readonly SettingsSectionEntryRule[] {
+  return sectionEntryRules
 }
 
 export function useAdminSettingsConfig(): AdminSettingsConfig | null {

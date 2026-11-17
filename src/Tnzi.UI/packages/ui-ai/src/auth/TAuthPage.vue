@@ -46,7 +46,7 @@ import {
   type LoginFeatures,
   type LoginThirdPartyProvider,
   type Translate,
-} from '@tnzi/ui';
+} from '@tnzi/ui/headless';
 import { useAuthPage } from '../headless/useAuthPage';
 import TAuthField from './TAuthField.vue';
 import TAuthProviderButton from './TAuthProviderButton.vue';
@@ -100,6 +100,15 @@ const props = withDefaults(
      * `runtime.http.resolveUrl`; leave unset when the API lives at the page origin.
      */
     resolveUrl?: (url: string) => string;
+    /**
+     * Show the account and the password together on the first screen, with one
+     * Sign in button (a real form, so password managers fill both). Off by
+     * default: the first screen asks for the account only and the password
+     * comes on a second screen. Takes effect only while the deployment has
+     * password sign-in on; two-factor, captcha, the code / register links and
+     * provider buttons still appear exactly when they are needed.
+     */
+    singleScreen?: boolean;
   }>(),
   {
     brandName: '',
@@ -117,6 +126,7 @@ const props = withDefaults(
     loading: false,
     sessionEndReason: null,
     resolveUrl: undefined,
+    singleScreen: false,
   },
 );
 
@@ -134,8 +144,10 @@ const features = computed<LoginFeatures>(() => props.features ?? DEFAULT_LOGIN_F
 
 async function focusFirstField(): Promise<void> {
   await nextTick();
-  const el = document.querySelector<HTMLInputElement>('.t-auth__pane input:not([disabled])');
-  el?.focus();
+  // The first EMPTY field (after a wrong password the account is still filled and
+  // focus belongs on the password); falls back to the first field.
+  const fields = [...document.querySelectorAll<HTMLInputElement>('.t-auth__pane input:not([disabled])')];
+  (fields.find((el) => !el.value) ?? fields[0])?.focus();
 }
 
 // The state machine and every submit handler live in `useAuthPage` (unit
@@ -150,6 +162,7 @@ const {
   notice,
   busy,
   canContinue,
+  singleScreen: onePane,
   offersCodeSignIn,
   offersSignUp,
   challenge,
@@ -172,6 +185,7 @@ const {
   features: () => features.value,
   translate: t,
   loading: () => props.loading,
+  singleScreen: () => props.singleScreen,
   onAuthenticated: () => emit('authenticated'),
   focusFirstField,
   // Resolved at submit time, after `captchaWidget` exists.
@@ -200,13 +214,38 @@ watch(error, (message) => {
   if (message && captcha.value && !captchaIsImage.value) captchaWidget.reset();
 });
 
-/** Placeholder + label follow what the deployment actually accepts. */
-const identifierLabel = computed(() => {
+/**
+ * Label + placeholder follow what the deployment actually accepts. Which kinds
+ * count is the `identifiers` flags from `/auth/config`: a user-name-only
+ * deployment reads "Username", never "Email address".
+ */
+const identifierKind = computed<'emailOrPhone' | 'phone' | 'userName' | 'emailOrUserName' | 'userNameOrPhone' | 'email'>(() => {
   const id = features.value.identifiers;
-  if (id.email && id.phone) return t('auth.identifier.emailOrPhone', 'Email or phone');
-  if (id.phone && !id.email) return t('auth.identifier.phone', 'Phone number');
-  if (id.userName && !id.email && !id.phone) return t('auth.identifier.userName', 'Username');
-  return t('auth.identifier.email', 'Email address');
+  if (id.email && id.phone) return 'emailOrPhone';
+  if (id.phone && !id.email) return id.userName ? 'userNameOrPhone' : 'phone';
+  if (id.userName && !id.email && !id.phone) return 'userName';
+  if (id.userName && id.email) return 'emailOrUserName';
+  return 'email';
+});
+const identifierLabel = computed(() => {
+  switch (identifierKind.value) {
+    case 'emailOrPhone': return t('auth.identifier.emailOrPhone', 'Email or phone');
+    case 'phone': return t('auth.identifier.phone', 'Phone number');
+    case 'userName': return t('auth.identifier.userName', 'Username');
+    case 'emailOrUserName': return t('auth.identifier.emailOrUserName', 'Email or username');
+    case 'userNameOrPhone': return t('auth.identifier.userNameOrPhone', 'Username or phone');
+    default: return t('auth.identifier.email', 'Email address');
+  }
+});
+const identifierPlaceholder = computed(() => {
+  switch (identifierKind.value) {
+    case 'emailOrPhone': return t('auth.identifier.placeholder.emailOrPhone', 'Enter your email or phone number');
+    case 'phone': return t('auth.identifier.placeholder.phone', 'Enter your phone number');
+    case 'userName': return t('auth.identifier.placeholder.userName', 'Enter your username');
+    case 'emailOrUserName': return t('auth.identifier.placeholder.emailOrUserName', 'Enter your email or username');
+    case 'userNameOrPhone': return t('auth.identifier.placeholder.userNameOrPhone', 'Enter your username or phone number');
+    default: return t('auth.identifier.placeholder', 'Enter your email address');
+  }
 });
 
 // Typing anywhere clears a stale message: leaving "Incorrect password" on
@@ -283,8 +322,82 @@ const subheadingText = computed(() => props.subheading || '');
         {{ sessionNotice.text }}
       </p>
 
+      <!-- Step: identify, one-screen form (opt-in `singleScreen`). A real <form> with
+           username / current-password tokens is what lets password managers fill
+           both fields in one go. -->
+      <form
+        v-if="step === 'identify' && onePane"
+        class="t-auth__pane"
+        data-test="t-auth-single-screen"
+        novalidate
+        @submit.prevent="onContinue"
+      >
+        <div v-if="providers.length" class="t-auth__providers">
+          <TAuthProviderButton
+            v-for="p in providers"
+            :key="p.key"
+            :provider="p"
+            :disabled="busy"
+            :label="t(`auth.provider.${p.key}`, `Continue with ${p.label}`)"
+            @select="emit('oauth', p)"
+          />
+        </div>
+
+        <div v-if="providers.length" class="t-auth__divider">
+          <span>{{ t('auth.or', 'Or') }}</span>
+        </div>
+
+        <TAuthField
+          v-model="account"
+          name="username"
+          zoom-safe
+          :placeholder="identifierPlaceholder"
+          :aria-label="identifierLabel"
+          autocomplete="username"
+          :disabled="busy"
+          @submit="onContinue"
+        />
+        <TAuthField
+          v-model="password"
+          name="password"
+          zoom-safe
+          type="password"
+          :placeholder="t('auth.password.placeholder', 'Password')"
+          :aria-label="t('auth.password.label', 'Password')"
+          autocomplete="current-password"
+          :disabled="busy"
+          @submit="onContinue"
+        />
+        <div v-if="captcha && captchaIsImage" class="t-auth__captcha">
+          <img :src="`data:image/png;base64,${captcha.imageBase64 ?? ''}`" :alt="t('auth.captcha.alt', 'Captcha')" />
+          <TAuthField
+            v-model="captchaCode"
+            zoom-safe
+            :placeholder="t('auth.captcha.placeholder', 'Captcha')"
+            :aria-label="t('auth.captcha.label', 'Captcha')"
+            :disabled="busy"
+            @submit="onContinue"
+          />
+        </div>
+        <div v-else-if="captcha" class="t-auth__captcha t-auth__captcha--widget">
+          <div ref="captchaContainer" />
+          <p v-if="captchaWidget.error.value" class="t-auth__captcha-error">{{ captchaWidget.error.value }}</p>
+        </div>
+        <button type="submit" class="t-auth__primary" :disabled="busy">
+          {{ t('auth.signIn', 'Sign in') }}
+        </button>
+        <div v-if="offersCodeSignIn || offersSignUp" class="t-auth__links">
+          <button v-if="offersCodeSignIn" type="button" class="t-auth__link" :disabled="busy" @click="switchTo('code')">
+            {{ t('auth.useCode', 'Use a verification code') }}
+          </button>
+          <button v-if="offersSignUp" type="button" class="t-auth__link" :disabled="busy" @click="switchTo('register')">
+            {{ t('auth.createAccount', 'Create an account') }}
+          </button>
+        </div>
+      </form>
+
       <!-- Step: identify -->
-      <div v-if="step === 'identify'" class="t-auth__pane">
+      <div v-else-if="step === 'identify'" class="t-auth__pane">
         <div v-if="providers.length" class="t-auth__providers">
           <TAuthProviderButton
             v-for="p in providers"

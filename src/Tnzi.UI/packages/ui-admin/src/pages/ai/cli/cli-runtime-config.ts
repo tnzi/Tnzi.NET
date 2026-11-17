@@ -7,7 +7,7 @@
  */
 import { h } from 'vue'
 import { formatDateTime } from '@tnzi/core'
-import type { FormSchemaItem } from '@tnzi/ui'
+import type { FormSchemaItem } from '../../../components/forms/TSchemaForm'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import TStatusBadge from '../../../components/display/TStatusBadge.vue'
 import { EMPTY_DASH } from '../../../utils/placeholders'

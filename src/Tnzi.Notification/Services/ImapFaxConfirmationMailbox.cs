@@ -48,6 +48,9 @@ public class ImapFaxConfirmationMailbox : IFaxConfirmationMailbox
         }
 
         using var client = new ImapClient();
+        var proxy = MailProxySelector.Apply(client, confirmation.Proxy, confirmation.UseEnvironmentProxy, confirmation.Host!, confirmation.Port);
+        if (proxy != null)
+            _logger.LogDebug("Connecting to IMAP {Host}:{Port} through proxy {Proxy}", confirmation.Host, confirmation.Port, proxy);
 
         await client.ConnectAsync(
             confirmation.Host!,

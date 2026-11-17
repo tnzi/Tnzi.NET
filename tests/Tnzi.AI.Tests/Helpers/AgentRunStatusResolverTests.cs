@@ -74,21 +74,4 @@ public class AgentRunStatusResolverTests
 
         fixedResult.Status.ShouldBe(AgentRunStatus.Completed);
     }
-
-    [Theory]
-    [InlineData(FinishReasons.GuardrailRejected, false)]
-    [InlineData(FinishReasons.QuotaExceeded, false)]
-    [InlineData(FinishReasons.Error, false)]
-    [InlineData(FinishReasons.Failed, false)]
-    [InlineData(FinishReasons.Rejected, false)]
-    [InlineData(FinishReasons.MaxHandoffs, false)]
-    [InlineData(FinishReasons.MaxToolIterations, false)]
-    [InlineData(FinishReasons.Stop, true)]
-    [InlineData(FinishReasons.Completed, true)]
-    [InlineData(FinishReasons.AwaitingApproval, true)]
-    [InlineData(null, true)]
-    public void ShouldGenerateThreadTitle_ReturnsExpected(string? finishReason, bool expected)
-    {
-        AgentRunStatusResolver.ShouldGenerateThreadTitle(finishReason).ShouldBe(expected);
-    }
 }

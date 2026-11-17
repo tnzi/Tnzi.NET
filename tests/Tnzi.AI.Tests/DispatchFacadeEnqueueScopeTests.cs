@@ -101,7 +101,7 @@ public class DispatchFacadeEnqueueScopeTests
     private sealed class StubThreadService : IAgentThreadInternalService
     {
         public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
-            Guid? threadId, Guid? agentId, CancellationToken ct = default)
+            Guid? threadId, Guid? agentId, string? origin, ThreadListing listing = ThreadListing.Listed, CancellationToken ct = default)
             => Task.FromResult((threadId ?? Guid.NewGuid(), threadId is null));
 
         public Task<Guid> SaveMessageAsync(Guid threadId, string role, string content,

@@ -19,6 +19,7 @@ public class CliRunConfiguration : EntityTypeConfigurationBase<CliRun, Guid>
         builder.Property(e => e.EstimatedCostUsd).HasPrecision(18, 6);
         builder.Property(e => e.WriteBackTokenHash).HasMaxLength(128);
         builder.Property(e => e.Model).HasMaxLength(200);
+        builder.Property(e => e.Effort).HasMaxLength(64);
         builder.Property(e => e.ReattachHandle).HasMaxLength(500);
 
         // 回写凭据校验是按哈希查找的热路径（每次 MCP 请求一次）。
@@ -34,6 +35,9 @@ public class CliRunConfiguration : EntityTypeConfigurationBase<CliRun, Guid>
         builder.HasIndex(e => e.AgentId);
         builder.HasIndex(e => e.ThreadId);
         builder.HasIndex(e => e.CliRuntimeId);
+
+        // 按起进程的运行找此刻拥有进程的运行（ICliProcessOwnership）：消费方的模型网关每个请求查一次
+        builder.HasIndex(e => e.ProcessLaunchedByRunId);
 
         if (multiTenancyEnabled)
         {

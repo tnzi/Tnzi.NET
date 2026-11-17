@@ -9,8 +9,25 @@
 // Form
 // ============================================
 
+/** When a form rule is checked: on leaving the field, on a committed change, or on every keystroke. */
+export type FormRuleTrigger = 'blur' | 'change' | 'input';
+
 /**
- * Form rule
+ * What a form rule's own check answers: `true` when the value passes, a
+ * string to fail with that message, or `false` to fail with the rule's
+ * `message`.
+ */
+export type FormRuleResult = boolean | string;
+
+/**
+ * A form validation rule that belongs to no component library.
+ *
+ * Shared code (the login stack in `@tnzi/ui`, for one) builds its rules in
+ * this shape, and each package that renders forms translates them into its
+ * library's own: `@tnzi/ui-admin` into Naive UI's `FormItemRule`, `@tnzi/mobile`
+ * into Vant's `FieldRule`. A rule's checks are all applied: a missing value
+ * fails `required` first, then the length range, the pattern and the
+ * validator each get their say.
  */
 export interface IFormRule {
   /**
@@ -21,16 +38,23 @@ export interface IFormRule {
   required?: boolean;
   /** Error message */
   message?: string;
-  /** Trigger timing */
-  trigger?: 'blur' | 'change' | 'input';
+  /**
+   * When the rule is checked. Several triggers check it on each of them:
+   * `['blur', 'input']` validates while typing and again on leaving the field.
+   * Left out, the rule is checked only when the whole form is.
+   */
+  trigger?: FormRuleTrigger | FormRuleTrigger[];
   /** Minimum length */
   min?: number;
   /** Maximum length */
   max?: number;
   /** Regular expression */
   pattern?: RegExp;
-  /** Custom validator */
-  validator?: (value: unknown) => boolean | string | Promise<boolean | string>;
+  /**
+   * The rule's own check. It receives the field's value alone, never a
+   * library's rule object, so the same rule runs under any form library.
+   */
+  validator?: (value: unknown) => FormRuleResult | Promise<FormRuleResult>;
 }
 
 /**

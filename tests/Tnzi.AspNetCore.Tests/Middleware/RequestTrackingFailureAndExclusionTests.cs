@@ -37,6 +37,29 @@ public class RequestTrackingFailureAndExclusionTests
         Assert.Equal(500, Assert.Single(logger.Entries).StatusCode);
     }
 
+    /// <summary>
+    /// 上传途中客户端关了页面：读体时 Kestrel 抛 <see cref="BadHttpRequestException"/>（400）。
+    /// 此前这一条记成 500、Error 级别，监控把它算成服务器错误，而客户端收到的是 400。
+    /// </summary>
+    [Fact]
+    public async Task ABodyReadTheClientAbandoned_IsLoggedWithItsOwn400_NotAsAnError()
+    {
+        var logger = new CapturingLogger();
+        var middleware = NewMiddleware(
+            _ => throw new BadHttpRequestException("Unexpected end of request content.", StatusCodes.Status400BadRequest),
+            logger,
+            new RequestTrackingOptions());
+        var context = NewContext();
+        using var aborted = new CancellationTokenSource();
+        aborted.Cancel();
+        context.RequestAborted = aborted.Token;
+
+        await Assert.ThrowsAsync<BadHttpRequestException>(() => middleware.InvokeAsync(context));
+
+        Assert.Equal(400, Assert.Single(logger.Entries).StatusCode);
+        Assert.True(Assert.Single(logger.Levels) < LogLevel.Error);
+    }
+
     [Theory]
     [InlineData("/health")]
     [InlineData("/health/live")]

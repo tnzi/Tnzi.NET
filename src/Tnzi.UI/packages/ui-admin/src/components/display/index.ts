@@ -3,9 +3,20 @@
 // The package root re-exports this barrel wholesale, so this file is what
 // decides which display primitives consumers can import from `@tnzi/ui-admin`.
 
-// TStatusBadge's implementation was sunk to @tnzi/ui in 0.2.x; the local SFC is
-// now a thin wrapper that injects admin i18n via translatePageKey.
+// Status pill; label keys resolve through the admin page translator.
 export { default as TStatusBadge } from './TStatusBadge.vue'
+export type { StatusType } from './TStatusBadge.vue'
+
+// Small display primitives rendered with naive.
+export { default as TRelativeTime } from './TRelativeTime.vue'
+export { default as TButtonIcon } from './TButtonIcon.vue'
+export { default as THint } from './THint.vue'
+export { default as TSourceBadge } from './TSourceBadge.vue'
+export type { SourceKind } from './TSourceBadge.vue'
+export { default as TStatToCards } from './TStatToCards.vue'
+export type { StatCard } from './TStatToCards.vue'
+export { default as TAttachmentWall } from './TAttachmentWall.vue'
+export type { Attachment, AttachmentReorderPayload } from './TAttachmentWall.vue'
 
 // Private-file rendering: the URL has to be swapped for a short-lived signed
 // token first. These two own that step (and the pending state while it is in

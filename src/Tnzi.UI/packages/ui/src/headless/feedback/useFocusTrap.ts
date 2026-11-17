@@ -38,7 +38,9 @@ function trapTab(e: KeyboardEvent, root: HTMLElement | null): void {
   const last = focusable[focusable.length - 1]!
   const current = document.activeElement as HTMLElement | null
   if (e.shiftKey) {
-    if (current === first || !root.contains(current)) {
+    // From the root itself (a dialog that focuses its own panel on open, so
+    // no control lights up), the browser's Shift+Tab would leave the trap.
+    if (current === first || current === root || !root.contains(current)) {
       e.preventDefault()
       last.focus()
     }

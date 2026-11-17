@@ -19,6 +19,12 @@ import { NGi, NGrid } from 'naive-ui'
  * Mobile (375px): the responsive cols string collapses the grid to 1-2
  * columns; pass a custom `cols` to override (Naive screen breakpoints:
  * s:640 / m:1024 / l:1280 / xl:1536).
+ *
+ * Tiles in one row are the same height: the grid stretches every cell of a
+ * row to its tallest, and each cell (`t-kpi-row__cell`) stretches its child
+ * to fill it, so a card with a `#footer` and one without line up, and a
+ * clickable card's hit area covers the whole cell. Each row still takes the
+ * height of its own content.
  */
 export default defineComponent({
   name: 'TKpiRow',
@@ -65,9 +71,22 @@ export default defineComponent({
           xGap: props.gap,
           yGap: props.gap,
         },
-        () => children.map((child, i) => h(NGi, { key: child.key ?? `kpi-${i}` }, () => child)),
+        () => children.map((child, i) => h(NGi, { key: child.key ?? `kpi-${i}`, class: 't-kpi-row__cell' }, () => child)),
       )
     }
   },
 })
 </script>
+
+<style>
+/* Not scoped: the child is the page's own vnode (a TKpiCard or anything else),
+   which a scoped selector of this component cannot reach. An inline
+   `display: none` that NGi sets on a collapsed item still wins over this. */
+.t-kpi-row__cell {
+  display: flex;
+  flex-direction: column;
+}
+.t-kpi-row__cell > * {
+  flex: 1 1 auto;
+}
+</style>

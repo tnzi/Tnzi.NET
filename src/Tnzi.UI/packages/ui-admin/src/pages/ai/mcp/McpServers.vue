@@ -26,39 +26,19 @@
     default-section="servers"
     v-model:section="activeTab"
   >
-    <!-- Keyword search lives in the single page-header bar (C2). It only
-         applies to the External Servers tab, so it hides on the others. -->
-    <template #actions="{ active }">
-      <div v-if="active === 'servers'" class="t-mcp__search">
-        <NInput
-          v-model:value="serverSearch"
-          size="small"
-          clearable
-          :placeholder="t('servers.searchPlaceholder')"
-          class="t-mcp__search-input"
-          @keydown.enter="onServerSearch"
-          @clear="onServerSearchClear"
-        >
-          <template #prefix><TSvgIcon icon="mdi:magnify" :size="16" /></template>
-        </NInput>
-        <NButton size="small" type="primary" @click="onServerSearch">
-          {{ t('admin.crud.search') }}
-        </NButton>
-      </div>
-    </template>
-
     <!-- ─── Tab 1: External Servers ─────────────────────────────── -->
     <template #servers>
             <!-- show-header=false suppresses the shell's own header bar:
                  without it the shell falls back to the route meta title and
-                 renders a SECOND "MCP" bar. The page title + keyword search
-                 live on the outer TContentPage header instead. -->
+                 renders a SECOND "MCP" bar. The keyword search still lands in
+                 the page header: TTabsPage hosts the active tab's list search. -->
             <TCardPage
               :state="serverCrud"
               mode="page"
               :cols="{ xs: 1, sm: 2, md: 3, lg: 3 }"
               :form-modal-width="800"
               :show-header="false"
+              :search-placeholder="t('servers.searchPlaceholder')"
               :translate="t"
             >
               <template #card="{ item }">
@@ -365,7 +345,6 @@ import {
   NCard,
   NDescriptions,
   NDescriptionsItem,
-  NInput,
   NPopconfirm,
   NSelect,
   NSpin,
@@ -437,20 +416,6 @@ const serverCrud = useCrudPage<McpServerRegistrationDto>({
     bridge.mcpServers.update(String(id), toUpdateMcpServerDto(data as Record<string, unknown>)),
   deleteData: (ids) => bridge.mcpServers.delete(ids.map(String)),
 })
-
-// Header keyword search for the External Servers tab. The TCardPage header
-// bar is suppressed (single title bar on TContentPage), so the keyword search
-// is wired manually to the same crud state the shell would drive.
-const serverSearch = ref('')
-function onServerSearch(): void {
-  serverCrud.setSearch(serverSearch.value)
-  void serverCrud.refresh()
-}
-function onServerSearchClear(): void {
-  serverSearch.value = ''
-  serverCrud.setSearch('')
-  void serverCrud.refresh()
-}
 
 type TestEntry = { busy: boolean; result: { ok: boolean; message: string } | null }
 const testState = reactive<Record<string, TestEntry>>({})
@@ -770,20 +735,6 @@ defineExpose({
 </script>
 
 <style scoped>
-/* Page-header keyword search (External Servers tab only). */
-.t-mcp__search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.t-mcp__search-input {
-  width: 240px;
-  max-width: 100%;
-}
-@media (max-width: 640px) {
-  .t-mcp__search { flex-wrap: wrap; }
-  .t-mcp__search-input { width: 100%; }
-}
 .t-mcp__form-hint {
   margin: 8px 0 0;
   font-size: 12px;

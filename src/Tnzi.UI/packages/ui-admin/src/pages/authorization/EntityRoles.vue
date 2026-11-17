@@ -7,7 +7,7 @@
     <!-- Matrix mode - pick an entity, edit role×operation cells. -->
     <template #matrix>
           <div class="t-entity-role-page__toolbar">
-            <NSpace align="center" :wrap="false">
+            <div class="flex items-center gap-x-12px gap-y-8px">
               <span class="t-entity-role-page__toolbar-label">{{ t('selectEntity') }}</span>
               <NSelect
                 v-model:value="selectedEntityInfoId"
@@ -27,7 +27,7 @@
               >
                 {{ selectedEntityInfo.isDataAuthEnabled ? t('status.dataAuthOn') : t('status.dataAuthOff') }}
               </NTag>
-            </NSpace>
+            </div>
           </div>
 
           <div v-if="!selectedEntityInfoId" class="t-entity-role-page__placeholder">
@@ -78,7 +78,7 @@
     -->
     <template #inspect>
           <p class="t-entity-role-page__hint">{{ t('inspect.hint') }}</p>
-          <NSpace class="t-entity-role-page__inspect-toolbar" align="center">
+          <div class="t-entity-role-page__inspect-toolbar flex flex-wrap items-center gap-x-12px gap-y-8px">
             <TUserSelector
               :value="inspect.userId || null"
               :fetcher="userFetcher"
@@ -96,7 +96,7 @@
             >
               {{ t('inspect.lookup') }}
             </NButton>
-          </NSpace>
+          </div>
           <NSpin :show="inspect.loading">
             <div
               v-if="inspect.hasQueried && !inspect.results.length"
@@ -122,7 +122,7 @@
 import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, h, reactive, ref, onMounted, watch } from 'vue'
 import {
-  NSpace, NButton, NSelect, NTag, NCheckbox, NSpin,
+  NButton, NSelect, NTag, NCheckbox, NSpin,
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import TUserSelector from '../../components/forms/TUserSelector.vue'

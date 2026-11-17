@@ -1,7 +1,6 @@
 /**
  * Theme type definitions shared across the theme subsystem.
  */
-import type { GlobalThemeOverrides } from 'naive-ui'
 import type { ThemeMode } from '@tnzi/core/types'
 
 /** The 11 palette levels used for color ramps. 500 is the base color. */
@@ -30,10 +29,8 @@ export interface ThemeSettings {
   palettes: Record<ColorRole, ColorPalette>
   /** Theme mode. `'auto'` follows the OS colour scheme. */
   mode: ThemeMode
-  /** Naive UI overrides (raw, consumer-provided). Merged over the generated base by `buildNaiveThemeOverrides`. */
-  naiveOverrides?: GlobalThemeOverrides
   /** The name of the preset this theme is derived from, if any. */
-  presetName?: 'default' | 'dark' | 'compact' | 'azir' | string
+  presetName?: 'default' | 'dark' | 'azir' | string
 }
 
 /** CSS variable key → value map. */

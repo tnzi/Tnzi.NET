@@ -329,7 +329,7 @@ public class AiMiddlewarePipelineTests
 
         // 线程存在且归当前用户所有：EnsureThreadAsync 现在**总是**经 GetOrCreateThreadAsync
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
-        threadService.Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        threadService.Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((threadId, false));
 
         // 模拟历史消息
@@ -369,7 +369,7 @@ public class AiMiddlewarePipelineTests
     {
         var autoThreadId = Guid.NewGuid();
         var threadService = new Mock<IAgentThreadInternalService>();
-        threadService.Setup(s => s.GetOrCreateThreadAsync(null, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        threadService.Setup(s => s.GetOrCreateThreadAsync(null, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((autoThreadId, true));
         threadService.Setup(s => s.GetMessageHistoryAsync(autoThreadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ChatMessage>());
@@ -390,7 +390,7 @@ public class AiMiddlewarePipelineTests
         result.ThreadId.ShouldBe(autoThreadId);
 
         // 验证自动创建了线程并保存了用户消息和助手回复
-        threadService.Verify(s => s.GetOrCreateThreadAsync(null, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+        threadService.Verify(s => s.GetOrCreateThreadAsync(null, It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<ThreadListing>(), It.IsAny<CancellationToken>()), Times.Once);
         threadService.Verify(s => s.SaveMessageAsync(autoThreadId, "user", "Hello", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
         threadService.Verify(s => s.SaveMessageAsync(autoThreadId, "assistant", "Hi there", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -519,9 +519,18 @@ public class AiMiddlewarePipelineTests
 
         result.ShouldBe(expected);
         usageLogService.Verify(s => s.LogUsageAsync(
-            AIOperationType.Chat, "TestProvider", "test-model", 50, 25,
-            It.IsAny<long>(), true, null, null, null,
-            0, 0,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.Chat &&
+                e.Provider == "TestProvider" &&
+                e.Model == "test-model" &&
+                e.InputTokens == 50 &&
+                e.OutputTokens == 25 &&
+                e.IsSuccess &&
+                e.ErrorMessage == null &&
+                e.AgentId == null &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 0 &&
+                e.CacheCreationTokens == 0),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -544,9 +553,18 @@ public class AiMiddlewarePipelineTests
         });
 
         usageLogService.Verify(s => s.LogUsageAsync(
-            AIOperationType.Chat, "TestProvider", "test-model", 0, 0,
-            It.IsAny<long>(), false, "Test error", null, null,
-            0, 0,
+            It.Is<UsageLogEntry>(e =>
+                e.OperationType == AIOperationType.Chat &&
+                e.Provider == "TestProvider" &&
+                e.Model == "test-model" &&
+                e.InputTokens == 0 &&
+                e.OutputTokens == 0 &&
+                !e.IsSuccess &&
+                e.ErrorMessage == "Test error" &&
+                e.AgentId == null &&
+                e.ThreadId == null &&
+                e.CachedInputTokens == 0 &&
+                e.CacheCreationTokens == 0),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 

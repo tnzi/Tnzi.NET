@@ -13,6 +13,7 @@ public class R2Storage : IFileStorage, IDisposable
     private readonly R2StorageOptions _options;
     private readonly string? _baseUrl;
     private readonly IAmazonS3 _s3Client;
+    private readonly IAmazonS3? _publicSigningClient;
     private readonly S3ObjectStore _objects;
     private readonly IOptionsMonitor<StorageOptions>? _optionsMonitor;
 
@@ -72,7 +73,18 @@ public class R2Storage : IFileStorage, IDisposable
         };
 
         _s3Client = new AmazonS3Client(_options.AccessKeyId, _options.SecretAccessKey, config);
-        _objects = new S3ObjectStore(_s3Client, _options.BucketName, ProviderName, presignProtocol: null, logger);
+
+        // 配了公开端点：预签名 URL 改由一个端点是公开地址的客户端签，凭据与签名区域（auto）与上面那一路相同，
+        // scheme 取公开地址自己的。其余操作仍走 R2 端点。见 S3PublicEndpoint。
+        Protocol? presignProtocol = null;
+        if (!string.IsNullOrWhiteSpace(_options.PublicServiceUrl))
+        {
+            var publicConfig = S3PublicEndpoint.ConfigFor(config, _options.PublicServiceUrl);
+            _publicSigningClient = new AmazonS3Client(_options.AccessKeyId, _options.SecretAccessKey, publicConfig);
+            presignProtocol = S3PublicEndpoint.ProtocolOf(publicConfig);
+        }
+
+        _objects = new S3ObjectStore(_s3Client, _options.BucketName, ProviderName, presignProtocol, logger, _publicSigningClient);
     }
 
     /// <summary>
@@ -158,5 +170,6 @@ public class R2Storage : IFileStorage, IDisposable
     public void Dispose()
     {
         _s3Client?.Dispose();
+        _publicSigningClient?.Dispose();
     }
 }

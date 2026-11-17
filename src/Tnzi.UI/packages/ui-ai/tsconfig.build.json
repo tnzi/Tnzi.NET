@@ -20,5 +20,7 @@
     "rootDir": "src"
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts", "**/__tests__/**"]
+  // `controls-stylesheet.ts` is the build entry of `dist/controls.css` alone
+  // (vite.controls-css.config.ts): nothing imports it, so it gets no types.
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts", "**/__tests__/**", "src/controls-stylesheet.ts"]
 }

@@ -12,6 +12,9 @@ public class AgentThreadConfiguration : EntityTypeConfigurationBase<AgentThread,
         builder.Property(e => e.Title)
             .HasMaxLength(200);
 
+        builder.Property(e => e.Origin)
+            .HasMaxLength(ThreadOrigin.MaxLength);
+
         builder.HasOne(e => e.Agent)
             .WithMany()
             .HasForeignKey(e => e.AgentId)
@@ -25,5 +28,9 @@ public class AgentThreadConfiguration : EntityTypeConfigurationBase<AgentThread,
 
         builder.HasIndex(e => e.AgentId);
         builder.HasIndex(e => e.LastActivityTime);
+        builder.HasIndex(e => e.LastUserMessageTime);
+
+        // 列表与关注计数都按主人 + 在不在列表筛：一条复合索引同时服务两者
+        builder.HasIndex(e => new { e.CreatorId, e.Listing });
     }
 }

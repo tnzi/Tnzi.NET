@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Cli.Services;
 
 /// <summary>
-/// 由使用方决定一轮外部运行在哪里、用什么跑：运行时（执行目标 × CLI）、模型与工作目录。
+/// 由使用方决定一轮外部运行在哪里、用什么跑：运行时（执行目标 × CLI）、模型、推理强度与工作目录。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -57,6 +57,21 @@ public sealed record CliRunPlacementRequest
     /// 落点不给模型时，框架照常按允许列表校验它；落点给了模型就以落点为准（使用方的决定，不再校验）。
     /// </remarks>
     public string? RequestedModel { get; init; }
+
+    /// <summary>
+    /// 调用方为这一轮要的推理强度，原样（聊天入口已按这段对话的模型校验过；直接入队的受信调用方没校验）。
+    /// </summary>
+    /// <remarks>
+    /// 落点给了 <see cref="CliRunPlacement.Effort"/> 就以它为准；没给而落点换了 provider 或模型时，框架按新的 provider / 模型再校验它，
+    /// 不在那里的可选档位里就丢掉（这一轮按运行时的缺省跑）。
+    /// </remarks>
+    public string? RequestedEffort { get; init; }
+
+    /// <summary>
+    /// 这一轮的每轮元数据（聊天入口交来的，已校验；直接入队的调用方没给时为空字典）。用户在输入框旁的「运行选择」（例如 CLI 档案）在这里，
+    /// 与应用的 <c>IChatModelTargetResolver</c> 校验这一轮的模型与强度时看到的是同一份。
+    /// </summary>
+    public IReadOnlyDictionary<string, JsonElement> Metadata { get; init; } = new Dictionary<string, JsonElement>();
 }
 
 /// <summary>
@@ -87,6 +102,13 @@ public sealed record CliRunPlacement
     public string? Model { get; init; }
 
     /// <summary>
+    /// 这一轮交给 CLI 的推理强度（运行时原生值：stream-json 的 <c>--effort</c>、ACP 的 <c>thought_level</c>）；不再校验，是使用方的决定。
+    /// 空 = 调用方请求的（落点换了 provider 或模型时按新那家再校验，不合法就丢掉），再没有就是绑定的 <c>ThinkingLevel</c>。
+    /// </summary>
+    /// <remarks>按用户的 CLI 档案换家时，给出档案里为那家定的强度，或者把请求的强度换成那家的词（例如把 claude 的 <c>max</c> 换成 codex 的 <c>high</c>）。</remarks>
+    public string? Effort { get; init; }
+
+    /// <summary>
     /// 这一轮的工作目录（执行目标上的绝对路径）；空 = 按绑定的工作目录策略。
     /// </summary>
     /// <remarks>
@@ -100,4 +122,14 @@ public sealed record CliRunPlacement
 
     /// <summary><see cref="WorkDirectory"/> 在目标上还不存在时建出来（经 <see cref="ICliHostTarget.CreateWorkDirectoryAsync"/>）；false = 不存在就失败。</summary>
     public bool CreateWorkDirectory { get; init; }
+
+    /// <summary>
+    /// 使用方在落点时就知道这一轮的用量在别处计量（用户自己的订阅或 key，见 <see cref="CliLaunchEnvironment.UsageMeteredElsewhere"/>）：
+    /// 入队时不查用户的用量上限，开跑时也不开用量窗口，免得一个用完了平台额度的人连自己付费的一轮也被拦下。
+    /// </summary>
+    /// <remarks>
+    /// 记在运行上（<c>CliRun.UsageMeteredElsewhere</c>）。起进程时仍以启动环境为准：它改说要计量时（落点之后档案变了），
+    /// 运行记录跟着改，但这一轮已经没开窗口，花费不进窗口 —— 只差这一轮，下一轮照常查。
+    /// </remarks>
+    public bool UsageMeteredElsewhere { get; init; }
 }

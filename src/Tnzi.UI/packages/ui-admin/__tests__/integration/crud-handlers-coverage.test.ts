@@ -375,6 +375,18 @@ vi.mock('../../src/services/bridges/signing-bridge', () => ({
     templates: { ...mkCrud(), getById: vi.fn(async () => ({ fields: [] })) },
   }),
 }))
+vi.mock('../../src/services/bridges/oidc-bridge', () => ({
+  createOidcBridge: () => ({
+    // Create answers the one-time secret beside the client, not the bare row.
+    clients: {
+      ...mkCrud(),
+      create: vi.fn(async (data: unknown) => ({ client: { id: '1', ...(data as object) }, clientSecret: 's' })),
+      setEnabled: vi.fn(async () => undefined),
+      rotateSecret: vi.fn(async () => ({ client: { id: '1' }, clientSecret: 's2' })),
+    },
+    grants: mkCrud(),
+  }),
+}))
 vi.mock('../../src/services/bridges/identity-bridge', () => ({
   createIdentityBridge: () => ({
     users: mkCrud(), roles: mkCrud(), tenants: mkCrud(), loginLogs: mkCrud(),
@@ -485,6 +497,8 @@ import Users from '../../src/pages/identity/Users.vue'
 import Roles from '../../src/pages/identity/Roles.vue'
 import Tenants from '../../src/pages/identity/Tenants.vue'
 import LoginLogs from '../../src/pages/identity/LoginLogs.vue'
+import OidcClients from '../../src/pages/identity/OidcClients.vue'
+import OidcGrants from '../../src/pages/identity/OidcGrants.vue'
 import Logs from '../../src/pages/audit/Logs.vue'
 import Operations from '../../src/pages/audit/Operations.vue'
 import AccessLogs from '../../src/pages/system/AccessLogs.vue'
@@ -621,6 +635,7 @@ const PAGES: Array<[string, any]> = [
   // Identity / Audit / System / Authorization / Storage
   ['Users', Users], ['Roles', Roles],
   ['Tenants', Tenants], ['LoginLogs', LoginLogs],
+  ['OidcClients', OidcClients], ['OidcGrants', OidcGrants],
   ['Logs', Logs], ['Operations', Operations],
   ['AccessLogs', AccessLogs], ['Dictionaries', Dictionaries],
   ['Parameters', Parameters],

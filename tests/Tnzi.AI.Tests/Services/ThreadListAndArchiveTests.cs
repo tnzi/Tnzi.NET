@@ -3,7 +3,7 @@ using AgentThreadEntity = Tnzi.AI.Entities.AgentThread;
 namespace Tnzi.AI.Tests.Services;
 
 /// <summary>
-/// The thread list filters by archive status and last activity and sorts on the server, so paging stays
+/// The thread list filters by archive status and the owner's last message and sorts on the server, so paging stays
 /// correct; a thread can be archived and unarchived, and a new user message brings an archived thread back.
 /// </summary>
 /// <remarks>Real repositories on SQLite: the queries are what is under test.</remarks>
@@ -68,7 +68,7 @@ public class ThreadListAndArchiveTests : IntegratedTestBase<ThreadAttachmentDbCo
     }
 
     [Fact]
-    public async Task Sort_LastActivity_CreationTime_AndTitle_IgnoringCase()
+    public async Task Sort_LastUserMessage_CreationTime_AndTitle_IgnoringCase()
     {
         var b = await SeedAsync("banana", activity: Now.AddHours(-1), created: Now.AddDays(-1));
         var a = await SeedAsync("Apple", activity: Now.AddHours(-3), created: Now.AddHours(-1));
@@ -167,7 +167,11 @@ public class ThreadListAndArchiveTests : IntegratedTestBase<ThreadAttachmentDbCo
 
     private async Task<Guid> SeedAsync(string title, DateTime activity, DateTime? created = null, DateTime? archivedAt = null, Guid? agentId = null)
     {
-        var thread = new AgentThreadEntity { Title = title, LastActivityTime = activity, ArchivedTime = archivedAt, AgentId = agentId };
+        // 「活动」在这里指列表据以排序与筛选的时间：主人最近一次发消息
+        var thread = new AgentThreadEntity
+        {
+            Title = title, LastActivityTime = activity, LastUserMessageTime = activity, ArchivedTime = archivedAt, AgentId = agentId
+        };
         DbContext.Set<AgentThreadEntity>().Add(thread);
         await DbContext.SaveChangesAsync();
         if (created.HasValue)

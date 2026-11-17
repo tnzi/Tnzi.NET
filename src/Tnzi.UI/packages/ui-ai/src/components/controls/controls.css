@@ -1,0 +1,287 @@
+/* ===========================================================================
+ * Native form controls in the package's look: `.t-input`, `.t-select`,
+ * `.t-check`, `.t-mono`. Plain elements keep v-model, autofill, IME and phone
+ * keyboards exactly as the browser does them; these classes only paint them.
+ *
+ *   <input class="t-input">  <textarea class="t-input">
+ *   <label class="t-check"><input type="checkbox"> text</label>
+ *
+ * `.t-select` is the field of a dropdown: `TSelect`'s button wears it, and so
+ * does the rare native `<select>` kept for what only the browser does (filling
+ * in an address). Its arrow is drawn in `currentColor` (a mask on a button, two
+ * gradient halves on a native select), so it follows the text colour in
+ * either mode.
+ *
+ * Heights follow the buttons, so a field and a button on one row line up: the
+ * default (30px) matches `TButton`'s default `sm`, the one size of an app's
+ * pages and dialogs; `--md` (36px) matches `TButton size="md"`, for the few
+ * standalone pages a visitor lands on (a shared link, an invitation). On a
+ * phone the text is 16px, the size below which iOS zooms the page into a
+ * focused field.
+ *
+ * `aria-invalid="true"` marks a field in error. Focus takes the focus tokens
+ * (`--tnzi-ai-focus-border` / `--tnzi-ai-focus-ring`), like every field the
+ * package draws (gate: __tests__/conventions/focus-style.test.ts).
+ * ========================================================================= */
+:root {
+  /* The chevron of a `.t-select` button, used as a mask (its stroke colour is irrelevant). */
+  --t-select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+.t-input,
+.t-select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--tnzi-ai-border-strong);
+  border-radius: var(--tnzi-ai-radius-md, 8px);
+  background-color: var(--tnzi-ai-surface);
+  color: var(--tnzi-ai-text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  transition: border-color var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing),
+    box-shadow var(--tnzi-ai-duration-fast) var(--tnzi-ai-easing);
+}
+input.t-input,
+.t-select {
+  height: 30px;
+  padding: 0 10px;
+}
+textarea.t-input {
+  padding: 6px 10px;
+  resize: vertical;
+}
+.t-input::placeholder {
+  color: var(--tnzi-ai-text-tertiary);
+}
+.t-input:focus,
+.t-select:focus {
+  outline: none;
+  border-color: var(--tnzi-ai-focus-border);
+  box-shadow: var(--tnzi-ai-focus-ring);
+}
+/* The ring is the focus sign; the page-wide focus line would draw a second one. */
+.t-input:focus-visible,
+.t-select:focus-visible {
+  outline: none;
+}
+.t-input[aria-invalid='true'],
+.t-select[aria-invalid='true'] {
+  border-color: var(--tnzi-ai-danger);
+}
+.t-input[aria-invalid='true']:focus,
+.t-select[aria-invalid='true']:focus {
+  border-color: var(--tnzi-ai-focus-border-error);
+  box-shadow: var(--tnzi-ai-focus-ring-error);
+}
+.t-input:disabled,
+.t-select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.t-select {
+  position: relative;
+  appearance: none;
+  padding-right: 30px;
+  cursor: pointer;
+}
+/* A button field: the chevron is a mask over `currentColor`, at the right. */
+:not(select).t-select::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  background: currentColor;
+  opacity: 0.6;
+  -webkit-mask: var(--t-select-arrow) center / contain no-repeat;
+  mask: var(--t-select-arrow) center / contain no-repeat;
+  pointer-events: none;
+}
+/* A native select cannot hold a pseudo-element: its arrow is two diagonal
+   strokes drawn with gradients in `currentColor` at 60%, a chevron that
+   follows the mode like the button field's. */
+select.t-select {
+  --t-select-stroke: color-mix(in srgb, currentColor 60%, transparent);
+  background-image:
+    linear-gradient(45deg, transparent 42%, var(--t-select-stroke) 42%, var(--t-select-stroke) 62%, transparent 62%),
+    linear-gradient(135deg, transparent 42%, var(--t-select-stroke) 42%, var(--t-select-stroke) 62%, transparent 62%);
+  background-repeat: no-repeat;
+  background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%;
+  background-size: 5px 5px, 5px 5px;
+}
+
+/* After the base rules so their padding and arrow position win. */
+input.t-input--md,
+.t-select--md {
+  height: 36px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+input.t-input--md {
+  padding: 0 12px;
+}
+.t-select--md {
+  padding: 0 34px 0 12px;
+}
+:not(select).t-select--md::after {
+  right: 10px;
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+}
+select.t-select--md {
+  background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%;
+  background-size: 6px 6px, 6px 6px;
+}
+/* A field with no box of its own: the line it sits on is the box. For the
+   rows of `TInlineField` (a letter's "To" and "Subject"), and for a field in a
+   bar that draws its own frame. Focus shows on the row (its rule turns the
+   focus colour), so the field itself draws no ring. */
+input.t-input--bare,
+textarea.t-input--bare {
+  height: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+.t-input--bare:focus {
+  box-shadow: none;
+}
+/* The dropdown's field with no box: as wide as its value, the arrow right
+   after it, so a "From" row reads like the "To" and "Subject" rows beside it.
+   In a `TInlineField` the row shows focus; on its own it has the keyboard
+   focus line. */
+.t-select.t-select--bare {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  min-height: 30px;
+  padding: 0 22px 0 0;
+  border: none;
+  border-radius: var(--tnzi-ai-radius-xs, 4px);
+  background-color: transparent;
+}
+:not(select).t-select--bare::after {
+  right: 2px;
+}
+.t-select--bare:focus {
+  box-shadow: none;
+}
+.t-select.t-select--bare:focus-visible {
+  outline: var(--tnzi-ai-focus-outline);
+  outline-offset: 2px;
+}
+.t-inline-field .t-select.t-select--bare:focus-visible {
+  outline: none;
+}
+/* A one-time code (a confirmation code from a mail, an authenticator's six
+   digits): it has to stand out and be easy to type, so the digits are 16px
+   monospace, evenly spaced and tabular. Pair with `--md` for the 36px field:
+   `class="t-input t-input--md t-input--code"`. */
+input.t-input--code {
+  font-family: var(--tnzi-ai-font-mono);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+}
+.t-mono {
+  font-family: var(--tnzi-ai-font-mono);
+  font-size: 13px;
+}
+/* Last, so it also covers the larger and monospace fields. */
+@media (max-width: 640px) {
+  :is(input, textarea).t-input,
+  .t-select {
+    font-size: 16px;
+  }
+}
+
+.t-check {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--tnzi-ai-text);
+  cursor: pointer;
+}
+.t-check input {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+  accent-color: var(--tnzi-ai-accent);
+  cursor: pointer;
+}
+
+/* -- Empty pages -------------------------------------------------------------
+   The drawing an empty page leads with (`TEmptyArt`, or a page's own in
+   `TEmptyState`'s `#art` slot): a line drawing in the text colour on a 96-unit
+   square, its shapes filled with a soft tone set off the lines. Global, so a
+   page's own drawing takes the same hand. */
+.t-empty-art {
+  width: 96px;
+  height: 96px;
+  color: var(--tnzi-ai-text);
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* The stopwatch's and the clock's fills are circles placed off-centre by hand;
+   every other fill is its outline moved by this offset. */
+.t-empty-art__fill {
+  fill: var(--tnzi-ai-sidebar-selected, var(--tnzi-ai-hover));
+  stroke: none;
+}
+:is(g, path).t-empty-art__fill {
+  translate: -1.5px 3px;
+}
+
+/* Templates on a page with nothing on it yet: a wavy hairline, then two columns
+   of `TTemplateRow`; one on a phone. The line is `--tnzi-ai-wave` used as a
+   mask over the border colour. */
+.t-templates-divider {
+  align-self: stretch;
+  height: 6px;
+  margin: 28px 0 20px;
+  background: var(--tnzi-ai-border);
+  -webkit-mask: var(--tnzi-ai-wave) repeat-x left center / 12px 6px;
+  mask: var(--tnzi-ai-wave) repeat-x left center / 12px 6px;
+}
+.t-templates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@media (max-width: 640px) {
+  .t-templates {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Words for a screen reader only (a badge's sentence, a segmented option's
+   count). Declared here, not left to the utility layer that happens to define
+   the same class in the package stylesheet: the controls stylesheet has no
+   utility layer, and there the words showed on the page. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}

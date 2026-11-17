@@ -74,8 +74,9 @@ public class PermissionDbSeeder
     /// </summary>
     /// <returns>
     /// Number of rows inserted + updated. Zero on no-op runs (re-startup
-    /// with unchanged providers). Failures are logged but do not throw -
-    /// startup must not block on this auxiliary step.
+    /// with unchanged providers). A provider whose <c>Define</c> throws is logged
+    /// and skipped for this run; a database failure throws, so the post-migration
+    /// startup task that calls this is retried until the seed goes through.
     /// </returns>
     public async Task<int> SeedAsync(IEnumerable<IPermissionDefinitionProvider> providers, CancellationToken cancellationToken = default)
     {

@@ -349,3 +349,31 @@ describe('the classic layout', () => {
     expect(el.querySelectorAll('.t-tool-run__row')).toHaveLength(2);
   });
 });
+
+describe('a plan sent back to the agent', () => {
+  const exitPlan = (id: string, patch: Partial<ToolCallInfo>): ToolCallInfo => ({
+    id,
+    name: 'ExitPlanMode',
+    input: { plan: '# Plan: create hello.py' },
+    textOffset: lead.length,
+    ...patch,
+  });
+  const sentBack = exitPlan('p1', { status: 'failed', error: 'Please add a test step.', result: [{ type: 'text', text: 'Please add a test step.' }] });
+  const approved = exitPlan('p2', { status: 'completed', result: [{ type: 'text', text: 'User has approved exiting plan mode.' }] });
+
+  it('reads as what happened on the line, with no failure mark', async () => {
+    const el = await mount(TThreadMessage, () => ({ message: answer([sentBack, approved]) }));
+    expect(lineText(el)).toBe('Plan sent back, plan approved');
+    expect(el.querySelector('.t-tool-run__mark--failed')).toBeNull();
+    expect(el.querySelector('.t-tool-run__part--failed')).toBeNull();
+  });
+
+  it('opens on a finished step, not a failed one, in either language', async () => {
+    const el = await mount(TThreadMessage, () => ({ message: answer([sentBack]) }), { locale: zhCn });
+    expect(lineText(el)).toBe('计划已退回');
+    (lines(el)[0] as HTMLButtonElement).click();
+    await settle();
+    expect(el.querySelector('[data-icon="lucide:x-circle"]')).toBeNull();
+    expect(el.querySelector('.t-tool-step__label')?.textContent).toBe('计划已退回');
+  });
+});

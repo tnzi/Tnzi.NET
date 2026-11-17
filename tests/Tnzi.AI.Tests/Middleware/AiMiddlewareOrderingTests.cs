@@ -68,8 +68,9 @@ public class AiMiddlewareOrderingTests
     [InlineData(nameof(AiMiddlewareOrders.SkillConstraint), nameof(AiMiddlewareOrders.UsageLogging))]
     [InlineData(nameof(AiMiddlewareOrders.LoopDetection), nameof(AiMiddlewareOrders.ToolGuardrail))]
     [InlineData(nameof(AiMiddlewareOrders.ToolGuardrail), nameof(AiMiddlewareOrders.ToolErrorRecovery))]
-    [InlineData(nameof(AiMiddlewareOrders.OutputGuardrail), nameof(AiMiddlewareOrders.Title))]
-    [InlineData(nameof(AiMiddlewareOrders.Title), nameof(AiMiddlewareOrders.Memory))]
+    [InlineData(nameof(AiMiddlewareOrders.Quota), nameof(AiMiddlewareOrders.Title))]
+    [InlineData(nameof(AiMiddlewareOrders.Title), nameof(AiMiddlewareOrders.History))]
+    [InlineData(nameof(AiMiddlewareOrders.OutputGuardrail), nameof(AiMiddlewareOrders.Memory))]
     [InlineData(nameof(AiMiddlewareOrders.Memory), nameof(AiMiddlewareOrders.Clarification))]
     public void OrderConstraint_FirstBeforeSecond(string firstName, string secondName)
     {

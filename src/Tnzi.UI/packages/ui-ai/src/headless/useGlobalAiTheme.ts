@@ -17,7 +17,7 @@
  * every user when it reached nobody.
  */
 import { ref, computed, shallowRef, hasInjectionContext, inject, type Ref, type ComputedRef } from 'vue';
-import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui';
+import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui/headless';
 import {
   useAppearanceApi,
   useAdminAppearanceApi,

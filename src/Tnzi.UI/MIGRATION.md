@@ -2,6 +2,39 @@
 
 This guide collects breaking changes by version range. Read [CHANGELOG.md](./CHANGELOG.md) alongside.
 
+## `@tnzi/*` unreleased — `@tnzi/ui` is the library-neutral common layer; the naive-rendered half moved to `@tnzi/ui-admin`
+
+**Breaking: the moved exports are gone from `@tnzi/ui` with no forwarding alias.**
+
+`@tnzi/ui` depends on no component library now. It keeps the theme context and
+`--tnzi-*` tokens, the login stack, the overlay and focus primitives, the
+runtime and theme adapters and 27 library-neutral components. Everything that
+renders with or targets Naive UI moved to `@tnzi/ui-admin`. An app built on
+`@tnzi/ui-ai` alone no longer installs naive-ui: remove it from `package.json`,
+and its `paths` mapping from `tsconfig.json`.
+
+| Was imported from | What | Import from now |
+| --- | --- | --- |
+| `@tnzi/ui`, `@tnzi/ui/components` | `TStatCard` `TUserCard` `TTable` `TDataList` `TAttachmentWall` `TButtonIcon` `THint` `TRelativeTime` `TSourceBadge` `TStatToCards` `TStatusBadge` `TCaptcha` `TImageCaptcha` `TForm` `TImageUpload` `TSchemaForm` `TSearchForm` `TAddressFields` `TComboSelect` `TMoneyInput` `TAppHeader` `TBreadcrumb` `TWidgetCard` `TWorkbenchLayout` `TMenu` `TNavBar` `TTabBar` `TDrawerShell` `TModalShell` `TOverlayTheme` `TLangSwitch` `TFullScreen` `TMenuToggler` `TPinToggler` `TReloadButton` `TThemeSchemaSwitch` and their types (`StatusType`, `FormSchemaItem`, `WidgetDef`, ...), `WIDGET_CONTEXT_KEY` | `@tnzi/ui-admin` |
+| `@tnzi/ui`, `@tnzi/ui/headless` | `useSafeMessage`, `useOverlayTheme` (+ `useOverlayThemeOverrides`, `useOverlayComponentOptions`, `OVERLAY_CONTROL_SIZE`), `useWidget`, `useWorkbenchLayout`, `useAddressFields`, the form host (`provideFormHost`, `useFormHost`, ...), `useEcharts`, `useReorderable`, `useDraggableComponent` | `@tnzi/ui-admin` |
+| `@tnzi/ui`, `@tnzi/ui/theme` | `buildNaiveThemeOverrides` (now `(settings, overrides?)`) | `@tnzi/ui-admin` |
+| `@tnzi/ui` | `ThemeSettings.naiveOverrides`, `ThemeContext.naiveOverrides` | `createTnziUiAdmin({ naiveOverrides })` (an object, a `Ref` or `({ isDark, settings }) => overrides`), `useNaiveThemeOverrides(themeContext)` |
+| `@tnzi/ui/theme/presets/compact.json` | compact density | `COMPACT_NAIVE_OVERRIDES` from `@tnzi/ui-admin` |
+| `@tnzi/ui`, `@tnzi/ui/adapters` | `createMessageAdapter`, `createDialogAdapter`, `createNotificationAdapter`, `createLoadingBarAdapter`, `createUiAdapter` | `@tnzi/ui-admin` (registered by `createTnziUiAdmin`, option `registerAdapters`) |
+| `@tnzi/ui`, `@tnzi/ui/utils` | `convertToMenuOptions`, `convertFormRule`, `convertFormRules` | `@tnzi/ui-admin` |
+| `@tnzi/ui` | `getNaiveLocale`, `NaiveLocaleBundle` | `@tnzi/ui-admin` |
+| `@tnzi/ui` (root) | the stores (`useAuthStore`, `useAppStore`, `useUserStore`, `initStoreRuntime`, ...) | `@tnzi/ui/stores` |
+| `createTnziUi({ registerAdapters })` | the naive adapters | option removed; `createTnziUiAdmin` registers them |
+| `@tnzi/ui/style.css` | styles of the moved components, media chip, schema form | `@tnzi/ui-admin/style.css` |
+| `@tnzi/ui-admin` | `TStatCard` as a deprecated alias of `TKpiCard` | `TKpiCard`; `TStatCard` is the statistic card itself now |
+
+Also: `tnziSingletons()` dedupes `vue`, and `vue-router`, `pinia` and `naive-ui`
+only where the app has them installed (no `extra` needed); `TWidgetCard` / `TWorkbenchLayout`
+dropped their `translate` and label props (they read the admin i18n);
+`useWorkbenchLayout` defaults to the `tnzi-admin-workbench-order` key.
+Unlisted symbols keep their path. The full list, with what the `@tnzi/ui` root
+still exports, is in the upgrade notes of the documentation site.
+
 ## `@tnzi/*` unreleased — directory naming unified across all five packages
 
 **Breaking: four published subpaths were renamed with no compatibility alias.**

@@ -94,7 +94,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useMessage } from 'naive-ui'
-import { TSvgIcon, TSourceBadge } from '@tnzi/ui'
+import { TSvgIcon } from '@tnzi/ui'
+import TSourceBadge from '../../components/display/TSourceBadge.vue'
 import TCardPage from '../../components/crud/TCardPage.vue'
 import TEntityCard from '../../components/data/TEntityCard.vue'
 import TRowActions from '../../components/crud/TRowActions.vue'

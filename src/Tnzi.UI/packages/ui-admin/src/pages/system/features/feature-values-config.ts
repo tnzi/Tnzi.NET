@@ -3,7 +3,7 @@ import { EMPTY_DASH } from '../../../utils/placeholders'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
 import TStatusBadge from '../../../components/display/TStatusBadge.vue'
-import { TSourceBadge } from '@tnzi/ui'
+import TSourceBadge from '../../../components/display/TSourceBadge.vue'
 import type { FeatureValueWithDefinitionDto } from '../../../services/bridges/feature-bridge'
 
 /**

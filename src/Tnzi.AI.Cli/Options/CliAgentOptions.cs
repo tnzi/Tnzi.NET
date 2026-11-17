@@ -59,6 +59,24 @@ public class CliAgentOptions
     public TimeSpan TerminateGrace { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// 一轮结束时 CLI 还有后台任务在跑（Bash 的 <c>run_in_background</c> 之类），最多等多久让它跑完、接着出下一轮的回答。
+    /// 默认 30 分钟；<see cref="TimeSpan.Zero"/> = 不等（一轮结束即结束运行，后台任务随进程结束）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 等待期间运行保持 Running：进程与并发槽都还占着；停止（取消）运行会连同后台任务一起结束。同一线程的下一条消息不排在等待后面：
+    /// 它接过这个进程（后台任务照常跑），等着的那条结束在它的回答上（见 <c>CliRunHandoffs</c>）。
+    /// 每一轮的回答各是线程里的一条助手消息（实时流上以 <c>turn_completed</c> 分隔）。
+    /// </para>
+    /// <para>
+    /// 上限从每一轮结束时重新起算，等待期间空闲与工具看门狗不判死（CLI 没有输出是应该的）；<see cref="HardTimeout"/> 照常，
+    /// 所以一个卡住的后台任务最多占住进程这么久。到点时已经有的回答照常交付，运行以 Completed 结束，事件流上留一条
+    /// <c>background_tasks_stopped</c> 状态。只对 stream-json 的 claude 生效（ACP 没有后台任务的协议形态）。
+    /// </para>
+    /// </remarks>
+    public TimeSpan BackgroundTaskWait { get; set; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>
     /// 是否把宿主的全部环境变量透传给子进程。<b>默认 false</b>。
     /// </summary>
     /// <remarks>
@@ -350,7 +368,8 @@ public class CliReattachOptions
 }
 
 /// <summary>
-/// 「先问我」档位（<c>CliPermissionMode.Ask</c>）在有人值守的一轮上把权限请求交给使用方批准。
+/// 有人值守的一轮上交给使用方回答的请求：「先问我」与「计划」档的权限请求、agent 的问题与计划（<c>CliAgentPermission.Kind</c>）。
+/// 三种请求共用这里的期限与轮询间隔。
 /// </summary>
 public class CliApprovalOptions
 {

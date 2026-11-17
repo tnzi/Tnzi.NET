@@ -10,7 +10,16 @@
     @keydown="onKeydown"
   >
     <slot />
-    <div v-if="$slots.actions" class="t-entity-card__actions" @click.stop>
+    <!-- Stop both activation keys as well as the click, and only stop: a native
+         button activates on Space at keyup, so its keydown would otherwise also
+         open the card behind it. -->
+    <div
+      v-if="$slots.actions"
+      class="t-entity-card__actions"
+      @click.stop
+      @keydown.enter.stop
+      @keydown.space.stop
+    >
       <slot name="actions" />
     </div>
   </NCard>

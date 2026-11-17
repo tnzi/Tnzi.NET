@@ -4,7 +4,7 @@ using Tnzi.TestBase;
 namespace Tnzi.Imaging.Tests;
 
 /// <summary>
-/// 根目录 <c>Directory.Build.props</c> 压掉了 ImageSharp 3.1.12 的五条 NuGet 审计告警，
+/// 根目录 <c>Directory.Build.props</c> 压掉了 ImageSharp 3.1.12 的六条 NuGet 审计告警，
 /// 每一条的理由都是「本仓不可达」或「已在仓内缓解」。这里把那些理由变成可执行的断言。
 /// </summary>
 /// <remarks>
@@ -23,7 +23,7 @@ public class ImageSharpAdvisoryGateTests
 {
     /// <summary>当前仓内把外来字节直接交给 ImageSharp 解码的全部位置。</summary>
     /// <remarks>
-    /// 两处都在交出字节之前拒绝 BigTIFF。新增一处时先让它也这么做，再把它加进这张表。
+    /// 两处都在交出字节之前拒绝 BigTIFF 与会越界写的 CCITT TIFF。新增一处时先让它也这么做，再把它加进这张表。
     /// </remarks>
     private static readonly string[] KnownDecodeSites =
     [
@@ -61,6 +61,24 @@ public class ImageSharpAdvisoryGateTests
         {
             Sources.Value.Single(file => file.Path == site).CodeLines
                 .ShouldContain(line => line.Contains("ThrowIfBigTiff"), $"{site} decodes without rejecting BigTIFF first.");
+        }
+    }
+
+    /// <summary>
+    /// GHSA-v76p-62qx-wwq2（CCITT 解压器越界写）同样按「已缓解」压制：每一个直接解码的位置都要先拒绝那些 CCITT 形态。
+    /// </summary>
+    [Fact]
+    public void DirectDecodeCalls_RejectUnsafeCcittTiffFirst()
+    {
+        var sites = Sources.Value.Where(file => file.CodeLines.Any(DecodeCall.IsMatch)).ToList();
+        sites.ShouldNotBeEmpty("The source scan found no direct decode call at all, so the check below would prove nothing.");
+
+        foreach (var site in sites)
+        {
+            site.CodeLines.ShouldContain(
+                line => line.Contains("ThrowIfUnsafeFaxTiff"),
+                $"{site.Path} decodes without rejecting the CCITT TIFF shapes that ImageSharp 3.1 decodes out of bounds "
+                + "(GHSA-v76p-62qx-wwq2, suppressed in Directory.Build.props as mitigated).");
         }
     }
 

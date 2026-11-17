@@ -20,8 +20,9 @@ import { __resetTouchProbeForTests } from '../../src/headless/useBreakpoint'
 // Mock @tnzi/ui's useTheme so TDashboardPage's useEcharts dependency
 // doesn't require a real plugin install. Stub returns the minimal
 // surface useEcharts touches (settings.value.mode + resolvedMode).
-vi.mock('@tnzi/ui', async () => {
-  const actual = await vi.importActual<Record<string, unknown>>('@tnzi/ui')
+// `useEcharts` imports it from the `/headless` subpath.
+vi.mock('@tnzi/ui/headless', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('@tnzi/ui/headless')
   return {
     ...actual,
     useTheme: () => ({

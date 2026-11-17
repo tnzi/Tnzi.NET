@@ -552,6 +552,200 @@ public class ClaudeStreamJsonSmokeTests
         file.Uri.ShouldBe("https://files.example.com/u/42/report.pdf");
     }
 
+    /// <summary>
+    /// In a full-permission turn someone attends, AskUserQuestion reaches us as a question request (it would not even be in
+    /// the agent's tools without <c>--permission-prompt-tool stdio</c>), and the agent continues with the answer we gave.
+    /// The turn also reports how full the context window is.
+    /// </summary>
+    [SmokeFact(ProviderKey)]
+    public async Task AskUserQuestion_InAnAttendedFullTurn_ReachesUs_AndTheAgentUsesTheAnswer()
+    {
+        var (events, outcome, result, _) = await RunTurnAsync(
+            "Use the AskUserQuestion tool to ask me one question: which color I prefer, with the options Red and Blue. " +
+            "Then reply with exactly the color I chose and nothing else.",
+            answer: evt => new CliPermissionDecision(true, CliInteractionOptionIds.Submit, null,
+                evt.Permission!.Questions!.ToDictionary(q => q.Question, _ => (IReadOnlyList<string>)["Blue"])));
+
+        var transcript = string.Join(Environment.NewLine, events.Select(e => $"[{e.Type}] {e.Tool} {e.Content ?? e.Output}"));
+        var request = events.FirstOrDefault(e => e.Type == CliAgentEventType.PermissionRequest)
+            .ShouldNotBeNull($"stderr tail was: {outcome.StderrTail}{Environment.NewLine}{transcript}");
+        request.Permission!.Kind.ShouldBe(CliInteractionKinds.Question);
+        request.Permission.Questions.ShouldNotBeNull().ShouldNotBeEmpty();
+        result.Status.ShouldBe(CliRunStatus.Completed, transcript);
+        result.Output.ShouldNotBeNull().ShouldContain("Blue");
+
+        var context = result.Context.ShouldNotBeNull("the stream reports the last call's usage");
+        context.Tokens.ShouldBeGreaterThan(0);
+        context.Window.ShouldNotBeNull("result.modelUsage carries the context window").ShouldBeGreaterThan(context.Tokens);
+    }
+
+    /// <summary>
+    /// A plan-mode turn someone attends: the plan reaches us; rejected with feedback the agent revises it; approved, it goes on
+    /// and the edit it then makes is asked for before it happens (back in the mode the turn started from, plan's "default").
+    /// </summary>
+    [SmokeFact(ProviderKey)]
+    public async Task PlanMode_ThePlanReachesUs_FeedbackRevisesIt_AndApprovalStartsTheWork()
+    {
+        var workspace = ThrowawayWorkspace();
+        var plans = 0;
+        try
+        {
+            var (events, outcome, result, _) = await RunTurnAsync(
+                "Create a file hello.txt containing the word hello. Plan it first and keep the plan very short.",
+                workspace: workspace, permissionMode: CliPermissionMode.Plan,
+                answer: evt => evt.Permission!.Kind == CliInteractionKinds.Plan && ++plans == 1
+                    ? new CliPermissionDecision(false, CliInteractionOptionIds.Reject, "Also say in the plan that the file must end with a newline.")
+                    : new CliPermissionDecision(true, evt.Permission.Kind == CliInteractionKinds.Plan ? CliInteractionOptionIds.Approve : CliPermissionOptionKinds.AllowOnce, null));
+
+            var transcript = string.Join(Environment.NewLine, events.Select(e => $"[{e.Type}] {e.Tool} {e.Content ?? e.Output}"));
+            var requests = events.Where(e => e.Type == CliAgentEventType.PermissionRequest).ToList();
+            requests.Count(e => e.Permission!.Kind == CliInteractionKinds.Plan).ShouldBeGreaterThanOrEqualTo(2, $"{outcome.StderrTail}{Environment.NewLine}{transcript}");
+            requests.First().Permission!.Plan.ShouldNotBeNullOrWhiteSpace();
+            requests.ShouldContain(e => e.Permission!.Kind == CliInteractionKinds.Permission, "after approval the edit is asked for");
+            result.Status.ShouldBe(CliRunStatus.Completed, transcript);
+            File.Exists(Path.Combine(workspace.WorkDirectory, "hello.txt")).ShouldBeTrue(transcript);
+        }
+        finally
+        {
+            RemoveWorkspace(workspace);
+        }
+    }
+
+    /// <summary>
+    /// A plan-mode turn someone attends, with the built-in tools restricted to <c>WebSearch</c> (no Write): the interaction tools
+    /// stay available, and the plan request carries a plan a person can decide on. claude 2.1.317 cannot write its plan file here,
+    /// so it often hands over an empty <c>ExitPlanMode</c> input; the plan then comes from what the agent wrote since plan mode began.
+    /// </summary>
+    [SmokeFact(ProviderKey)]
+    public async Task PlanMode_WithoutWrite_ThePlanRequestStillCarriesThePlan()
+    {
+        var (events, outcome, result, _) = await RunTurnAsync(
+            "Plan how you would compare the three most popular Python web frameworks in one paragraph. Keep the plan to three short steps. " +
+            "When the plan is ready, exit plan mode with it. After approval, reply with exactly: DONE",
+            permissionMode: CliPermissionMode.Plan, builtInTools: ["WebSearch"],
+            answer: evt => new CliPermissionDecision(true,
+                evt.Permission!.Kind == CliInteractionKinds.Plan ? CliInteractionOptionIds.Approve : CliPermissionOptionKinds.AllowOnce, null));
+
+        var transcript = string.Join(Environment.NewLine, events.Select(e => $"[{e.Type}] {e.Tool} {e.Content ?? e.Output}"));
+        var plan = events.Where(e => e.Type == CliAgentEventType.PermissionRequest).Select(e => e.Permission!)
+            .FirstOrDefault(p => p.Kind == CliInteractionKinds.Plan)
+            .ShouldNotBeNull($"the plan request never came: {outcome.StderrTail}{Environment.NewLine}{transcript}");
+        plan.Plan.ShouldNotBeNullOrWhiteSpace(transcript);
+        plan.PlanSource.ShouldBeOneOf(CliPlanSources.Input, CliPlanSources.AssistantText, CliPlanSources.AssistantThinking);
+        result.Status.ShouldBe(CliRunStatus.Completed, transcript);
+    }
+
+    /// <summary>
+    /// The "ask me" mode in a turn someone attends: an edit is asked for (without <c>--permission-prompt-tool stdio</c> claude
+    /// refuses it on the spot and sends no request at all), and allowing it lets the edit happen.
+    /// </summary>
+    [SmokeFact(ProviderKey)]
+    public async Task AskMode_AnEditIsAskedFor_AndAllowingItLetsItHappen()
+    {
+        var workspace = ThrowawayWorkspace();
+        try
+        {
+            var (events, outcome, result, _) = await RunTurnAsync(
+                "Use the Write tool to create a.txt containing A, then reply with exactly: DONE",
+                workspace: workspace, permissionMode: CliPermissionMode.Ask,
+                answer: _ => new CliPermissionDecision(true, CliPermissionOptionKinds.AllowOnce, null));
+
+            var transcript = string.Join(Environment.NewLine, events.Select(e => $"[{e.Type}] {e.Tool} {e.Content ?? e.Output}"));
+            events.Where(e => e.Type == CliAgentEventType.PermissionRequest)
+                .ShouldContain(e => e.Tool == "Write" && e.Permission!.Kind == CliInteractionKinds.Permission, $"{outcome.StderrTail}{Environment.NewLine}{transcript}");
+            result.Status.ShouldBe(CliRunStatus.Completed, transcript);
+            File.Exists(Path.Combine(workspace.WorkDirectory, "a.txt")).ShouldBeTrue(transcript);
+        }
+        finally
+        {
+            RemoveWorkspace(workspace);
+        }
+    }
+
+    /// <summary>
+    /// A turn that starts a background task and ends before the task does: the CLI starts another turn by itself when the
+    /// task finishes, and that turn reaches us after a turn boundary instead of dying with the first result.
+    /// </summary>
+    [SmokeFact(ProviderKey)]
+    public async Task ABackgroundTask_TheTurnTheCliStartsWhenItFinishes_ReachesUs()
+    {
+        var (events, outcome, result, elapsed) = await RunTurnAsync(
+            "Use the Bash tool with run_in_background=true to run exactly: sleep 15 && echo BG_DONE . " +
+            "Then immediately reply with the single word STARTED and end your turn. Do not wait or poll for it. " +
+            "When it finishes later, reply with the word FINISHED plus its output.",
+            backgroundTaskWait: TimeSpan.FromMinutes(2));
+
+        var transcript = string.Join(Environment.NewLine, events.Select(e => $"[{e.Type}] {e.Tool} {e.Status} {e.Content ?? e.Output}"));
+        var boundary = events.FindIndex(e => e.Type == CliAgentEventType.TurnCompleted);
+        boundary.ShouldBeGreaterThanOrEqualTo(0, $"{outcome.StderrTail}{Environment.NewLine}{transcript}");
+        events[boundary].Turn!.BackgroundTasks.ShouldNotBeEmpty(transcript);
+        events.Skip(boundary + 1).ShouldContain(e => e.Type == CliAgentEventType.Text && e.Content!.Contains("FINISHED"), transcript);
+        result.Status.ShouldBe(CliRunStatus.Completed, transcript);
+        result.Output.ShouldNotBeNull().ShouldContain("BG_DONE");
+        elapsed.ShouldBeGreaterThan(TimeSpan.FromSeconds(14), "the run waited for the background task");
+    }
+
+    /// <summary>
+    /// A slash command with per-turn context: the context goes in a frame of its own before the command, so the skill gets
+    /// clean arguments and the model still reads the context.
+    /// </summary>
+    [SmokeFact(ProviderKey)]
+    public async Task ASlashCommand_GetsCleanArguments_AndTheModelStillSeesTheTurnContext()
+    {
+        var workspace = ThrowawayWorkspace();
+        try
+        {
+            var skill = Path.Combine(workspace.WorkDirectory, ".claude", "skills", "echo-args");
+            Directory.CreateDirectory(skill);
+            await File.WriteAllTextAsync(Path.Combine(skill, "SKILL.md"),
+                "---\nname: echo-args\ndescription: Echo back the arguments exactly.\n---\n" +
+                "Reply with exactly two lines and nothing else.\nLine 1: ARGS=[$ARGUMENTS]\n" +
+                "Line 2: SECRET=<the secret word if any earlier message in this conversation told you one, otherwise NONE>\n");
+
+            var (events, outcome, result, _) = await RunTurnAsync(
+                "/echo-args hello world", workspace: workspace,
+                turnContext: "Context for this turn: the secret word is PINEAPPLE.");
+
+            var transcript = string.Join(Environment.NewLine, events.Select(e => $"[{e.Type}] {e.Tool} {e.Content ?? e.Output}"));
+            result.Status.ShouldBe(CliRunStatus.Completed, $"{outcome.StderrTail}{Environment.NewLine}{transcript}");
+            result.Output.ShouldNotBeNull().ShouldContain("ARGS=[hello world]", Case.Sensitive, transcript);
+            result.Output.ShouldContain("PINEAPPLE", Case.Sensitive, transcript);
+        }
+        finally
+        {
+            RemoveWorkspace(workspace);
+        }
+    }
+
+    /// <summary>
+    /// <c>/compact</c> on a resumed session: a typed compaction with its token counts, no answer text, and the run does not
+    /// claim a missing final response.
+    /// </summary>
+    [SmokeFact(ProviderKey)]
+    public async Task Compact_IsReportedAsACompaction_NotAsAMissingAnswer()
+    {
+        var workspace = ThrowawayWorkspace();
+        try
+        {
+            var (_, _, first, _) = await RunTurnAsync("Reply with exactly: OK", workspace: workspace);
+            first.SessionId.ShouldNotBeNull();
+
+            var (events, outcome, result, _) = await RunTurnAsync("/compact", resumeSessionId: first.SessionId, workspace: workspace);
+
+            var transcript = string.Join(Environment.NewLine, events.Select(e => $"[{e.Type}] {e.Status} {e.Content}"));
+            var compaction = events.Single(e => e.Type == CliAgentEventType.Compacted).Compaction.ShouldNotBeNull(transcript);
+            compaction.Trigger.ShouldBe("manual");
+            compaction.PostTokens.ShouldNotBeNull().ShouldBeGreaterThan(0);
+            result.Status.ShouldBe(CliRunStatus.Completed, $"{outcome.StderrTail}{Environment.NewLine}{transcript}");
+            result.Output.ShouldBeNull();
+            result.LocalCommand.ShouldBe("compact");
+        }
+        finally
+        {
+            RemoveWorkspace(workspace);
+        }
+    }
+
     private static CliLaunchEnvironmentComposer Composer()
         => new(new CliAuthStatusProbe(NullLogger<CliAuthStatusProbe>.Instance), NullLogger<CliLaunchEnvironmentComposer>.Instance);
 
@@ -575,12 +769,22 @@ public class ClaudeStreamJsonSmokeTests
     /// <param name="attachments">Images and PDFs sent with the prompt.</param>
     /// <param name="resumeAtEntryId">With <paramref name="resumeSessionId"/>: cut the session back to this entry and fork it.</param>
     /// <param name="inspect">Looks at the adapter after the turn (state the events do not carry).</param>
+    /// <param name="permissionMode">The turn's permission mode.</param>
+    /// <param name="answer">
+    /// Answers each request the adapter hands over; given, the turn counts as attended (questions and plans are relayed, and in the
+    /// ask and plan modes so are permission prompts). Null = unattended.
+    /// </param>
+    /// <param name="builtInTools">The launch profile's built-in tool list (null = all), passed through the executor's interaction-tool step.</param>
+    /// <param name="turnContext">The turn's per-turn context (sent the way the adapter sends it).</param>
+    /// <param name="backgroundTaskWait">How long to wait for the CLI's background tasks; null = not at all.</param>
     private static async Task<(List<CliAgentEvent> Events, CliSessionOutcome Outcome, CliAgentResult Result, TimeSpan Elapsed)>
         RunTurnAsync(
             string prompt, string? resumeSessionId = null, string? mcpConfigJson = null, IReadOnlyList<string>? extraArgs = null,
             CliWorkspace? workspace = null, CliUserConfigIsolation? isolation = null,
             IReadOnlyList<CliPromptAttachment>? attachments = null, string? resumeAtEntryId = null,
-            Action<StreamJsonAdapter>? inspect = null)
+            Action<StreamJsonAdapter>? inspect = null,
+            CliPermissionMode permissionMode = CliPermissionMode.Full, Func<CliAgentEvent, CliPermissionDecision>? answer = null,
+            string? turnContext = null, TimeSpan? backgroundTaskWait = null, IReadOnlyList<string>? builtInTools = null)
     {
         var provider = isolation is { } tier
             ? CliBuiltInProviders.All[ProviderKey] with { UserConfigIsolation = tier }
@@ -607,8 +811,11 @@ public class ClaudeStreamJsonSmokeTests
             // Compose the launch the way the executor does, so the deployment-default
             // isolation arguments are part of what the real CLI has to accept.
             var host = LocalHosts.Create(options);
+            // A restricted tool list goes through the same step the executor applies (attended turns keep the interaction tools)
+            var profile = CliRunExecutor.WithInteractionTools(
+                CliLaunchProfile.Local with { BuiltInTools = builtInTools }, provider, new CliRun { Attended = answer is not null });
             var launchEnvironment = await Composer().ComposeAsync(
-                provider, executablePath, workspace, host, options, CliLaunchProfile.Local, CancellationToken.None);
+                provider, executablePath, workspace, host, options, profile, CancellationToken.None);
 
             // Delivered the way the workspace preparer delivers it: a file the CLI is pointed at.
             string? mcpConfigPath = null;
@@ -623,6 +830,8 @@ public class ClaudeStreamJsonSmokeTests
                 Provider = provider,
                 ExecutablePath = executablePath,
                 Prompt = prompt,
+                TurnContext = turnContext,
+                BackgroundTaskWait = backgroundTaskWait ?? TimeSpan.Zero,
                 WorkingDirectory = workDirectory,
                 ResumeSessionId = resumeSessionId,
                 ResumeAtEntryId = resumeAtEntryId,
@@ -632,7 +841,11 @@ public class ClaudeStreamJsonSmokeTests
                 OwnedArgs = launchEnvironment.OwnedArgs,
                 ExtraArgs = extraArgs ?? [],
                 Environment = launchEnvironment.Environment,
-                EnvironmentWhitelist = options.EnvironmentWhitelist
+                EnvironmentWhitelist = options.EnvironmentWhitelist,
+                // Someone attends the turn exactly when the test answers requests (the executor's rule: attended + a provider that hands prompts over)
+                PermissionMode = permissionMode,
+                RelaysInteractions = answer is not null,
+                AsksForApproval = answer is not null && permissionMode is CliPermissionMode.Ask or CliPermissionMode.Plan
             };
 
             var adapter = new StreamJsonAdapter(NullLogger<StreamJsonAdapter>.Instance);
@@ -649,6 +862,10 @@ public class ClaudeStreamJsonSmokeTests
                 await foreach (var evt in adapter.RunAsync(process.Transport, context, cts.Token))
                 {
                     events.Add(evt);
+                    if (evt.Type == CliAgentEventType.PermissionRequest && answer is not null)
+                    {
+                        await adapter.AnswerPermissionAsync(evt.Permission!.ProtocolKey!, answer(evt), cts.Token);
+                    }
                 }
             }
             catch (OperationCanceledException)

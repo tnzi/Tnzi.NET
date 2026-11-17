@@ -1,0 +1,79 @@
+/* ===========================================================================
+ * Unified custom scrollbar - scoped to what ui-ai renders, so it NEVER leaks
+ * into the consumer's global `*` (unlike a raw global rule). Four hooks:
+ *
+ *   :root[data-tnzi-ai-app]  the whole page of an app built on ui-ai (the
+ *                        marker `defineChatApp` / `TChatApp` / `markAiApp()`
+ *                        put on `<html>`, headless/app-root.ts): the app's own
+ *                        pages and dialogs get the same bar as the shell;
+ *   .t-chat-app          the shell and everything inside it;
+ *   .t-ai-scroll-scope   an element and everything inside it: the root of each
+ *                        surface teleported out of the shell (settings dialog,
+ *                        command palette, action menu), so the consumer's own
+ *                        content in their slots matches, and the roots of
+ *                        rendered markup (markdown, highlighted code) whose
+ *                        scrolling `pre` the template cannot class;
+ *   .t-ai-scroll         this element: every scroll container ui-ai renders
+ *                        carries it, so a component used on its own, outside
+ *                        the shell, still has the thin bar.
+ *
+ * Engines with the `::-webkit-scrollbar` pseudo-elements (Chromium, Safari)
+ * get only those; the standard `scrollbar-width` / `scrollbar-color` are for
+ * the others (Firefox). Setting both is not harmless: once either standard
+ * property is set on an element, Chromium (121+) ignores its pseudo-elements
+ * and draws its native thin bar, arrow buttons and all, so the size token and
+ * the rounded thumb below never showed there.
+ *
+ * Gated by __tests__/conventions/thin-scrollbars.test.ts.
+ * ========================================================================= */
+@supports not selector(::-webkit-scrollbar) {
+  :root[data-tnzi-ai-app] *,
+  .t-chat-app,
+  .t-chat-app *,
+  .t-ai-scroll-scope,
+  .t-ai-scroll-scope *,
+  .t-ai-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--tnzi-ai-scrollbar-thumb, rgba(0, 0, 0, 0.18)) transparent;
+  }
+}
+:root[data-tnzi-ai-app] ::-webkit-scrollbar,
+.t-chat-app ::-webkit-scrollbar,
+.t-ai-scroll-scope::-webkit-scrollbar,
+.t-ai-scroll-scope ::-webkit-scrollbar,
+.t-ai-scroll::-webkit-scrollbar {
+  width: var(--tnzi-ai-scrollbar-size, 8px);
+  height: var(--tnzi-ai-scrollbar-size, 8px);
+}
+:root[data-tnzi-ai-app] ::-webkit-scrollbar-track,
+.t-chat-app ::-webkit-scrollbar-track,
+.t-ai-scroll-scope::-webkit-scrollbar-track,
+.t-ai-scroll-scope ::-webkit-scrollbar-track,
+.t-ai-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+:root[data-tnzi-ai-app] ::-webkit-scrollbar-thumb,
+.t-chat-app ::-webkit-scrollbar-thumb,
+.t-ai-scroll-scope::-webkit-scrollbar-thumb,
+.t-ai-scroll-scope ::-webkit-scrollbar-thumb,
+.t-ai-scroll::-webkit-scrollbar-thumb {
+  background: var(--tnzi-ai-scrollbar-thumb, rgba(0, 0, 0, 0.18));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+:root[data-tnzi-ai-app] ::-webkit-scrollbar-thumb:hover,
+.t-chat-app ::-webkit-scrollbar-thumb:hover,
+.t-ai-scroll-scope::-webkit-scrollbar-thumb:hover,
+.t-ai-scroll-scope ::-webkit-scrollbar-thumb:hover,
+.t-ai-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--tnzi-ai-scrollbar-thumb-hover, rgba(0, 0, 0, 0.32));
+  background-clip: padding-box;
+}
+:root[data-tnzi-ai-app] ::-webkit-scrollbar-corner,
+.t-chat-app ::-webkit-scrollbar-corner,
+.t-ai-scroll-scope::-webkit-scrollbar-corner,
+.t-ai-scroll-scope ::-webkit-scrollbar-corner,
+.t-ai-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}

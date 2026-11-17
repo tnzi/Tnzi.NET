@@ -57,6 +57,7 @@
     <ProjectReference Include="..\Tnzi.Finance.Offers\Tnzi.Finance.Offers.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Authorization.DataAuth\Tnzi.Authorization.DataAuth.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Identity.Organization\Tnzi.Identity.Organization.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Tnzi.Identity.OpenIdConnect\Tnzi.Identity.OpenIdConnect.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Payment.Billing\Tnzi.Payment.Billing.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Payment.Subscriptions\Tnzi.Payment.Subscriptions.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Tnzi.Payment.Promotions\Tnzi.Payment.Promotions.csproj" PrivateAssets="all" />

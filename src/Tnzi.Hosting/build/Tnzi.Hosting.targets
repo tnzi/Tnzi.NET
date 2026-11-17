@@ -147,6 +147,10 @@
     <PackageReference Include="Tnzi.Identity.Organization" Version="$(TnziVersion)" />
   </ItemGroup>
 
+  <ItemGroup Condition="$(TnziModules.Contains('Identity.OpenIdConnect'))">
+    <PackageReference Include="Tnzi.Identity.OpenIdConnect" Version="$(TnziVersion)" />
+  </ItemGroup>
+
   <ItemGroup Condition="$(TnziModules.Contains('Authorization.DataAuth'))">
     <PackageReference Include="Tnzi.Authorization.DataAuth" Version="$(TnziVersion)" />
   </ItemGroup>

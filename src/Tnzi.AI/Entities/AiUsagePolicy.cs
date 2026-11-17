@@ -42,6 +42,12 @@ public class AiUsagePolicy : AuditedEntity<Guid>, IMultiTenant
     /// <summary>默认模型 id；null = 跟随下一层。</summary>
     public string? DefaultModel { get; set; }
 
+    /// <summary>
+    /// 按模型设的可选强度（JSON 对象：模型 id → <c>{ "efforts": [...], "defaultEffort": "..." }</c>）；null = 每个模型都跟随下一层。
+    /// 逐个模型往下找：这一层列出的模型用这一层的，没列出的看下一层。
+    /// </summary>
+    public string? ModelEffortsJson { get; set; }
+
     /// <summary>备注（为什么这样设），只给管理员看。</summary>
     public string? Note { get; set; }
 }

@@ -6,13 +6,17 @@
  * proxy), so everything widget-specific lives here, versioned with the client:
  *
  *   - the theme: the variables a widget is told to use (`--color-text-primary`, …) on `:root`,
- *     `color-scheme`, and quiet defaults for `body` (font, colour, transparent background) that
- *     the widget's own CSS overrides;
+ *     `color-scheme`, quiet defaults for `body` (font, colour, transparent background) and the
+ *     conversation's thin scrollbar, all of which the widget's own CSS overrides;
  *   - the bridge (`window.widget`): it speaks the MCP Apps messages to the host through the runner
  *     (`ui/initialize`, `ui/notifications/initialized`, `ui/notifications/size-changed`,
  *     `ui/open-link`, `ui/message`, `tools/call`), reports the document's height as it changes,
- *     sends link clicks to the host (the frame may not navigate or open windows itself) and
- *     applies theme changes (`ui/notifications/host-context-changed`).
+ *     sends link clicks to the host (the frame may not navigate or open windows itself), applies
+ *     theme and language changes (`ui/notifications/host-context-changed`; the language as
+ *     `<html lang>`), and cancels every form submission the widget's own handlers did not, so a
+ *     `<form>` fires `submit` for the widget's script and never navigates; `form.submit()`, which
+ *     fires no event, does nothing (the runner's `form-action 'none'` blocks any submission that
+ *     still got through).
  *
  * A downloaded copy (`standaloneWidgetDocument`) carries the theme but not the bridge.
  */
@@ -39,7 +43,34 @@ function cssValue(value: string): string {
   return value.replace(/[<>{};]/g, '');
 }
 
-/** The theme as a `<style>` element: variables on `:root`, then defaults any widget CSS overrides. */
+/**
+ * The conversation's thin scrollbar, for the document and every scroller in it, drawn from the
+ * `--scrollbar-*` variables so it follows theme changes like the rest.
+ *
+ * It sits in a cascade layer, so any unlayered rule of the widget's wins whatever its
+ * specificity (a widget's bare `::-webkit-scrollbar-thumb` beats the `:hover` rule here). Engines
+ * with the `::-webkit-scrollbar` pseudo-elements (Chromium, Safari) get only those: setting
+ * `scrollbar-width` or `scrollbar-color` as well would make Chromium ignore them, a widget's own
+ * included, and draw its native thin bar with arrow buttons instead. Firefox gets the standard
+ * properties.
+ */
+const SCROLLBAR_STYLE =
+  '@layer widget-host{' +
+  '@supports selector(::-webkit-scrollbar){' +
+  '::-webkit-scrollbar{width:var(--scrollbar-size);height:var(--scrollbar-size);}' +
+  '::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent;}' +
+  '::-webkit-scrollbar-thumb{background:var(--scrollbar-thumb);border-radius:999px;border:2px solid transparent;background-clip:padding-box;}' +
+  '::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-thumb-hover);background-clip:padding-box;}' +
+  '}' +
+  '@supports not selector(::-webkit-scrollbar){' +
+  'html,html *{scrollbar-width:thin;scrollbar-color:var(--scrollbar-thumb) transparent;}' +
+  '}' +
+  '}';
+
+/**
+ * The theme as a `<style>` element: variables on `:root`, then defaults any widget CSS overrides
+ * (the `body` text and the scrollbar).
+ */
 export function widgetThemeStyle(theme: WidgetTheme): string {
   const variables = Object.entries(theme.variables)
     .filter(([name]) => /^--[a-z0-9-]+$/i.test(name))
@@ -49,6 +80,7 @@ export function widgetThemeStyle(theme: WidgetTheme): string {
     '<style data-widget-theme>' +
     `:root{${variables}color-scheme:${theme.scheme};}` +
     ':where(body){font-family:var(--font-sans);font-size:14px;line-height:1.5;color:var(--color-text-primary);background:transparent;}' +
+    SCROLLBAR_STYLE +
     '</style>'
   );
 }
@@ -87,6 +119,7 @@ const BRIDGE_SOURCE = `(function (initial) {
       root.style.colorScheme = context.theme;
       root.setAttribute('data-theme', context.theme);
     }
+    if (typeof context.locale === 'string' && context.locale) root.setAttribute('lang', context.locale);
     api.hostContext = context;
     try { window.dispatchEvent(new CustomEvent('widget:hostcontext', { detail: context })); } catch (e) { /* old engine */ }
   }
@@ -147,6 +180,14 @@ const BRIDGE_SOURCE = `(function (initial) {
     event.preventDefault();
     openLink(link.href && typeof link.href === 'string' ? link.href : href).catch(function () {});
   }, true);
+  // Last in the bubble phase, after the widget's own handlers: a submission they left alone would
+  // navigate the frame (and be blocked by form-action, or replace the widget); it is cancelled.
+  window.addEventListener('submit', function (event) { event.preventDefault(); });
+  // form.submit() fires no event, so nothing above sees it; form-action 'none' blocks its request,
+  // but the blocked navigation still swaps the widget for an error page. It does nothing instead,
+  // as it did when the sandbox had no allow-forms. Not requestSubmit(): a submit handler that ends
+  // in form.submit() (validate, then send) would call itself forever.
+  if (window.HTMLFormElement) window.HTMLFormElement.prototype.submit = function () {};
   window.open = function (href) { if (href) openLink(href).catch(function () {}); return null; };
   applyContext(initial);
   request('ui/initialize', {

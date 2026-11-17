@@ -7,6 +7,7 @@
  */
 
 import type { PagedQueryDto } from '../../types/pagination';
+import type { CliPermissionOption, CliQuestion } from './cli';
 
 // ============================================
 // Enums
@@ -104,9 +105,26 @@ export enum ThreadListStatus {
   Archived = 'Archived',
 }
 
-/** Thread list order: most recent activity first (default), newest first, or by title (A-Z, ignoring case). */
+/**
+ * Whether a thread shows in its owner's conversation lists. Server code decides it; no request
+ * carries it. `UntilUserMessage`: kept out until the owner writes in it (an unattended run's
+ * thread), then `Listed`. `Never`: kept out for good. The user-facing list and attention counts
+ * only ever hold `Listed` threads; every thread stays usable by id.
+ */
+export enum ThreadListing {
+  Listed = 'Listed',
+  UntilUserMessage = 'UntilUserMessage',
+  Never = 'Never',
+}
+
+/**
+ * Thread list order inside each tier. Whatever the sort, the list comes in three tiers: threads awaiting their
+ * owner (`awaitingOwner`), then running ones (`running`), then the rest. Inside a tier: the owner's last message first
+ * (`lastUserMessageTime`, creation when none; default), newest created first, or by title (A-Z, ignoring case); ties go
+ * to the newer creation, then the id.
+ */
 export enum ThreadListSort {
-  LastActivity = 'LastActivity',
+  LastUserMessage = 'LastUserMessage',
   CreationTime = 'CreationTime',
   Title = 'Title',
 }
@@ -430,7 +448,13 @@ export interface ChatRequestDto {
   model?: string | null;
   toolGroups?: string[] | null;
   userId?: string | null;
+  /** Built-in agents only, not checked against the model list; clients offering a choice per model send `effort`. */
   reasoningEffort?: ReasoningEffort | null;
+  /**
+   * This turn's reasoning effort: a runtime-native value from the turn's model (`ChatModelDto.efforts`). One the model
+   * does not offer is refused with 403 `AI_EFFORT_NOT_ALLOWED`; null keeps the agent's own setting.
+   */
+  effort?: string | null;
   /**
    * Replace this user message of the thread (and everything after it) with the request's
    * `message` / `content`. Needs `threadId`.
@@ -448,6 +472,13 @@ export interface ChatRequestDto {
    * hands it to its per-turn handlers and stores it with the user message.
    */
   metadata?: Record<string, unknown> | null;
+  /**
+   * Where the conversation came from, when this message starts a new thread (`threadId` is null):
+   * stored as the thread's `origin`. The server accepts only values the application lets clients
+   * declare (`AI:Chat:AllowedThreadOrigins` or its own `IThreadOriginPolicy`) and answers anything
+   * else with 400 `AI_THREAD_ORIGIN_NOT_ALLOWED`. Ignored when the message continues a thread.
+   */
+  origin?: string | null;
 }
 
 /** Chat response */
@@ -494,6 +525,59 @@ export interface ToolCallDetailDto {
   result?: ToolResultBlockDto[] | null;
   /** How long the reply text was when the call happened, to place the call within it (external CLI agents). */
   textOffset?: number | null;
+  /**
+   * The `id` of the sub-agent dispatch this call was made in (a call the sub-agent made, not the main agent).
+   * Absent for the main agent's calls. Show such calls in the sub-agent's own view, not in the reply.
+   */
+  parentId?: string | null;
+  /**
+   * Set when this call started a CLI task (external CLI agents): a sub-agent, or a command running in the
+   * background. Its kind, description, state and usage, and for a sub-agent its steps and report.
+   */
+  task?: ToolTaskDetailDto | null;
+}
+
+/**
+ * A task an external CLI agent started (backend `ToolTaskDetail`): a sub-agent or a command in the background. A
+ * sub-agent's calls are entries of the same tool-call list with `parentId` set to the dispatch's `id`; `steps` gives the
+ * order of those calls and of the text it wrote. The call that started the task completes when it returns (at once for
+ * a background task): `status` here is the task's own state.
+ */
+export interface ToolTaskDetailDto {
+  /** The CLI's task id: what stopping the task takes (`useChatApi().stopTask`). */
+  taskId?: string | null;
+  /** `agent`, `command`, or the CLI's own word for another kind. */
+  kind?: string | null;
+  /** A sub-agent's type (`general-purpose`, `Explore`, ...). */
+  agentType?: string | null;
+  /** The model a sub-agent answers with, when its replies were seen. */
+  model?: string | null;
+  /** The short description it was started with. */
+  description?: string | null;
+  /** The task a sub-agent was given. */
+  prompt?: string | null;
+  background?: boolean | null;
+  /** `running`, `completed`, `failed` or `stopped`. */
+  status?: string | null;
+  /** When it started (ISO), to show how long a running one has taken. */
+  startedAt?: string | null;
+  /** How long it ran (ms), as last reported. */
+  durationMs?: number | null;
+  /** How many tool calls it made, as last reported (counts those of sub-agents it dispatched too). */
+  toolUseCount?: number | null;
+  totalTokens?: number | null;
+  /** What it is doing now. */
+  activity?: string | null;
+  /** Its report: a sub-agent's final report, a command's exit note. */
+  result?: string | null;
+  steps?: ToolTaskStepDto[] | null;
+}
+
+/** One step of a sub-agent: text it wrote, or one of its tool calls (by id). */
+export interface ToolTaskStepDto {
+  type: 'text' | 'tool' | string;
+  text?: string | null;
+  toolCallId?: string | null;
 }
 
 /**
@@ -548,13 +632,75 @@ export type ChatStreamEventType =
    */
   | 'run_started'
   /**
-   * An external agent asks to be allowed an action ("ask me" permission mode). `eventData`: `requestId`,
-   * `tool`, `toolCallId`, `input`, `description`, `title`, `reason`, `blockedPath`, `options`
-   * (`id` / `name` / `kind`), `expiresAt`, `status` (`Pending`). Answer with `answerRunPermission`.
+   * An external agent waits for the person attending the turn. `eventData`: `requestId`, `kind`
+   * (`permission` / `question` / `plan`), `tool`, `toolCallId`, `input`, `description`, `title`, `reason`,
+   * `blockedPath`, `questions` (question requests), `plan` (plan requests), `options` (`id` / `name` / `kind`),
+   * `expiresAt`, `status` (`Pending`). Answer with `answerRunPermission` (with `answers` for a question).
    */
   | 'permission_request'
-  /** A permission request got its outcome. `eventData`: `requestId`, `status`, `optionId`, `answeredBy`. */
-  | 'permission_resolved';
+  /**
+   * A request got its outcome. `eventData`: `requestId`, `kind`, `status`, `optionId`, `answeredBy`, and `answers`
+   * for an answered question.
+   */
+  | 'permission_resolved'
+  /**
+   * The external agent finished one answer but the run goes on: the CLI still has background tasks and starts
+   * another turn by itself when they finish. `eventData`: `assistantMessageId` (the answer, already stored in the
+   * thread) and `backgroundTasks` (`id` / `description` / `kind`). Close the current answer here; text after this
+   * event is a new answer. The run (and its terminal chunk) ends after the last turn.
+   */
+  | 'turn_completed'
+  /**
+   * The CLI compacted the conversation's context (`/compact`, or automatically when it was nearly full).
+   * `eventData`: `trigger` (`manual` / `auto`), `preTokens`, `postTokens`. A turn that only compacted has no
+   * answer text; its stored reply has status `compacted`.
+   */
+  | 'compacted'
+  /**
+   * A message the user queued while the turn ran reached the agent. `eventData`: `messageId`, `taken`, `text`; when
+   * taken `threadMessageId` (the user message it became) and `assistantMessageId` (the answer up to it, stored as its own
+   * message); when declined `reason` (it is held in the queue). Close the current answer at a taken one, show the user's
+   * message, and let the text after it start a new answer: the conversation then reads as it will after a reload.
+   */
+  | 'user_message';
+
+/** `eventData` of a `user_message` stream event. */
+export interface ChatUserMessageEventData {
+  /** The queued message. */
+  messageId: string;
+  /** Taken in by the agent; false when the CLI declined it (it is held in the queue). */
+  taken: boolean;
+  text?: string;
+  /** Why the CLI did not take it (not taken only). */
+  reason?: string;
+  /** The user message it became in the thread (taken only). */
+  threadMessageId?: string;
+  /** The answer up to it, stored as its own message; absent when the agent had said nothing yet. */
+  assistantMessageId?: string;
+}
+
+/** `eventData` of a `turn_completed` stream event. */
+export interface ChatTurnCompletedEventData {
+  /** The answer that just ended, already stored in the thread; absent when nothing was stored. */
+  assistantMessageId?: string;
+  /** Background tasks still running; the CLI answers again when they finish. */
+  backgroundTasks: CliBackgroundTask[];
+}
+
+/** `eventData` of a `compacted` stream event. Counts the CLI did not report are absent. */
+export interface ChatCompactedEventData {
+  trigger?: 'manual' | 'auto' | string;
+  preTokens?: number;
+  postTokens?: number;
+}
+
+/** A background task of an external CLI agent (a command it started with `run_in_background`, say). */
+export interface CliBackgroundTask {
+  id: string;
+  description?: string | null;
+  /** The CLI's own kind (`local_bash`, `local_agent`, ...), passed through. */
+  kind?: string | null;
+}
 
 /**
  * Plan-mode todo item as carried by a stream event (maps to backend `TodoItemDto`).
@@ -692,17 +838,55 @@ export interface AgentThreadDto {
   /** Resolved agent display name; null when the agent was deleted or the thread is agent-less. */
   agentName?: string | null;
   title?: string | null;
+  /**
+   * True while the server is generating an AI title: `title` is the fallback (the first words of
+   * the first message) and will change. Read the thread again shortly to pick up the new title.
+   */
+  titlePending?: boolean;
+  /**
+   * Where the thread came from: a short value the application defines and writes when the thread
+   * is created (for example `Email` or `Schedule`); null when none was declared. The framework
+   * passes it through as is; a product maps it to an icon (`TChatApp`'s `threadIcon`).
+   */
+  origin?: string | null;
   messageCount: number;
   lastActivityTime: string;
   creationTime: string;
   /** When the thread was archived; null when it is not. */
   archivedTime?: string | null;
+  /**
+   * A turn of the thread is going on on the server: a run of an external agent that is queued or
+   * working (one that only waits on its background tasks after answering does not count). Turns of a
+   * built-in agent run on the request that started them and are not reported.
+   */
+  running?: boolean;
+  /**
+   * A turn of the thread is blocked waiting for its owner: an external agent's permission request,
+   * question or plan still unanswered, or whatever the application declares (its own confirmation
+   * cards). The list puts these threads first.
+   */
+  awaitingOwner?: boolean;
+  /**
+   * When the owner last sent a message in the thread (ISO, UTC); null when they never did, and the list
+   * then uses `creationTime`. A turn the application starts on the owner's behalf counts; replies, turn
+   * ends, renames and read marks do not. Each tier of the list is ordered by it (`ThreadListSort`).
+   */
+  lastUserMessageTime?: string | null;
+  /**
+   * A server-side turn wrote a reply after the owner last saw the thread (`threadApi.markRead`):
+   * there is something the owner has not read.
+   */
+  unread?: boolean;
+  /** Whether the thread shows in its owner's lists (see `ThreadListing`); omitted = `Listed`. */
+  listing?: ThreadListing;
 }
 
 /** Create thread request */
 export interface CreateAgentThreadDto {
   agentId?: string | null;
   title?: string | null;
+  /** See `AgentThreadDto.origin`. A letter, then letters, digits, `_ . : -` (at most 64). */
+  origin?: string | null;
 }
 
 /** Thread list query */
@@ -711,17 +895,40 @@ export interface ThreadListQueryDto extends PagedQueryDto {
   /** Only threads of these agents (agent-less threads never match); omitted or empty = no filter. ANDed with `agentId`. */
   agentIds?: string[] | null;
   keyword?: string | null;
-  /** Last activity at or after (ISO). */
+  /** The owner's last message (creation when none) at or after (ISO). */
   startTime?: string | null;
-  /** Last activity at or before (ISO). */
+  /** The owner's last message (creation when none) at or before (ISO). */
   endTime?: string | null;
   /** Archive filter; omitted = `All`. */
   status?: ThreadListStatus;
-  /** Order; omitted = `LastActivity`. */
+  /** Order inside each tier; omitted = `LastUserMessage`. */
   sort?: ThreadListSort;
 }
 
 /** Update thread title request */
+/** Which of the current user's threads need them (`threadApi.getAttention`). */
+export interface ThreadAttentionQueryDto {
+  /** Only threads of these agents, as `ThreadListQueryDto.agentIds`; omitted or empty = no filter. */
+  agentIds?: string[] | null;
+}
+
+/**
+ * The current user's threads awaiting them, with a turn going on on the server, and with a reply they
+ * have not seen: the same rule as `AgentThreadDto.awaitingOwner` / `running` / `unread`, counted over
+ * all their threads.
+ */
+export interface ThreadAttentionDto {
+  awaitingOwnerCount: number;
+  runningCount: number;
+  unreadCount: number;
+  /** The threads awaiting the user, in list order (at most 200; the count is exact beyond it). */
+  awaitingOwnerThreadIds: string[];
+  /** The running threads, in list order (at most 200; the count is exact beyond it). */
+  runningThreadIds: string[];
+  /** The unread threads, most recent reply first (at most 200; the count is exact beyond it). */
+  unreadThreadIds: string[];
+}
+
 export interface UpdateThreadTitleDto {
   title: string;
 }
@@ -732,12 +939,26 @@ export interface AgentThreadDetailDto {
   agentId?: string | null;
   agentName?: string | null;
   title?: string | null;
+  /** See `AgentThreadDto.titlePending`. */
+  titlePending?: boolean;
+  /** See `AgentThreadDto.origin`. */
+  origin?: string | null;
   metadata?: string | null;
   messageCount: number;
   lastActivityTime: string;
   creationTime: string;
   /** When the thread was archived; null when it is not. */
   archivedTime?: string | null;
+  /** See `AgentThreadDto.running`. */
+  running?: boolean;
+  /** See `AgentThreadDto.awaitingOwner`. */
+  awaitingOwner?: boolean;
+  /** See `AgentThreadDto.lastUserMessageTime`. */
+  lastUserMessageTime?: string | null;
+  /** See `AgentThreadDto.unread`. */
+  unread?: boolean;
+  /** See `AgentThreadDto.listing`. */
+  listing?: ThreadListing;
   messages: ThreadMessageDto[];
 }
 
@@ -755,7 +976,10 @@ export interface ThreadMessageDto {
   feedbackTags?: string | null;
   feedbackComment?: string | null;
   feedbackTime?: string | null;
-  /** How the reply ended when it did not simply complete: `stopped`, `failed` or `usage_limit`. */
+  /**
+   * How the reply ended when it did not simply complete: `stopped`, `failed`, `usage_limit`, or `compacted` (the turn
+   * only compacted the conversation, `/compact`; the reply has no text).
+   */
   status?: string | null;
   /** With status `usage_limit`: when the external CLI's account limit resets (ISO, UTC), if known. */
   usageLimitResetsAt?: string | null;
@@ -807,12 +1031,129 @@ export interface ChatRunDto {
   creationTime: string;
 }
 
+/**
+ * A request a run still waits on (`GET chat/threads/{threadId}/permissions`, `GET chat/runs/{runId}/permissions`):
+ * a permission, the agent's questions, or its plan. The fields are those of the `permission_request` stream event's
+ * `eventData`, plus `runId` and `createdAt`. Answer with `answerRunPermission(runId, requestId, ...)`.
+ */
+export interface ChatPermissionRequestDto {
+  runId: string;
+  requestId: string;
+  /** One of `CliInteractionKind` (`permission` / `question` / `plan`); a kind the client does not know is a permission. */
+  kind: string;
+  /** `Pending`. */
+  status: string;
+  tool?: string | null;
+  toolCallId?: string | null;
+  input?: Record<string, unknown> | null;
+  /** The agent's description of the action. */
+  description?: string | null;
+  title?: string | null;
+  reason?: string | null;
+  blockedPath?: string | null;
+  questions?: CliQuestion[] | null;
+  plan?: string | null;
+  planSource?: string | null;
+  options: CliPermissionOption[];
+  expiresAt?: string | null;
+  createdAt?: string | null;
+}
+
+/**
+ * Where a queued message stands (backend `QueuedMessageState`): `Queued` waits (to be handed to the running agent, or
+ * for the thread's turn to end; it goes at once when none runs); `Delivering` is going out as the next turn right now;
+ * `Held` goes only when the user sends it now (the turn it waited for was stopped, its turn was refused, its sending
+ * was interrupted, or the agent did not take it); `HandedOver` was written to the running agent, which takes it in
+ * between two of its steps; `Delivered` was taken in: it is a user message of the thread (`threadMessageId`) until the
+ * turn that took it ends.
+ */
+export type QueuedMessageState = 'Queued' | 'Delivering' | 'Held' | 'HandedOver' | 'Delivered';
+
+/**
+ * A message queued in a thread while its turn runs (`GET chat/threads/{threadId}/queue`). It waits on the server: an
+ * agent whose turn can take messages while it works (claude over stream-json) gets it at once and takes it in between
+ * two steps; otherwise it goes out with the others as one turn when that turn ends. Once it went as a turn of its own,
+ * it is a user message of the thread and no longer in the queue.
+ */
+export interface QueuedMessageDto {
+  id: string;
+  threadId: string;
+  text: string;
+  state: QueuedMessageState;
+  /** It goes next, by itself, ahead of the others. */
+  sendNow: boolean;
+  /**
+   * Why it is held: its turn was refused, its sending was interrupted, the agent did not take it in, or the
+   * turn it waited for was stopped (`failureCode` `AI_QUEUED_TURN_STOPPED`). Null when it is not held.
+   */
+  failure?: string | null;
+  /** The error code of `failure` (one of `AiChatErrorCodes`), for a localized message. */
+  failureCode?: string | null;
+  /** The model chosen for it; null for the thread's default. */
+  model?: string | null;
+  /** The reasoning effort chosen for it; null for none. */
+  effort?: string | null;
+  /** The per-turn metadata it goes with. */
+  metadata?: Record<string, unknown> | null;
+  /** The run it waits for; null when none was running when it was queued. */
+  afterRunId?: string | null;
+  queuedTime: string;
+  /** Its attachments; their content is at `GET threads/{threadId}/attachments/{id}`. */
+  attachments?: AttachmentDto[];
+  /** The run it was handed to (`HandedOver`, `Delivered`). */
+  handedToRunId?: string | null;
+  /** The thread's user message it became once the agent took it in (`Delivered`). */
+  threadMessageId?: string | null;
+  /**
+   * Sending it now stops the turn that is running: that turn cannot take a message while it works, or this message
+   * carries files the agent opens with its tools. False when nothing runs, or when it goes to the running agent
+   * without stopping anything. Word the button by it ("Send now" vs. "Stop and send").
+   */
+  sendNowStopsTurn?: boolean;
+}
+
+/** A message to queue (`POST chat/threads/{threadId}/queue`): what the composer would have sent. */
+export interface QueueMessageRequestDto {
+  /** The words; may be empty when `content` carries attachments. */
+  text: string;
+  /**
+   * Attachments, as on `ChatRequestDto.content` (image and document parts with inline data): the same rules as a chat
+   * message's (types, sizes, `MaxCount`; a file that is not an image or a PDF only where the backend takes files).
+   */
+  content?: ContentPartDto[] | null;
+  /** The model chosen in the composer; checked against the user's allowed models when it goes. */
+  model?: string | null;
+  /**
+   * The reasoning effort chosen in the composer; checked against the model's efforts when it goes. One that differs
+   * from the running turn's is not handed to that turn: it waits and goes as a turn of its own.
+   */
+  effort?: string | null;
+  /** Same limits as `ChatRequestDto.metadata`. */
+  metadata?: Record<string, unknown> | null;
+}
+
+/** `eventData` of a `permission_request` stream event: a pending request as it appears (no `runId` / `createdAt`). */
+export type ChatPermissionRequestEventData = Omit<ChatPermissionRequestDto, 'runId' | 'createdAt'>;
+
+/** `eventData` of a `permission_resolved` stream event. */
+export interface ChatPermissionResolvedEventData {
+  requestId: string;
+  kind?: string;
+  /** `Allowed`, `Denied`, `TimedOut` or `Cancelled`. */
+  status: string;
+  optionId?: string | null;
+  answeredBy?: string | null;
+  answers?: Record<string, string[]> | null;
+}
+
 /** Thread export data */
 export interface ThreadExportDto {
   id: string;
   agentId?: string | null;
   agentName?: string | null;
   title?: string | null;
+  /** See `AgentThreadDto.origin`. */
+  origin?: string | null;
   metadata?: string | null;
   messageCount: number;
   lastActivityTime: string;
@@ -951,6 +1292,8 @@ export interface UsagePolicyDto {
   allowedModels?: string[] | null;
   /** Default model id; null = follow the level below. */
   defaultModel?: string | null;
+  /** Reasoning efforts per model id; a model left out follows the level below. */
+  modelEfforts?: Record<string, ChatModelEffortsDto> | null;
   note?: string | null;
   lastModificationTime?: string | null;
 }
@@ -961,7 +1304,20 @@ export interface SaveUsagePolicyDto {
   weeklyLimit: UsageLimitSettingDto;
   allowedModels?: string[] | null;
   defaultModel?: string | null;
+  /**
+   * Reasoning efforts per model id (models of the model list); a model left out follows the level below. An empty
+   * `efforts` list turns the choice off for that model.
+   */
+  modelEfforts?: Record<string, ChatModelEffortsDto> | null;
   note?: string | null;
+}
+
+/** The reasoning efforts an administrator set for one model. */
+export interface ChatModelEffortsDto {
+  /** Runtime-native values, in display order; empty = no effort choice for this model. */
+  efforts: string[];
+  /** One of `efforts`; null = nothing preselected. */
+  defaultEffort?: string | null;
 }
 
 /** A model of the model list (`AI:Chat:Models`). */
@@ -971,6 +1327,13 @@ export interface ChatModelDto {
   /** Provider the model runs on; null = any agent. */
   provider?: string | null;
   description?: string | null;
+  /**
+   * The reasoning efforts this model offers (runtime-native values such as Claude Code's `low` ... `max`, in display
+   * order); empty = no effort choice. From the policy, else the model list, else what the agent's CLI runtime reported.
+   */
+  efforts?: string[];
+  /** One of `efforts`, preselected; null = nothing preselected (the turn then carries no effort). */
+  defaultEffort?: string | null;
 }
 
 /** The models the current user may pick for an agent. More than one: the chat shows a picker. */
@@ -1154,6 +1517,8 @@ export interface UsageSummaryQueryDto {
 /** Usage log record */
 export interface UsageLogDto {
   id: string;
+  /** User the usage is metered to (null = not any user's) */
+  userId?: string | null;
   agentId?: string | null;
   threadId?: string | null;
   provider: string;
@@ -1180,6 +1545,8 @@ export interface UsageLogQueryDto extends PagedQueryDto {
   operationType?: string | null;
   isSuccess?: boolean | null;
   agentId?: string | null;
+  /** Rows metered to this user */
+  userId?: string | null;
 }
 
 /** Usage by provider */

@@ -115,7 +115,7 @@ public class TnziAiClientDispatchTests
 
     private sealed class FixedThreadService : IAgentThreadInternalService
     {
-        public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default)
+        public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, string? origin, ThreadListing listing = ThreadListing.Listed, CancellationToken ct = default)
             => Task.FromResult((ThreadId, true));
 
         public Task<Guid> SaveMessageAsync(Guid threadId, string role, string content,

@@ -86,6 +86,10 @@ public class AspNetCoreModule : TnziFrameworkModule
         // 不再仅依赖 DI 容器释放时的 sync-over-async Dispose 兜底路径（ShutdownAsync 幂等，重复触发安全）
         context.Services.AddHostedService<TnziShutdownHostedService>();
 
+        // 迁移后启动任务：启动那一轮失败的任务（数据库那一刻不可达）在后台退避重试直到完成，
+        // 健康检查 startup-tasks 在此之前报告它们（AspNetCore:StartupTasks）。
+        context.Services.AddPostMigrationStartupTaskRetry(context.Configuration);
+
         // 注册 Web 层工具服务（UserAgent 解析，纯本地计算）。
         // ★ IP 定位（IIpLocatorService）刻意不默认注册：自带的 IpLocatorService 把访问者 IP 以明文 HTTP 发给
         // 第三方公共接口，默认注册等于任何宿主一打开访问日志就把每个公网来访 IP 交出去而无人知情。
@@ -289,6 +293,7 @@ public class AspNetCoreModule : TnziFrameworkModule
         // 注册异常处理器为 Singleton（无请求级依赖，且中间件在构造时从 root provider 解析）
         context.Services.AddSingleton<BusinessExceptionHandler>();
         context.Services.AddSingleton<InfrastructureExceptionHandler>();
+        context.Services.AddSingleton<BadHttpRequestExceptionHandler>();
         context.Services.AddSingleton<ValidationExceptionHandler>();
         context.Services.AddSingleton<DefaultExceptionHandler>();
 

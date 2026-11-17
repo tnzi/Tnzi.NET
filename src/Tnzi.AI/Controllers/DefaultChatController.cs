@@ -78,6 +78,39 @@ public class DefaultChatController : ApiControllerBase
     }
 
     /// <summary>
+    /// 停下线程里的单个任务（外部 agent 派出的子 agent、在后台跑的命令；<paramref name="taskId"/> 是任务事件里的 <c>taskId</c>），不停这一轮。
+    /// 停下之后流上照常出现它的结局（任务状态 <c>stopped</c>）。没有正在跑的运行时 409，这个 CLI 做不到时 501（那时只能停整轮）。
+    /// </summary>
+    [HttpPost("threads/{threadId:guid}/tasks/{taskId}/stop")]
+    public virtual async Task<ApiResult> StopTask(Guid threadId, string taskId, CancellationToken cancellationToken = default)
+    {
+        var userId = AiControllerHelpers.RequireUserId(GetRequiredCurrentUser());
+        var result = await ChatService.StopTaskAsync(threadId, userId, taskId, cancellationToken);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 线程里还在等回答的请求（权限、问题、计划），最早的在前。刷新之后，客户端据此找回还在等的卡片（流从中途接上时不再交出早先的请求事件）。
+    /// </summary>
+    [HttpGet("threads/{threadId:guid}/permissions")]
+    public virtual async Task<ApiResult<List<ChatPermissionRequestDto>>> GetPendingPermissions(Guid threadId, CancellationToken cancellationToken = default)
+    {
+        var userId = AiControllerHelpers.RequireUserId(GetRequiredCurrentUser());
+        var result = await ChatService.GetPendingPermissionsAsync(threadId, userId, cancellationToken);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 一次运行里还在等回答的请求，最早的在前。
+    /// </summary>
+    [HttpGet("runs/{runId:guid}/permissions")]
+    public virtual async Task<ApiResult<List<ChatPermissionRequestDto>>> GetRunPendingPermissions(Guid runId, CancellationToken cancellationToken = default)
+    {
+        var result = await ChatService.GetRunPendingPermissionsAsync(runId, cancellationToken);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 回答一次运行的权限请求（流上的 <c>permission_request</c> 事件）：从它给的 <c>options</c> 里挑一个。
     /// </summary>
     [HttpPost("runs/{runId:guid}/permissions/{requestId:guid}")]

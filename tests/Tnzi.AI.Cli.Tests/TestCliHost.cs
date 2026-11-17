@@ -65,9 +65,13 @@ internal sealed class TestCliHost : ICliHost, ICliHostTarget
 
     public string WorkspacesRoot { get; }
 
+    /// <summary>取目标之前先做的事（比如让服务端开始停机，再由 <see cref="UnavailableWith"/> 说连不上）。</summary>
+    public Action? BeforeGetTarget { get; set; }
+
     public Task<ICliHostTarget> GetTargetAsync(CliHostScope scope, CancellationToken cancellationToken)
     {
         _scopes.Enqueue(scope);
+        BeforeGetTarget?.Invoke();
         return UnavailableWith is { } unavailable
             ? Task.FromException<ICliHostTarget>(unavailable)
             : Task.FromResult<ICliHostTarget>(this);

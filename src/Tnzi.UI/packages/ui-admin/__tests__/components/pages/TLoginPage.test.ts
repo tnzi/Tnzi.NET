@@ -20,6 +20,20 @@ vi.mock('naive-ui', () => ({
 }))
 
 // Stub @tnzi/ui exports consumed by TLoginPage
+vi.mock('../../../src/components/utility/TThemeSchemaSwitch.vue', () => ({
+  default: defineComponent({
+    name: 'TThemeSchemaSwitch',
+    render: () => h('span', { 'data-testid': 'theme-switch', class: 'stub-theme-switch' }),
+  }),
+}))
+vi.mock('../../../src/components/utility/TLangSwitch.vue', () => ({
+  default: defineComponent({
+    name: 'TLangSwitch',
+    props: ['value', 'options', 'translate'],
+    emits: ['update:value', 'change'],
+    render: () => h('span', { 'data-testid': 'lang-switch', class: 'stub-lang-switch' }),
+  }),
+}))
 vi.mock('@tnzi/ui', () => ({
   useTheme: () => ({
     resolvedMode: { value: 'light' },
@@ -32,22 +46,11 @@ vi.mock('@tnzi/ui', () => ({
     props: ['icon', 'size'],
     render: () => h('span', { class: 'stub-icon' }),
   }),
-  TThemeSchemaSwitch: defineComponent({
-    name: 'TThemeSchemaSwitch',
-    render: () => h('span', { 'data-testid': 'theme-switch', class: 'stub-theme-switch' }),
-  }),
-  TLangSwitch: defineComponent({
-    name: 'TLangSwitch',
-    props: ['value', 'options', 'translate'],
-    emits: ['update:value', 'change'],
-    render: () => h('span', { 'data-testid': 'lang-switch', class: 'stub-lang-switch' }),
-  }),
-  // The login stack moved from `../../headless/*` into `@tnzi/ui` on
-  // 2026-08-02, so these two now come from the same module as the components
-  // above. They must live in THIS factory rather than a second
-  // `vi.mock('@tnzi/ui', ...)`: a module gets one factory, and a second call
-  // replaces the first - which silently drops every component stub above and
-  // leaves the page with nothing to render.
+  // The login stack lives in `@tnzi/ui`, so these two come from the same
+  // module as the stubs above. They must live in THIS factory rather than a
+  // second `vi.mock('@tnzi/ui', ...)`: a module gets one factory, and a second
+  // call replaces the first - which silently drops every stub above and leaves
+  // the page with nothing to render.
   provideLoginContext: vi.fn(),
   DEFAULT_LOGIN_FEATURES: {
     passwordLogin: true,

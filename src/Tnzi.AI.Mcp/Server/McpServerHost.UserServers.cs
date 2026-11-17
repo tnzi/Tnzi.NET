@@ -9,7 +9,8 @@ namespace Tnzi.AI.Mcp.Server;
 /// <remarks>
 /// <para>
 /// 令牌始终留在平台：CLI 只拿到工具名与结果。工具来自 <see cref="IMcpToolProvider.GetUserToolsAsync"/>，
-/// 与内建路径是同一批包装（审批 / 审计 / 401 恢复 / egress 守卫）与同一套按用户分区的连接缓存。
+/// 与内建路径是同一批过滤与包装（AllowedTools / DeniedTools、审批 / 审计 / 401 恢复 / egress 守卫）与同一套按用户分区的连接缓存：
+/// 被禁用的工具不出现在 <c>tools/list</c> 里，点名调用它得到的是「未暴露」的错误结果。
 /// </para>
 /// <para>
 /// 用户由凭据里运行记录的 <see cref="McpCallerScope.CreatorId"/> 决定，不取任何请求头。工具名按
@@ -124,7 +125,9 @@ public partial class McpServerHost
     /// 把 AI 函数的返回值还原成 MCP 结果：SDK 工具返回的是序列化的 <see cref="CallToolResult"/>（原样透传，保留内容块与 IsError）；
     /// 包装器（审批拒绝）返回的是字符串；其余按文本。
     /// </summary>
-    /// <summary>文本结果。审批包装器拒绝时返回以这个前缀开头的字符串而不是抛异常，据此标成错误。</summary>
+    /// <summary>
+    /// 文本结果。审批包装器与禁用检查（<c>McpServerConfig.DeniedTools</c>）拒绝时返回以这个前缀开头的字符串而不是抛异常，据此标成错误。
+    /// </summary>
     private static CallToolResult TextResult(string text)
         => CreateTextResult(text, isError: text.StartsWith("Tool call rejected", StringComparison.Ordinal));
 

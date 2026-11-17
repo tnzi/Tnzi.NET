@@ -1,7 +1,7 @@
 import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import { NTag } from 'naive-ui'
-import type { StatusType } from '@tnzi/ui'
+import type { StatusType } from '../../components/display/TStatusBadge.vue'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'

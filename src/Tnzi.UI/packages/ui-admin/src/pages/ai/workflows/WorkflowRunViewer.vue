@@ -15,7 +15,7 @@
     <template #default>
       <TMasterDetailLayout :master-width="320">
         <template #master>
-          <NSpace vertical size="small">
+          <div class="flex flex-col gap-4px">
             <NSelect
               v-model:value="filters.status"
               :options="statusOptions"
@@ -37,7 +37,7 @@
               :loading="workflowsLoading"
               @update:value="onFilterChange"
             />
-          </NSpace>
+          </div>
           <NSpin :show="listLoading" class="mt-8px">
             <div v-if="!runs.length && !listLoading" class="t-wf-run-page__empty">
               {{ t('empty') }}
@@ -98,7 +98,7 @@
                     {{ t('detail.cancelRequested') }}
                   </NTag>
                 </div>
-                <NSpace size="small">
+                <div class="flex flex-wrap items-center gap-x-8px gap-y-4px">
                   <NPopconfirm
                     v-if="canCancel"
                     @positive-click="onCancel"
@@ -123,7 +123,7 @@
                     </template>
                     {{ resumeConfirmText }}
                   </NPopconfirm>
-                </NSpace>
+                </div>
               </header>
 
               <div class="t-wf-run-page__detail-meta">
@@ -242,7 +242,7 @@ import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, reactive, ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  NAlert, NSpace, NButton, NSelect, NInput, NSpin, NTimeline, NTimelineItem, NTag, NPopconfirm,
+  NAlert, NButton, NSelect, NInput, NSpin, NTimeline, NTimelineItem, NTag, NPopconfirm,
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TContentPage from '../../../components/layout/TContentPage.vue'

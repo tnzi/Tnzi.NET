@@ -67,7 +67,7 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { NAlert, NButton } from 'naive-ui'
-import { THint } from '@tnzi/ui'
+import THint from '../../components/display/THint.vue'
 import type { SubscriptionPlanDto } from '@tnzi/core/services/payment'
 import { useAdminBillingConfig } from '../../plugin/billing-config'
 import { billingT as t, useBillingBridge } from './billing-context'

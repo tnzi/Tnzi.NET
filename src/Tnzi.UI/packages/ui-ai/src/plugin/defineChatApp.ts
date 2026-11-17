@@ -19,6 +19,10 @@
  * app.mount('#app')
  * ```
  *
+ * It also claims the first `popstate` listener for the phone back-button
+ * handling (`installBackLayers`), which has to happen before the router is
+ * created; call `defineChatApp` before `createRouter`, as above.
+ *
  * ## What it deliberately does NOT do
  *
  * It does not own the conversation screen. `TChatApp` is a component with 60+
@@ -28,16 +32,14 @@
  */
 import type { App, Component } from 'vue';
 import { preventPageZoom } from '../headless/preventPageZoom';
+import { claimPopState } from '../headless/popstate-gate';
+import { markAiApp } from '../headless/app-root';
 import type { Router, RouteRecordRaw } from 'vue-router';
 import { createTnziAuthGuard } from '@tnzi/core/guards';
 import { installAppUpdate, type AppUpdateOptions } from '@tnzi/core/app-update';
-import {
-  THEME_CONTEXT_KEY,
-  createThemeContext,
-  mergeThemeSettings,
-  type ThemeSettings,
-} from '@tnzi/ui';
-import type { AdminAuthRuntime } from '@tnzi/ui';
+import { THEME_CONTEXT_KEY, createThemeContext } from '@tnzi/ui/headless';
+import { mergeThemeSettings, type ThemeSettings } from '@tnzi/ui/theme';
+import type { AdminAuthRuntime } from '@tnzi/ui/headless';
 import TAuthRoute from '../auth/TAuthRoute.vue';
 import TGuestWelcome from '../auth/TGuestWelcome.vue';
 import { TOOL_RENDERERS_KEY, type ToolRendererMap } from '../components/chat/chat-render-context';
@@ -81,6 +83,9 @@ export interface ChatAppGuestWelcomeConfig {
   placeholder?: string;
   /** Under the composer: what sending does. Defaults to the locale's; '' for none. */
   hint?: string;
+  /** Iconify name of the send button: give it the `sendIcon` the conversation
+   *  screen's `TChatApp` has. Default `lucide:arrow-up`. */
+  sendIcon?: string;
   /** Replace the screen. It should keep the message (`stashWelcomeMessage`) and open sign-in. */
   component?: Component;
 }
@@ -111,9 +116,9 @@ export interface DefineChatAppOptions {
    * defaults; `false` opts out entirely.
    *
    * Establishing it here is what makes the colour actually reach the UI: the
-   * theme fans out to naive-ui overrides, `--tnzi-*` CSS variables and UnoCSS
-   * atoms at once, so one value moves the naive controls and this package's
-   * own painted surfaces together. Ignored when the host app already provided
+   * theme fans out to the `--tnzi-*` CSS variables and UnoCSS atoms that this
+   * package's `--tnzi-ai-*` tokens derive from, so one value moves every
+   * control and surface together. Ignored when the host app already provided
    * a theme context of its own.
    */
   theme?: Partial<ThemeSettings> | false;
@@ -156,6 +161,13 @@ export interface DefineChatAppResult {
 }
 
 export function defineChatApp(options: DefineChatAppOptions): DefineChatAppResult {
+  /* Before the router exists: back on a phone closes the shell's layers, and
+     the listener that keeps such a back from the router has to come first
+     (`installBackLayers`, which only needs this place claimed). */
+  claimPopState();
+  /* The whole app is a ui-ai app, sign-in page included: the page-wide rules
+     (body face, thin scrollbars, keyboard focus line) apply for its lifetime. */
+  markAiApp();
   const loginPath = options.login?.path ?? '/login';
   const loginName = options.login?.name ?? 'login';
   const homePath = options.homePath ?? '/';
@@ -214,6 +226,8 @@ export function defineChatApp(options: DefineChatAppOptions): DefineChatAppResul
             subline: welcome.subline ?? '',
             placeholder: welcome.placeholder ?? '',
             ...(welcome.hint !== undefined ? { hint: welcome.hint } : {}),
+            /* Only when set, for the same reason as the wordmark. */
+            ...(welcome.sendIcon ? { sendIcon: welcome.sendIcon } : {}),
             loginName,
             homePath,
             redirectQuery,
@@ -228,8 +242,8 @@ export function defineChatApp(options: DefineChatAppOptions): DefineChatAppResul
     /* Establish the `@tnzi/ui` theme unless the host already did.
      *
      * This package is an application package built on `@tnzi/ui`, and that is
-     * where the theme lives: one `ThemeSettings` fans out to naive-ui
-     * overrides, `--tnzi-*` CSS variables and UnoCSS atoms. Chat apps were not
+     * where the theme lives: one `ThemeSettings` fans out to the
+     * `--tnzi-*` CSS variables and UnoCSS atoms. Chat apps were not
      * calling `createTnziUi()`, so none of those variables were ever on the
      * document - which made this package's own tokens fall back to their
      * literals and left "change the product's look" with nothing to change.

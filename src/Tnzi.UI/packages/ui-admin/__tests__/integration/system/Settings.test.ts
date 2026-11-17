@@ -322,6 +322,64 @@ describe('Settings page (TSettingsPage integration)', () => {
     expect(wrapper.text()).toContain('System Extras')
   })
 
+  it('gates a custom section on roles (any-of, case-insensitive) for a non-super administrator', async () => {
+    const auth = useAdminAuthStore()
+    auth.setUserInfo({ id: 'u1', username: 'ops', displayName: 'ops', roles: ['Admin'], permissions: ['system.parameter.view'] })
+    auth.setSuperUser(false)
+
+    const config: AdminSettingsConfig = {
+      sections: [
+        { key: 'root', label: 'Root Only', roles: ['SuperAdmin'], component: { template: '<div>r</div>' } },
+        { key: 'admins', label: 'Admins Section', roles: ['superadmin', 'admin'], component: { template: '<div>a</div>' } },
+      ],
+    }
+    const wrapper = mount(TSettingsPage, {
+      global: { provide: { [ADMIN_SETTINGS_CONFIG_KEY]: config } },
+    })
+    await flushPromises()
+
+    const keys = (wrapper.findComponent(TDetailLayout).props('sections') as { key: string }[]).map((s) => s.key)
+    expect(keys).not.toContain('custom:root')
+    expect(keys).toContain('custom:admins')
+  })
+
+  it('global search finds custom sections by their translated label and group, following a language switch', async () => {
+    getDefinitions.mockResolvedValue([])
+    const app = useAdminAppStore()
+    app.extendLocaleMessages({
+      en: { admin: { myapp: { settings: { channels: 'Channels', credentials: 'Credentials', group: 'Connectors' } } } },
+      'zh-cn': { admin: { myapp: { settings: { channels: '渠道', credentials: '凭据', group: '连接器' } } } },
+    })
+    app.setLocale('zh-cn')
+
+    const config: AdminSettingsConfig = {
+      sections: [
+        { key: 'channels', label: 'admin.myapp.settings.channels', group: 'admin.myapp.settings.group', component: { template: '<div />' } },
+        { key: 'credentials', label: 'admin.myapp.settings.credentials', group: 'admin.myapp.settings.group', component: { template: '<div />' } },
+      ],
+    }
+    const wrapper = mount(TSettingsPage, { global: { provide: { [ADMIN_SETTINGS_CONFIG_KEY]: config } } })
+    await flushPromises()
+    const layout = wrapper.findComponent(TDetailLayout)
+    const search = wrapper.find('.t-detail-layout__nav-header input')
+    const found = async (q: string) => {
+      await search.setValue(q)
+      await flushPromises()
+      return (layout.props('sections') as { key: string }[]).map((s) => s.key)
+    }
+
+    expect(await found('渠道')).toEqual(['custom:channels'])
+    expect(await found('凭据')).toEqual(['custom:credentials'])
+    expect(await found('连接器')).toEqual(['custom:channels', 'custom:credentials'])
+    // The key is not what the reader sees: it must not match.
+    expect(await found('admin')).toEqual([])
+
+    app.setLocale('en')
+    expect(await found('channels')).toEqual(['custom:channels'])
+    expect(await found('connectors')).toEqual(['custom:channels', 'custom:credentials'])
+    expect(await found('渠道')).toEqual([])
+  })
+
   it('global search filters the left nav to matching groups (deep-link engine keeps full list)', async () => {
     getDefinitions.mockResolvedValue([clone(demoGroup), clone(budgetGroup)])
     const wrapper = mount(TSettingsPage)

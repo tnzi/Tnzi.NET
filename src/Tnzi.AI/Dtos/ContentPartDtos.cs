@@ -47,12 +47,19 @@ public class ImageContentPartDto : ContentPartDto
 }
 
 /// <summary>
-/// 文档内容部分（内联 Base64）。目前接受的只有 PDF（<c>application/pdf</c>）。
+/// 文档内容部分（内联 Base64）：PDF，或发给收文件的外部 CLI 一轮的任意文件。
 /// </summary>
 /// <remarks>
+/// <para>
 /// 与 <see cref="FileContentPartDto"/> 的区别：那个引用 Storage 里的文件（默认解析器不加载它），
 /// 这个把文档字节随请求带来。内建引擎把它作为数据内容交给提供商（提供商不支持时以错误结束，不会被丢掉）；
-/// 绑了外部 CLI 运行时的 Agent 把它作为 PDF 文档块交给 CLI，并随消息存档。
+/// 绑了外部 CLI 运行时的 Agent 把 PDF 作为文档块交给 CLI，并随消息存档。
+/// </para>
+/// <para>
+/// 其余文件（<c>.eml</c>、<c>.txt</c>、<c>.csv</c>、<c>.docx</c>、<c>.zip</c>……）只有发给外部 CLI、且这一轮收文件
+/// （<c>ICliFileAttachmentPolicy</c>）时才接受：随消息存档（<see cref="FileName"/> 与 <see cref="MediaType"/> 照存），
+/// 不交给模型，agent 用自己的工具打开它。不收文件的一轮以 415 拒绝。
+/// </para>
 /// </remarks>
 public class DocumentContentPartDto : ContentPartDto
 {
@@ -60,7 +67,7 @@ public class DocumentContentPartDto : ContentPartDto
     [Required]
     public string Base64Data { get; set; } = string.Empty;
 
-    /// <summary>Media type, <c>application/pdf</c></summary>
+    /// <summary>Media type: <c>application/pdf</c>, or for another file the type the browser gave it (<c>message/rfc822</c>, <c>text/csv</c>...)</summary>
     [MaxLength(100)]
     public string? MediaType { get; set; }
 

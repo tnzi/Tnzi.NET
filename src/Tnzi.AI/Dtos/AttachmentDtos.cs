@@ -42,13 +42,20 @@ public class AttachmentContentDto
 /// <summary>
 /// An attachment decoded from a chat request and checked against <c>AI:Chat:Attachments</c>.
 /// </summary>
-/// <param name="MediaType">Media type, taken from the bytes themselves.</param>
-/// <param name="FileName">File name the client gave, if any.</param>
+/// <param name="MediaType">
+/// Media type: for an image or a PDF taken from the bytes themselves; for a file, the type the client declared
+/// (<c>application/octet-stream</c> when it declared none, or one that does not describe the bytes).
+/// </param>
+/// <param name="FileName">File name the client gave, if any; a file always has one.</param>
 /// <param name="Content">The decoded bytes.</param>
-public sealed record ChatAttachmentPayload(string MediaType, string? FileName, byte[] Content)
+/// <param name="IsFile">
+/// A file the agent opens with its own tools (anything that is not a PNG / JPEG / GIF / WebP image or a PDF):
+/// stored with the message, never sent to the model as a content block.
+/// </param>
+public sealed record ChatAttachmentPayload(string MediaType, string? FileName, byte[] Content, bool IsFile = false)
 {
-    /// <summary>Whether it is an image (otherwise a PDF document).</summary>
-    public bool IsImage => MediaType.StartsWith("image/", StringComparison.Ordinal);
+    /// <summary>Whether it is an image delivered inline (otherwise a PDF document or a file).</summary>
+    public bool IsImage => !IsFile && MediaType.StartsWith("image/", StringComparison.Ordinal);
 }
 
 /// <summary>

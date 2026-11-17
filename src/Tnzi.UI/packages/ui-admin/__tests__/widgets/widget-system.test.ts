@@ -6,11 +6,11 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { THEME_CONTEXT_KEY, createThemeContext, mergeThemeSettings } from '@tnzi/ui'
 
 import TWidgetCard from '../../src/components/widgets/TWidgetCard.vue'
-import TWorkbenchLayout from '../../src/components/pages/TWorkbenchLayout.vue'
+import TWorkbenchLayout from '../../src/components/layout/TWorkbenchLayout.vue'
 import TWidgetQuickActions from '../../src/components/widgets/TWidgetQuickActions.vue'
 import TWidgetList from '../../src/components/widgets/TWidgetList.vue'
 import TKpiCard from '../../src/components/data/TKpiCard.vue'
-import { useWidget } from '@tnzi/ui'
+import { useWidget } from '../../src/headless/useWidget'
 import { useWidgetData } from '../../src/headless/useWidgetData'
 import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
 import { useAdminRouteStore } from '../../src/stores/useAdminRouteStore'
@@ -20,7 +20,7 @@ import {
   defaultTimelineItems,
   defaultWorkbenchWidgets,
 } from '../../src/components/widgets/presets'
-import type { WidgetDef } from '@tnzi/ui'
+import type { WidgetDef } from '../../src/components/widgets/widget-types'
 
 // A mounted widget whose router finishes its first navigation after the test
 // ended re-runs its computeds, and a store action called there makes that

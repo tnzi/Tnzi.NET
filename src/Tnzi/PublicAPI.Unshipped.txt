@@ -53,6 +53,7 @@ Tnzi.Data.IDataScopeProvider<TEntity>
 Tnzi.Data.IDataScopeProvider<TEntity>.CanAccessAsync(TEntity! entity, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 Tnzi.Data.IDataScopeProvider<TEntity>.GetFilter() -> System.Linq.Expressions.Expression<System.Func<TEntity!, bool>!>?
 Tnzi.Data.IPostMigrationStartupTask
+Tnzi.Data.IPostMigrationStartupTask.RequiredForReadiness.get -> bool
 Tnzi.Data.IPostMigrationStartupTask.ExecuteAsync(System.IServiceProvider! serviceProvider, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 Tnzi.Documents.IDocumentConverter
 Tnzi.Documents.IDocumentConverter.CanConvert(string! fileName) -> bool
@@ -517,7 +518,7 @@ Tnzi.AI.Options.AiUtilityOptions.MaxTokens.get -> int
 Tnzi.AI.Options.AiUtilityOptions.MaxTokens.set -> void
 Tnzi.AI.Options.AiUtilityOptions.Model.get -> string?
 Tnzi.AI.Options.AiUtilityOptions.Model.set -> void
-Tnzi.AI.Options.AiUtilityOptions.Temperature.get -> double
+Tnzi.AI.Options.AiUtilityOptions.Temperature.get -> double?
 Tnzi.AI.Options.AiUtilityOptions.Temperature.set -> void
 Tnzi.AI.Options.AiUtilityOptionsValidator
 Tnzi.AI.Options.AiUtilityOptionsValidator.AiUtilityOptionsValidator() -> void
@@ -743,6 +744,7 @@ static Tnzi.Settings.SiteNameResolver.Resolve(Microsoft.Extensions.Configuration
 Tnzi.Settings.SiteNameResolver
 Tnzi.Domain.Repositories.IRepository<TEntity, TKey>.NewId() -> TKey
 const Tnzi.Exceptions.ErrorCodes.IDENTITY_USER_IN_USE = "IDENTITY_USER_IN_USE" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_AVATAR_INVALID = "IDENTITY_AVATAR_INVALID" -> string!
 const Tnzi.Exceptions.ErrorCodes.IDENTITY_USER_EXPORT_TOO_LARGE = "IDENTITY_USER_EXPORT_TOO_LARGE" -> string!
 const Tnzi.AI.Services.AiUtilityHttpClientNames.Inline = "Tnzi.AiUtility#inline" -> string!
 override Tnzi.AI.Options.AiUtilityInlineProvider.ToString() -> string!
@@ -967,3 +969,42 @@ Tnzi.Storage.IStorageUsageReader.GetStoredBytesAsync(Tnzi.Storage.StorageUsageSc
 Tnzi.Storage.StorageUsageReadMode
 Tnzi.Storage.StorageUsageReadMode.KnownSizesOnly = 1 -> Tnzi.Storage.StorageUsageReadMode
 Tnzi.Storage.StorageUsageReadMode.Measure = 0 -> Tnzi.Storage.StorageUsageReadMode
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_OIDC_CLIENT_NOT_FOUND = "IDENTITY_OIDC_CLIENT_NOT_FOUND" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_OIDC_CLIENT_DISABLED = "IDENTITY_OIDC_CLIENT_DISABLED" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_OIDC_CLIENT_ALREADY_EXISTS = "IDENTITY_OIDC_CLIENT_ALREADY_EXISTS" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_OIDC_CLIENT_HAS_NO_SECRET = "IDENTITY_OIDC_CLIENT_HAS_NO_SECRET" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_OIDC_GRANT_NOT_FOUND = "IDENTITY_OIDC_GRANT_NOT_FOUND" -> string!
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_PHONE_NUMBER_AMBIGUOUS = "IDENTITY_PHONE_NUMBER_AMBIGUOUS" -> string!
+override Tnzi.AI.Services.AiUtilityResponse.Equals(object? obj) -> bool
+override Tnzi.AI.Services.AiUtilityResponse.GetHashCode() -> int
+override Tnzi.AI.Services.AiUtilityResponse.ToString() -> string!
+static Tnzi.AI.Services.AiUtilityResponse.operator !=(Tnzi.AI.Services.AiUtilityResponse? left, Tnzi.AI.Services.AiUtilityResponse? right) -> bool
+static Tnzi.AI.Services.AiUtilityResponse.operator ==(Tnzi.AI.Services.AiUtilityResponse? left, Tnzi.AI.Services.AiUtilityResponse? right) -> bool
+Tnzi.AI.Services.AiUtilityFinishReason
+Tnzi.AI.Services.AiUtilityFinishReason.ContentFilter = 4 -> Tnzi.AI.Services.AiUtilityFinishReason
+Tnzi.AI.Services.AiUtilityFinishReason.Length = 2 -> Tnzi.AI.Services.AiUtilityFinishReason
+Tnzi.AI.Services.AiUtilityFinishReason.Stop = 1 -> Tnzi.AI.Services.AiUtilityFinishReason
+Tnzi.AI.Services.AiUtilityFinishReason.ToolCalls = 3 -> Tnzi.AI.Services.AiUtilityFinishReason
+Tnzi.AI.Services.AiUtilityFinishReason.Unknown = 0 -> Tnzi.AI.Services.AiUtilityFinishReason
+Tnzi.AI.Services.AiUtilityResponse
+Tnzi.AI.Services.AiUtilityResponse.<Clone>$() -> Tnzi.AI.Services.AiUtilityResponse!
+Tnzi.AI.Services.AiUtilityResponse.AiUtilityResponse() -> void
+Tnzi.AI.Services.AiUtilityResponse.CachedInputTokens.get -> int?
+Tnzi.AI.Services.AiUtilityResponse.CachedInputTokens.init -> void
+Tnzi.AI.Services.AiUtilityResponse.Equals(Tnzi.AI.Services.AiUtilityResponse? other) -> bool
+Tnzi.AI.Services.AiUtilityResponse.FinishReason.get -> Tnzi.AI.Services.AiUtilityFinishReason
+Tnzi.AI.Services.AiUtilityResponse.FinishReason.init -> void
+Tnzi.AI.Services.AiUtilityResponse.InputTokens.get -> int?
+Tnzi.AI.Services.AiUtilityResponse.InputTokens.init -> void
+Tnzi.AI.Services.AiUtilityResponse.Model.get -> string?
+Tnzi.AI.Services.AiUtilityResponse.Model.init -> void
+Tnzi.AI.Services.AiUtilityResponse.OutputTokens.get -> int?
+Tnzi.AI.Services.AiUtilityResponse.OutputTokens.init -> void
+Tnzi.AI.Services.AiUtilityResponse.Provider.get -> string?
+Tnzi.AI.Services.AiUtilityResponse.Provider.init -> void
+Tnzi.AI.Services.AiUtilityResponse.Text.get -> string!
+Tnzi.AI.Services.AiUtilityResponse.Text.init -> void
+Tnzi.AI.Services.IAiUtility.ExecuteForResponseAsync(string! systemPrompt, string! userMessage, Tnzi.AI.Options.AiUtilityCallOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AI.Services.AiUtilityResponse?>!
+Tnzi.AI.Services.ModelSamplingSupport
+static Tnzi.AI.Services.ModelSamplingSupport.AcceptsSamplingParameters(string? model) -> bool
+const Tnzi.Exceptions.ErrorCodes.BAD_REQUEST = "BAD_REQUEST" -> string!

@@ -1,0 +1,14 @@
+/* The five `--tnzi-*` variables the accent tokens read, for a page without the
+ * `@tnzi/ui` stylesheet and theme context (the controls stylesheet only). The
+ * values are that theme's default teal and its readable companions.
+ *
+ * `:where(:root)` has no specificity, so the `@tnzi/ui` stylesheet's `:root`
+ * and the inline values a theme writes (`applyControlsTheme`, or the theme
+ * context) win wherever they are, in whatever order the sheets load. */
+:where(:root) {
+  --tnzi-primary: #0d9488;
+  --tnzi-primary-rgb: 13 148 136;
+  --tnzi-on-primary: #ffffff;
+  --tnzi-primary-text-on-light: #0a776e;
+  --tnzi-primary-text-on-dark: #0d9488;
+}

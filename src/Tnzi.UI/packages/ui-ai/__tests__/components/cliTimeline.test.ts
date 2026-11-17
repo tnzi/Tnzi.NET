@@ -51,6 +51,25 @@ describe('groupCliEvents', () => {
     expect((rows[2] as { content: string }).content).toBe('after');
   });
 
+  it('does not join a sub-agent\'s words to the main agent\'s, and marks its rows', () => {
+    const rows = groupCliEvents([
+      text('Delegating. '),
+      { type: 'Text', content: 'sub ', parentCallId: 'agent-1' } as CliTimelineEvent,
+      { type: 'Text', content: 'notes', parentCallId: 'agent-1' } as CliTimelineEvent,
+      { type: 'ToolUse', tool: 'Read', callId: 'r1', parentCallId: 'agent-1' } as CliTimelineEvent,
+      { type: 'Task', callId: 'agent-1', task: { kind: 'agent', status: 'completed' } } as CliTimelineEvent,
+      text('Done.'),
+    ]);
+
+    expect(rows.map((r) => [r.kind, 'parentCallId' in r ? r.parentCallId : undefined])).toEqual([
+      ['text', null],
+      ['text', 'agent-1'],
+      ['tool', 'agent-1'],
+      ['text', null],
+    ]);
+    expect((rows[1] as { content: string }).content).toBe('sub notes');
+  });
+
   it('keeps text and reasoning in separate rows', () => {
     const rows = groupCliEvents([
       text('answer'),

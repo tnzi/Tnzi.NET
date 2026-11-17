@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { createApp, defineComponent, h } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { Router } from 'vue-router'
-import { useFormRules } from '@tnzi/ui'
+import { useNaiveFormRules } from '../../src/headless/useNaiveFormRules'
 import { defineAdminApp } from '../../src/plugin/defineAdminApp'
 import { removePublicPages, PUBLIC_PAGE_ROUTE_NAMES } from '../../src/plugin/route-transforms'
 import { defaultAdminRoutes } from '../../src/router/routes'
@@ -62,10 +62,10 @@ describe('passwordPolicy', () => {
     const router = { beforeEach: () => {}, afterEach: () => {}, onError: () => {} } as unknown as Router
     defineAdminApp({ client: dummyClient, moduleGating: false, passwordPolicy: { requireUppercase: true } }).install(app, pinia, router)
 
-    const rule = app.runWithContext(() => useFormRules().rules.password())[1]!
-    const validate = rule.validator as (r: unknown, v: string) => true | Error
-    expect(validate({}, 'admin123')).toBeInstanceOf(Error)
-    expect(validate({}, 'Admin123')).toBe(true)
+    const rule = app.runWithContext(() => useNaiveFormRules().rules.password())[1]!
+    const validate = (value: string) => rule.validator!({} as never, value, () => {}, {}, {})
+    expect(validate('admin123')).toEqual(new Error('Password must contain an uppercase letter (A-Z)'))
+    expect(validate('Admin123')).toBe(true)
   })
 
   it('without it the server defaults apply', () => {
@@ -73,9 +73,9 @@ describe('passwordPolicy', () => {
     const router = { beforeEach: () => {}, afterEach: () => {}, onError: () => {} } as unknown as Router
     defineAdminApp({ client: dummyClient, moduleGating: false }).install(app, createPinia(), router)
 
-    const rule = app.runWithContext(() => useFormRules().rules.password())[1]!
-    const validate = rule.validator as (r: unknown, v: string) => true | Error
-    expect(validate({}, 'admin123')).toBe(true)
-    expect(validate({}, 'ABCDEF12')).toBeInstanceOf(Error)
+    const rule = app.runWithContext(() => useNaiveFormRules().rules.password())[1]!
+    const validate = (value: string) => rule.validator!({} as never, value, () => {}, {}, {})
+    expect(validate('admin123')).toBe(true)
+    expect(validate('ABCDEF12')).toEqual(new Error('Password must contain a lowercase letter (a-z)'))
   })
 })

@@ -9,7 +9,7 @@
  * GUID shortening, empty → em-dash). The domain label tables stay app-supplied.
  */
 import { EMPTY_DASH } from '../utils/placeholders'
-import type { StatusType } from '@tnzi/ui'
+import type { StatusType } from '../components/display/TStatusBadge.vue'
 import { formatDateTime } from '@tnzi/core'
 import { EntityChangeType } from '@tnzi/core/services/audit'
 import type { AuditEntityEntryDto, AuditPropertyEntryDto } from '@tnzi/core/services/audit'

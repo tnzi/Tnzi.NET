@@ -23,6 +23,7 @@ public class CliRunQueueProcessor : BackgroundService
     private readonly IOptionsMonitor<CliAgentOptions> _options;
     private readonly ILogger<CliRunQueueProcessor> _logger;
     private readonly CliRunQueueSignal? _queueSignal;
+    private readonly CliRunHandoffs _handoffs;
     private readonly string _hostId = Environment.MachineName;
 
     /// <summary>已交给执行、还没收尾的运行（停机时等它们收尾，见 <see cref="DrainInFlightAsync"/>）。</summary>
@@ -35,7 +36,8 @@ public class CliRunQueueProcessor : BackgroundService
         CliRunCancellationRegistry cancellationRegistry,
         IOptionsMonitor<CliAgentOptions> options,
         ILogger<CliRunQueueProcessor> logger,
-        CliRunQueueSignal? queueSignal = null)
+        CliRunQueueSignal? queueSignal = null,
+        CliRunHandoffs? handoffs = null)
     {
         _scopeFactory = Check.NotNull(scopeFactory);
         _signalHub = Check.NotNull(signalHub);
@@ -44,6 +46,8 @@ public class CliRunQueueProcessor : BackgroundService
         _logger = Check.NotNull(logger);
         // 缺省只为直接构造（测试）：没有提示就只按轮询间隔醒来
         _queueSignal = queueSignal;
+        // 缺省只为直接构造（测试）：一份只属于这个处理器的交接处
+        _handoffs = handoffs ?? new CliRunHandoffs();
     }
 
     /// <inheritdoc />
@@ -186,7 +190,18 @@ public class CliRunQueueProcessor : BackgroundService
     /// </remarks>
     internal async Task<bool> TryStartNextAsync(SemaphoreSlim slots, CancellationToken stoppingToken)
     {
-        await slots.WaitAsync(stoppingToken);
+        // 接着一个等后台任务的进程跑的运行不另占槽：进程只有一个，槽由等着的那条交给它（见 CliRunHandoffs）
+        if (await TryClaimContinuationAsync(stoppingToken) is { } continued)
+        {
+            Track(ExecuteClaimedAsync(continued, null, stoppingToken));
+            return true;
+        }
+
+        // 槽满时不一直等下去：占满槽的可能正是等后台任务的运行，同线程的下一条要在下一轮循环里接过它们的进程（不占槽）
+        if (!await slots.WaitAsync(_options.CurrentValue.PollInterval, stoppingToken))
+        {
+            return false;
+        }
 
         var handedOff = false;
         try
@@ -211,8 +226,17 @@ public class CliRunQueueProcessor : BackgroundService
         }
     }
 
-    private async Task ExecuteClaimedAsync(Guid runId, SemaphoreSlim slots, CancellationToken stoppingToken)
+    /// <param name="runId">已认领的运行。</param>
+    /// <param name="slots">它占的并发槽所在的信号量；null = 没占槽（接着别的运行的进程跑，槽随进程交过来）。</param>
+    /// <param name="stoppingToken">宿主停机。</param>
+    private async Task ExecuteClaimedAsync(Guid runId, SemaphoreSlim? slots, CancellationToken stoppingToken)
     {
+        // 槽记在运行名下而不是这里的局部变量：等后台任务的运行把进程交出去时，槽跟着进程到下一条运行名下，由它的这一步归还
+        if (slots is not null)
+        {
+            _handoffs.HoldSlot(runId, slots);
+        }
+
         using var cts = _cancellationRegistry.Register(runId, stoppingToken);
         var renewal = RenewLeaseLoopAsync(runId, cts.Token);
 
@@ -230,7 +254,7 @@ public class CliRunQueueProcessor : BackgroundService
             await cts.CancelAsync();
             await renewal;
             _cancellationRegistry.Unregister(runId);
-            slots.Release();
+            _handoffs.ReleaseSlot(runId);
         }
     }
 
@@ -350,6 +374,71 @@ public class CliRunQueueProcessor : BackgroundService
 
             _logger.LogDebug("Claimed CLI run {RunId} on host {HostId}", candidate.Id, _hostId);
             return candidate.Id;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 认领一条接着「等后台任务的运行」的进程跑的运行：同线程上那条运行在这个副本上等后台任务，这一条是线程上排在最前的那条（§6.18）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 普通认领按同线程互斥跳过它（线程上有一条 Running），别的副本也是：进程只在这里，交接也只能在这里发生。认领是同样的条件更新；
+    /// 执行器随后过完它自己的治理门，再从 <see cref="CliRunHandoffs"/> 取进程。
+    /// </para>
+    /// <para>
+    /// 只认线程上排在最前的那条，且线程上除了等着的那条之外没有别的进行中运行（已经有一条接手了就不再认第二条）。
+    /// 它要是别的 Agent、或者落在别的运行时上，不越过它：它照旧排在等待后面。不查运行时的并发上限：进程只有一个，不多占。
+    /// </para>
+    /// </remarks>
+    internal async Task<Guid?> TryClaimContinuationAsync(CancellationToken cancellationToken)
+    {
+        var waiting = _handoffs.WaitingRuns();
+        if (waiting.Count == 0)
+        {
+            return null;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var repository = scope.ServiceProvider.GetRequiredService<IRepository<CliRun, Guid>>();
+        var options = _options.CurrentValue;
+        var runs = repository.AcrossTenants();
+
+        foreach (var carrier in waiting)
+        {
+            var threadId = carrier.ThreadId;
+            var carrierId = carrier.RunId;
+            var first = await runs
+                .Where(r => r.ThreadId == threadId && r.Status == CliRunStatus.Queued && !r.CancelRequested)
+                .Where(r => !runs.Any(o => o.ThreadId == threadId
+                                           && o.Id != carrierId
+                                           && (o.Status == CliRunStatus.Dispatched || o.Status == CliRunStatus.Running)))
+                .OrderBy(r => r.CreationTime)
+                .Select(r => new { r.Id, r.AgentId, r.CliRuntimeId })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (first is null || first.AgentId != carrier.AgentId || first.CliRuntimeId != carrier.CliRuntimeId)
+            {
+                continue;
+            }
+
+            var now = DateTime.UtcNow;
+            var claimed = await runs
+                .Where(r => r.Id == first.Id && r.Status == CliRunStatus.Queued && !r.CancelRequested)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(r => r.Status, CliRunStatus.Dispatched)
+                    .SetProperty(r => r.DispatchedAt, now)
+                    .SetProperty(r => r.ClaimedByHostId, _hostId)
+                    .SetProperty(r => r.LeaseExpiresAt, now.Add(options.LeaseDuration)), cancellationToken);
+
+            if (claimed > 0)
+            {
+                _logger.LogInformation(
+                    "Claimed CLI run {RunId} on host {HostId} to continue on the process of run {CarrierRunId}, which waits on background tasks",
+                    first.Id, _hostId, carrierId);
+                return first.Id;
+            }
         }
 
         return null;

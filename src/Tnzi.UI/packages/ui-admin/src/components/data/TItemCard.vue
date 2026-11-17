@@ -47,6 +47,7 @@
             round
             :bordered="false"
             :type="tag.type ?? 'default'"
+            :title="tag.title"
           >
             {{ tag.label }}
           </NTag>
@@ -56,8 +57,9 @@
       <slot name="meta">
         <div v-if="subtitle || meta.length" class="t-item-card__meta">
           <span v-if="subtitle" class="t-item-card__desc" :title="subtitle">{{ subtitle }}</span>
-          <span v-for="(m, i) in meta" :key="i" :title="m.title ?? m.text">
-            <TSvgIcon v-if="m.icon" :icon="m.icon" :size="13" />{{ m.text }}
+          <span v-for="(m, i) in meta" :key="i" class="t-item-card__meta-item" :title="m.title ?? m.text">
+            <TSvgIcon v-if="m.icon" :icon="m.icon" :size="13" />
+            <span class="t-item-card__meta-text">{{ m.text }}</span>
           </span>
         </div>
       </slot>
@@ -137,6 +139,8 @@ export type ItemCardTone = 'default' | 'primary' | 'info' | 'success' | 'warning
 export interface ItemCardTag {
   label: string
   type?: 'default' | 'primary' | 'info' | 'success' | 'warning' | 'error'
+  /** Tooltip (`title` attribute): what the chip means, when its label alone does not say. */
+  title?: string
 }
 
 export interface ItemCardMeta {
@@ -328,8 +332,10 @@ function onKeydown(event: KeyboardEvent): void {
   text-overflow: ellipsis;
 }
 .t-item-card__meta {
+  /* Wraps: a meta line longer than the card moves its next item to a new line
+     instead of widening the card past its container. */
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   min-width: 0;
   gap: 4px 16px;
   font-size: 12.5px;
@@ -339,7 +345,20 @@ function onKeydown(event: KeyboardEvent): void {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.t-item-card__meta-item > svg {
   flex-shrink: 0;
+}
+/* An item longer than a whole line truncates; its full text is the item's
+   `title` (the `title` of the meta entry, else its text). */
+.t-item-card__meta-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* `display: block`, not the meta inline-flex: text-overflow only ellipsises
    inline text - inside a flex container the text becomes an anonymous flex

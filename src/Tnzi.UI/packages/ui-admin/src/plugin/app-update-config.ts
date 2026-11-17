@@ -3,7 +3,7 @@
  * 特有的两件事：路由器来自 `install()`，`prompt` 模式的询问框用后台的对话框与词典。
  */
 import type { Router } from 'vue-router'
-import { createDialogAdapter } from '@tnzi/ui'
+import { createDialogAdapter } from '../adapters/dialog'
 import {
   installAppUpdate,
   type AppUpdateHandle,

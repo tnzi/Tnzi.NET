@@ -18,7 +18,7 @@ export default defineConfig({
         components: resolve(import.meta.dirname, 'src/components/index.ts'),
         stores: resolve(import.meta.dirname, 'src/stores/index.ts'),
         adapters: resolve(import.meta.dirname, 'src/adapters/index.ts'),
-        // Theme barrel (tokens, palette, naive bridge, UnoCSS preset). Consumers
+        // Theme barrel (tokens, palette, document writer, UnoCSS preset). Consumers
         // that build their own UnoCSS config need `presetTnzi` from here rather
         // than a hand-kept copy.
         theme: resolve(import.meta.dirname, 'src/theme/index.ts'),
@@ -40,12 +40,8 @@ export default defineConfig({
     rolldownOptions: {
       external: (id) =>
         id === 'vue'
-        || id === 'naive-ui'
         || id === 'pinia'
-        || id === 'echarts'
-        || id === 'vue-draggable-plus'
         || id === '@vueuse/core'
-        || id.startsWith('echarts/')
         || id.startsWith('@vueuse/')
         || id.startsWith('@tnzi/core')
         || id.startsWith('@iconify/'),
@@ -64,7 +60,6 @@ export default defineConfig({
         entryFileNames: preservedModuleFileName,
         globals: {
           vue: 'Vue',
-          'naive-ui': 'NaiveUi',
           pinia: 'Pinia',
           '@tnzi/core': 'TnziCore',
         },

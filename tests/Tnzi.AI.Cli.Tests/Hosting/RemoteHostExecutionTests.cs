@@ -152,6 +152,99 @@ public class RemoteHostExecutionTests : IntegratedTestBase<CliBudgetDbContext>
         ((InMemoryHostFileSystem)target.Host.FileSystem).Files.ShouldBe([RemoteExecutable]);
     }
 
+    /// <summary>
+    /// 服务端停机时，执行宿主在取目标时连不上（消费方的远程通道随停机关闭）：运行打回队列交给下一个宿主，而不是以启动失败结束。
+    /// 两种停机信号都算：执行器的令牌已取消，或应用已经开始停机（它先于队列处理器的令牌触发）。
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AnUnavailableTarget_WhileTheServerIsStopping_IsReleasedToTheQueue(bool viaExecutorToken)
+    {
+        using var stopping = new CancellationTokenSource();
+        using var lifetime = new StoppingLifetime();
+        var target = await CreateTargetAsync("claude", remote: true);
+        target.Host.UnavailableWith = new CliHostUnavailableException("The workspace's connection was lost: the channel closed");
+        target.Host.BeforeGetTarget = viaExecutorToken ? stopping.Cancel : lifetime.StopApplication;
+        var run = await SeedClaimedRunAsync("claude", target.ExecutablePath);
+
+        await CreateExecutor(target.Host, "claude", lifetime).ExecuteAsync(run.Id, stopping.Token).WaitAsync(TestTimeout);
+
+        var persisted = await ReloadAsync(run.Id);
+        persisted.Status.ShouldBe(CliRunStatus.Queued, persisted.Error);
+        persisted.FailureReason.ShouldBeNull();
+        persisted.Error.ShouldBeNull();
+        persisted.ClaimedByHostId.ShouldBeNull();
+        persisted.LeaseExpiresAt.ShouldBeNull();
+        target.Host.Starts.ShouldBeEmpty();
+    }
+
+    /// <summary>停机时连不上发生在起进程那一步（运行已经是 Running）：同样打回队列。</summary>
+    [Fact]
+    public async Task AHostThatBecomesUnavailableAtLaunch_WhileTheServerIsStopping_IsReleasedToTheQueue()
+    {
+        using var lifetime = new StoppingLifetime();
+        var target = await CreateTargetAsync("claude", remote: true);
+        target.Host.StartWith = _ =>
+        {
+            lifetime.StopApplication();
+            throw new CliHostUnavailableException("The workspace's connection was lost: the channel closed");
+        };
+        var run = await SeedClaimedRunAsync("claude", target.ExecutablePath);
+
+        await CreateExecutor(target.Host, "claude", lifetime).ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        var persisted = await ReloadAsync(run.Id);
+        persisted.Status.ShouldBe(CliRunStatus.Queued, persisted.Error);
+        persisted.FailureReason.ShouldBeNull();
+        persisted.ClaimedByHostId.ShouldBeNull();
+    }
+
+    /// <summary>对照：服务端不在停机时，起进程那一步连不上照常以启动失败结束。</summary>
+    [Fact]
+    public async Task AHostThatBecomesUnavailableAtLaunch_WhenTheServerIsNotStopping_FailsTheRun()
+    {
+        using var lifetime = new StoppingLifetime();
+        var target = await CreateTargetAsync("claude", remote: true);
+        target.Host.StartWith = _ => throw new CliHostUnavailableException("The workspace agent for this user is not connected.");
+        var run = await SeedClaimedRunAsync("claude", target.ExecutablePath);
+
+        await CreateExecutor(target.Host, "claude", lifetime).ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        var persisted = await ReloadAsync(run.Id);
+        persisted.Status.ShouldBe(CliRunStatus.Failed);
+        persisted.FailureReason.ShouldBe(CliRunFailureReason.LaunchFailed);
+    }
+
+    /// <summary>
+    /// 最后一轮的 result 已到（不是错误），进程却没有自己退出（它起的子进程握着它）：执行器终止它，退出码 143。
+    /// 回答已经交付，运行是完成的，也不另起进程把提示重跑一遍。
+    /// </summary>
+    [Fact]
+    public async Task AProcessTerminatedAfterItsDeliveredResult_CompletesTheRun()
+    {
+        var target = await CreateTargetAsync("claude", remote: true);
+        KeptAliveProcess? process = null;
+        target.Host.StartWith = _ => process = new KeptAliveProcess(new FakeCliAgentTransport(
+            [
+                """{"type":"system","subtype":"init","session_id":"sess-remote"}""",
+                """{"type":"assistant","message":{"role":"assistant","model":"m","content":[{"type":"text","text":"All done."}]},"session_id":"sess-remote"}""",
+                """{"type":"result","subtype":"success","session_id":"sess-remote","result":"All done.","num_turns":7}"""
+            ],
+            // stdin 一直开着、stdout 不结束：进程不会自己退出
+            onWrite: _ => []));
+        var run = await SeedClaimedRunAsync("claude", target.ExecutablePath);
+
+        await CreateExecutor(target.Host, "claude").ExecuteAsync(run.Id, CancellationToken.None).WaitAsync(TestTimeout);
+
+        process.ShouldNotBeNull().Terminated.ShouldBeTrue();
+        var persisted = await ReloadAsync(run.Id);
+        persisted.Status.ShouldBe(CliRunStatus.Completed, persisted.Error);
+        persisted.FailureReason.ShouldBeNull();
+        persisted.Output.ShouldBe("All done.");
+        target.Host.Starts.ShouldHaveSingleItem();
+    }
+
     [Fact]
     public async Task ARegisteredExecutableMissingOnTheTarget_IsLookedUpOnTheTarget()
     {
@@ -278,6 +371,46 @@ public class RemoteHostExecutionTests : IntegratedTestBase<CliBudgetDbContext>
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
+    /// <summary>不自己退出的进程：执行器终止它时以 143（SIGTERM）结束。</summary>
+    private sealed class KeptAliveProcess(ICliAgentTransport transport) : ICliProcess
+    {
+        public ICliAgentTransport Transport { get; } = transport;
+
+        public bool Terminated { get; private set; }
+
+        public int ProcessId => 4343;
+
+        public bool HasExited => Terminated;
+
+        public int? ExitCode => Terminated ? 143 : null;
+
+        public Task TerminateAsync(CancellationToken cancellationToken)
+        {
+            Terminated = true;
+            return Task.CompletedTask;
+        }
+
+        public Task<int> WaitForExitAsync(CancellationToken cancellationToken) => Task.FromResult(143);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>应用生命周期：测试让它开始停机。</summary>
+    private sealed class StoppingLifetime : IHostApplicationLifetime, IDisposable
+    {
+        private readonly CancellationTokenSource _stopping = new();
+
+        public CancellationToken ApplicationStarted => CancellationToken.None;
+
+        public CancellationToken ApplicationStopping => _stopping.Token;
+
+        public CancellationToken ApplicationStopped => CancellationToken.None;
+
+        public void StopApplication() => _stopping.Cancel();
+
+        public void Dispose() => _stopping.Dispose();
+    }
+
     private async Task<CliRun> SeedClaimedRunAsync(string providerKey, string registeredExecutable)
     {
         DbContext.Set<CliAgentBinding>().Add(new CliAgentBinding
@@ -317,7 +450,7 @@ public class RemoteHostExecutionTests : IntegratedTestBase<CliBudgetDbContext>
     private async Task<CliRun> ReloadAsync(Guid runId)
         => await DbContext.Set<CliRun>().AsNoTracking().IgnoreQueryFilters().FirstAsync(r => r.Id == runId);
 
-    private CliRunExecutor CreateExecutor(ICliHost host, string providerKey)
+    private CliRunExecutor CreateExecutor(ICliHost host, string providerKey, IHostApplicationLifetime? lifetime = null)
     {
         var runs = ServiceProvider.GetRequiredService<IRepository<CliRun, Guid>>();
 
@@ -355,6 +488,7 @@ public class RemoteHostExecutionTests : IntegratedTestBase<CliBudgetDbContext>
             options,
             ServiceProvider.GetRequiredService<ICurrentTenant>(),
             NullLogger<CliRunExecutor>.Instance,
-            ServiceProvider.GetRequiredService<IServiceScopeFactory>());
+            ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
+            applicationLifetime: lifetime);
     }
 }

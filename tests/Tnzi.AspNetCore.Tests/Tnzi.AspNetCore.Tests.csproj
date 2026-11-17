@@ -5,6 +5,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Tnzi.AspNetCore grants InternalsVisibleTo with the framework's public key (the post-migration
+         startup task runner, its retry service and health check are internal), so this assembly is
+         signed with the same snk. -->
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\..\build\Tnzi.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
 
   <!--

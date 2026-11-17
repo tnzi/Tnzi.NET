@@ -64,9 +64,28 @@ public interface IAgentDispatchFacade
         CancellationToken cancellationToken = default)
         => NotAttachable();
 
+    /// <summary>
+    /// 线程上还没结束的运行里仍在等回答的请求（权限、问题、计划），最早的在前。调用方负责先核线程归属。
+    /// </summary>
+    Task<IReadOnlyList<ChatPermissionRequestDto>> GetPendingPermissionsAsync(Guid threadId, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<ChatPermissionRequestDto>>([]);
+
+    /// <summary>
+    /// 一次运行里仍在等回答的请求，最早的在前；调用者看不见这次运行时为 null。
+    /// </summary>
+    Task<IReadOnlyList<ChatPermissionRequestDto>?> GetRunPendingPermissionsAsync(Guid runId, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<ChatPermissionRequestDto>?>(null);
+
     /// <summary>在服务端取消一次运行（不只是断开连接）。</summary>
     Task<Result> CancelRunAsync(Guid runId, CancellationToken cancellationToken = default)
         => Task.FromResult(Result.Failure("Run not found.", 404, ErrorCodes.ChatRunNotFound));
+
+    /// <summary>
+    /// 停下线程里正在跑的进程中的单个任务（子 agent、后台命令），不停这一轮。任务属于进程而不是某一条运行：后台任务在派出它的那一轮结束后
+    /// 还在跑，进程可能已经交给了同线程的下一条运行，所以按线程找正在跑的那条运行。没有正在跑的运行时 409。
+    /// </summary>
+    Task<Result> StopTaskAsync(Guid threadId, string taskId, CancellationToken cancellationToken = default)
+        => Task.FromResult(Result.Failure("No run is going on in this conversation.", 409, ErrorCodes.ChatNoActiveRun));
 
     /// <summary>
     /// 回答一次运行的一个权限请求（聊天流上的 <c>permission_request</c> 事件）。规则同 <see cref="ICliAgentDispatcher.AnswerPermissionAsync"/>。

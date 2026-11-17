@@ -12,6 +12,7 @@ public class CliRunPermissionRequestConfiguration : EntityTypeConfigurationBase<
 
         builder.Property(e => e.ProtocolKey).HasMaxLength(200).IsRequired();
         builder.Property(e => e.Tool).HasMaxLength(200);
+        builder.Property(e => e.Kind).HasMaxLength(32).IsRequired().HasDefaultValue(CliInteractionKinds.Permission);
         builder.Property(e => e.OptionId).HasMaxLength(200);
         builder.Property(e => e.Message).HasMaxLength(2000);
 

@@ -11,16 +11,21 @@ withDefaults(
   defineProps<{
     type?: 'text' | 'password' | 'email';
     placeholder?: string;
+    name?: string;
     autocomplete?: string;
     inputmode?: 'text' | 'numeric' | 'email' | 'tel';
     disabled?: boolean;
+    /** 16px text: iOS Safari zooms the page into any input set smaller than that. */
+    zoomSafe?: boolean;
   }>(),
   {
     type: 'text',
     placeholder: '',
+    name: undefined,
     autocomplete: 'off',
     inputmode: 'text',
     disabled: false,
+    zoomSafe: false,
   },
 );
 
@@ -46,9 +51,14 @@ function onEnter(event: KeyboardEvent): void {
   <input
     v-model="model"
     class="t-auth-field"
+    :class="{ 't-auth-field--zoom-safe': zoomSafe }"
     :type="type"
     :placeholder="placeholder"
+    :name="name"
     :autocomplete="autocomplete"
+    autocapitalize="off"
+    autocorrect="off"
+    spellcheck="false"
     :inputmode="inputmode"
     :disabled="disabled"
     @keydown.enter="onEnter"
@@ -71,12 +81,27 @@ function onEnter(event: KeyboardEvent): void {
   box-sizing: border-box;
 }
 
+.t-auth-field--zoom-safe {
+  font-size: 16px;
+}
+
 .t-auth-field::placeholder {
   color: var(--tnzi-ai-text-tertiary);
 }
 
 .t-auth-field:focus {
-  border-color: var(--tnzi-ai-accent);
+  border-color: var(--tnzi-ai-focus-border);
+  box-shadow: var(--tnzi-ai-focus-ring);
+}
+
+/* A field the page marks wrong (`aria-invalid="true"`, which falls through to
+   the input): a danger border, and the error focus ring when focused. */
+.t-auth-field[aria-invalid='true'] {
+  border-color: var(--tnzi-ai-danger);
+}
+.t-auth-field[aria-invalid='true']:focus {
+  border-color: var(--tnzi-ai-focus-border-error);
+  box-shadow: var(--tnzi-ai-focus-ring-error);
 }
 
 .t-auth-field:disabled {
